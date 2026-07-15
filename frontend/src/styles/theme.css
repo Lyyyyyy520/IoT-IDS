@@ -1,0 +1,221 @@
+/* ============================================
+   IoT IDS — Dark Tech Theme + Risk Color System
+   ============================================ */
+
+:root {
+  /* ----- Risk Color Palette ----- */
+  --risk-critical: #FF4444;   /* 高危 - 红 */
+  --risk-high:     #FF8800;   /* 中危 - 橙 */
+  --risk-medium:   #FFCC00;   /* 低危 - 黄 */
+  --risk-low:      #00CC66;   /* 正常/安全 - 绿 */
+
+  /* ----- Risk Backgrounds (translucent) ----- */
+  --risk-critical-bg: rgba(255, 68, 68, 0.12);
+  --risk-high-bg:     rgba(255, 136, 0, 0.12);
+  --risk-medium-bg:   rgba(255, 204, 0, 0.10);
+  --risk-low-bg:      rgba(0, 204, 102, 0.10);
+
+  /* ----- Tech Dark Palette ----- */
+  --bg-base:          #0D1117;    /* 最深底色 */
+  --bg-elevated:      #161B22;    /* 卡片/面板 */
+  --bg-surface:       #1C2333;    /* 悬浮层 */
+  --bg-hover:         #21283D;    /* 悬停 */
+
+  --border-color:     #30363D;    /* 边框 */
+  --border-light:     #21262D;    /* 细边框 */
+
+  --text-primary:     #E6EDF3;    /* 主文字 */
+  --text-secondary:   #8B949E;    /* 次要文字 */
+  --text-muted:       #484F58;    /* 禁用文字 */
+
+  /* ----- Accent ----- */
+  --accent-blue:      #58A6FF;    /* 强调蓝 */
+  --accent-cyan:      #39D2C0;    /* 科技青 */
+  --accent-purple:    #BC8CFF;    /* 紫色点缀 */
+
+  /* ----- Shadows ----- */
+  --shadow-card:      0 1px 3px rgba(0,0,0,0.4);
+  --shadow-elevated:  0 4px 12px rgba(0,0,0,0.5);
+}
+
+/* ----- Global Reset ----- */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei",
+               sans-serif;
+}
+
+/* ----- Scrollbar Styling ----- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-base);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ----- Ant Design Dark Theme Overrides ----- */
+.ant-layout {
+  background: var(--bg-base) !important;
+}
+
+.ant-layout-sider {
+  background: var(--bg-elevated) !important;
+  border-right: 1px solid var(--border-color) !important;
+}
+
+.ant-menu-dark {
+  background: transparent !important;
+}
+
+.ant-card {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 8px !important;
+  box-shadow: var(--shadow-card) !important;
+}
+
+.ant-card-head {
+  border-bottom: 1px solid var(--border-light) !important;
+  color: var(--text-primary) !important;
+}
+
+.ant-table {
+  background: var(--bg-elevated) !important;
+  color: var(--text-primary) !important;
+}
+
+.ant-table-thead > tr > th {
+  background: var(--bg-surface) !important;
+  color: var(--text-secondary) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+}
+
+.ant-table-tbody > tr > td {
+  border-bottom: 1px solid var(--border-light) !important;
+  color: var(--text-primary) !important;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: var(--bg-hover) !important;
+}
+
+.ant-tag {
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.ant-btn-primary {
+  background: var(--accent-blue) !important;
+  border-color: var(--accent-blue) !important;
+}
+
+.ant-select-dropdown,
+.ant-picker-dropdown,
+.ant-dropdown-menu {
+  background: var(--bg-surface) !important;
+}
+
+.ant-input,
+.ant-select-selector,
+.ant-picker,
+.ant-input-affix-wrapper {
+  background: var(--bg-base) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+.ant-input::placeholder {
+  color: var(--text-muted) !important;
+}
+
+/* ----- Risk-color utility classes ----- */
+.risk-critical { color: var(--risk-critical) !important; }
+.risk-high     { color: var(--risk-high) !important; }
+.risk-medium   { color: var(--risk-medium) !important; }
+.risk-low      { color: var(--risk-low) !important; }
+
+.risk-critical-bg { background: var(--risk-critical-bg) !important; }
+.risk-high-bg     { background: var(--risk-high-bg) !important; }
+.risk-medium-bg   { background: var(--risk-medium-bg) !important; }
+.risk-low-bg      { background: var(--risk-low-bg) !important; }
+
+/* ----- KPI Stat Card ----- */
+.stat-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all 0.2s;
+}
+.stat-card:hover {
+  border-color: var(--accent-blue);
+  box-shadow: var(--shadow-elevated);
+}
+.stat-card .stat-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.stat-card .stat-value {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.stat-card .stat-trend {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ----- Top Filter Bar ----- */
+.filter-bar {
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-color);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* ----- Page Container ----- */
+.page-container {
+  padding: 24px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+/* ----- Alert Row Highlight ----- */
+.alert-row-critical {
+  border-left: 3px solid var(--risk-critical) !important;
+}
+
+/* ----- Network Topology Canvas ----- */
+.topology-container {
+  background: var(--bg-base);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.topology-container svg {
+  display: block;
+}

@@ -1,0 +1,178 @@
+# ============================================================
+# IoT IDS Detection Rules — Signature-based Detection
+# ============================================================
+
+rules:
+  # ---- Reconnaissance ----
+  - id: RULE-001
+    name: "TCP 端口扫描检测"
+    category: recon
+    severity: high
+    description: "短时间内对多个目标端口发起 TCP SYN 请求"
+    pattern:
+      protocol: TCP
+      flags: SYN
+      condition: distinct_dst_ports > 15
+      window: 10  # seconds
+    action: alert
+
+  - id: RULE-002
+    name: "UDP 端口扫描检测"
+    category: recon
+    severity: medium
+    description: "短时间内对多个目标端口发起 UDP 探测"
+    pattern:
+      protocol: UDP
+      condition: distinct_dst_ports > 10
+      window: 10
+    action: alert
+
+  # ---- Brute Force ----
+  - id: RULE-003
+    name: "SSH 暴力破解检测"
+    category: bruteforce
+    severity: critical
+    description: "对 SSH 端口(22)的高频连接尝试"
+    pattern:
+      protocol: TCP
+      dst_port: 22
+      condition: packet_count > 20
+      window: 30
+    action: alert
+
+  - id: RULE-004
+    name: "Telnet 暴力破解检测"
+    category: bruteforce
+    severity: critical
+    description: "对 Telnet 端口(23)的高频连接尝试 (Mirai 特征)"
+    pattern:
+      protocol: TCP
+      dst_port: 23
+      condition: packet_count > 15
+      window: 30
+    action: alert
+
+  - id: RULE-005
+    name: "HTTP 登录爆破"
+    category: bruteforce
+    severity: high
+    description: "对 HTTP 服务的高频 POST 请求"
+    pattern:
+      protocol: TCP
+      dst_port: [80, 8080, 443, 8443]
+      condition: packet_count > 30
+      window: 30
+    action: alert
+
+  # ---- DDoS / Flood ----
+  - id: RULE-006
+    name: "UDP Flood 攻击检测"
+    category: ddos
+    severity: critical
+    description: "短时间内大量 UDP 数据包 (Gafgyt 特征)"
+    pattern:
+      protocol: UDP
+      condition: packet_count > 100
+      window: 5
+    action: alert
+
+  - id: RULE-007
+    name: "ICMP Flood 攻击检测"
+    category: ddos
+    severity: high
+    description: "短时间内大量 ICMP 请求"
+    pattern:
+      protocol: ICMP
+      condition: packet_count > 50
+      window: 5
+    action: alert
+
+  - id: RULE-008
+    name: "TCP SYN Flood 检测"
+    category: ddos
+    severity: critical
+    description: "短时间内大量 TCP SYN 包"
+    pattern:
+      protocol: TCP
+      flags: SYN
+      condition: packet_count > 80
+      window: 5
+    action: alert
+
+  # ---- C2 Communication ----
+  - id: RULE-009
+    name: "异常外联 C2 服务器"
+    category: c2
+    severity: critical
+    description: "设备连接已知恶意 IP 或非常见端口"
+    pattern:
+      condition: 'dst_port_not_in [80, 443, 53, 1883, 5683, 22, 123] AND dst_ip_not_in ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]'
+    action: alert
+
+  - id: RULE-010
+    name: "DNS 隧道检测"
+    category: c2
+    severity: high
+    description: "异常大的 DNS 查询包 (可能为 DNS 隧道)"
+    pattern:
+      protocol: UDP
+      dst_port: 53
+      condition: packet_length > 512
+    action: alert
+
+  # ---- Exploitation ----
+  - id: RULE-011
+    name: "可疑 HTTP User-Agent"
+    category: exploit
+    severity: medium
+    description: "检测到已知恶意工具 User-Agent"
+    pattern:
+      dst_port: [80, 8080]
+      condition: payload_contains ["nikto", "sqlmap", "nmap", "masscan", "zgrab"]
+    action: alert
+
+  - id: RULE-012
+    name: "恶意负载检测"
+    category: exploit
+    severity: critical
+    description: "数据包包含已知攻击载荷特征"
+    pattern:
+      condition: payload_contains ["/bin/sh", "wget http", "curl http", "chmod +x", "/etc/passwd", "select+from", "../etc"]
+    action: alert
+
+  # ---- IoT Specific ----
+  - id: RULE-013
+    name: "MQTT 异常订阅"
+    category: exploit
+    severity: high
+    description: "MQTT 协议异常订阅行为"
+    pattern:
+      protocol: TCP
+      dst_port: 1883
+      condition: packet_count > 40
+      window: 10
+    action: alert
+
+  - id: RULE-014
+    name: "CoAP 放大攻击"
+    category: ddos
+    severity: high
+    description: "利用 CoAP 协议进行反射放大攻击"
+    pattern:
+      protocol: UDP
+      dst_port: 5683
+      condition: packet_count > 50
+      window: 10
+    action: alert
+
+  # ---- Exfiltration ----
+  - id: RULE-015
+    name: "数据外泄检测"
+    category: exfil
+    severity: critical
+    description: "大流量单向数据传输 (可能为数据窃取)"
+    pattern:
+      protocol: TCP
+      condition: total_bytes > 1000000
+      window: 60
+    action: alert

@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+*.egg
+venv/
+env/
+.venv/
+
+# Build output
+frontend/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Database (contains local data, regenerate from seed scripts)
+backend/data/ids.db
+
+# Trained models (too large, regenerate from training scripts)
+# Keep ONNX model for demo
+# backend/data/best_model.pt
+
+# Test files
+test_traffic.pcap
+
+# Logs
+*.log
+edge/ids.log
+edge/ids_error.log
+
+# Temp
+*.tmp
+tmp/
+temp/
+
+# Environment
+.env
+.env.local

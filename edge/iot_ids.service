@@ -1,0 +1,16 @@
+[Unit]
+Description=IoT IDS Edge Detection Service
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/iot-ids/edge
+ExecStart=/usr/bin/python3 /home/pi/iot-ids/edge/edge_detect.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/pi/iot-ids/edge/ids.log
+StandardError=append:/home/pi/iot-ids/edge/ids_error.log
+
+[Install]
+WantedBy=multi-user.target
