@@ -109,6 +109,14 @@ def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = get_db()
     conn.executescript(SCHEMA)
+
+    # Migration: add trace_info column if it doesn't exist (for DBs created before v2.0)
+    try:
+        conn.execute("ALTER TABLE alerts ADD COLUMN trace_info TEXT")
+        print('[DB] Migration: added trace_info column to alerts')
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
     conn.commit()
 
     # Seed default admin user if not exists

@@ -49,6 +49,25 @@ export interface AlertListResponse {
   items: AlertItem[];
 }
 
+export interface BlocklistItem {
+  id: number;
+  ip_address: string;
+  reason: string;
+  blocked_at: string;
+  enabled: number;
+  alert_id: number | null;
+  attack_type: string | null;
+  risk_level: string | null;
+  src_ip: string | null;
+  dst_ip: string | null;
+  alert_status: string | null;
+}
+
+export interface BlocklistResponse {
+  total: number;
+  items: BlocklistItem[];
+}
+
 export interface HealthResponse {
   status: string;
   model_loaded: boolean;
@@ -68,9 +87,17 @@ export const api = {
 
   blockIp: (id: number) => request<{ success: boolean }>(`/alerts/${id}/block`, { method: 'POST' }),
 
+  unblockIp: (id: number) => request<{ success: boolean; message: string }>(`/alerts/${id}/unblock`, { method: 'POST' }),
+
   traceAlert: (id: number) => request<{ success: boolean; trace_info: string }>(`/alerts/${id}/trace`, { method: 'POST' }),
 
   markFalsePositive: (id: number) => request<{ success: boolean }>(`/alerts/${id}/false-positive`, { method: 'POST' }),
+
+  unmarkFalsePositive: (id: number) => request<{ success: boolean; message: string }>(`/alerts/${id}/unmark-false-positive`, { method: 'POST' }),
+
+  // Blacklist
+  getBlocklist: () => request<BlocklistResponse>('/blocklist'),
+  deleteBlocklist: (id: number) => request<{ success: boolean; message: string }>(`/blocklist/${id}`, { method: 'DELETE' }),
 
   getConfig: () => request<any>('/config'),
 

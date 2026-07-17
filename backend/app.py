@@ -125,32 +125,80 @@ def alerts_list():
     page_size = request.args.get('page_size', 20, type=int)
     risk_filter = request.args.get('risk_level', '')
     type_filter = request.args.get('attack_type', '')
+    merged = request.args.get('merged', 'false').lower() == 'true'
 
-    where = []
-    params = []
+    # 筛选条件
+    where_parts = []
+    where_params = []
     if risk_filter and risk_filter != 'all':
-        where.append("risk_level = ?")
-        params.append(risk_filter)
+        where_parts.append("risk_level = ?")
+        where_params.append(risk_filter)
     if type_filter and type_filter != 'all':
-        where.append("attack_type = ?")
-        params.append(type_filter)
+        where_parts.append("attack_type = ?")
+        where_params.append(type_filter)
+    where_clause = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
 
-    where_clause = ("WHERE " + " AND ".join(where)) if where else ""
     order_clause = """
         ORDER BY
             CASE risk_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
             created_at DESC
     """
 
-    count_sql = f"SELECT COUNT(*) as c FROM alerts {where_clause}"
-    total = query_one(count_sql, params)['c']
+    if merged:
+        # 合并模式：按 attack_type + src_ip + dst_ip 分组
+        merge_sql = f"""
+            SELECT
+                MIN(a.id) as id,
+                CASE
+                    WHEN SUM(CASE WHEN a.risk_level = 'critical' THEN 1 ELSE 0 END) > 0 THEN 'critical'
+                    WHEN SUM(CASE WHEN a.risk_level = 'high' THEN 1 ELSE 0 END) > 0 THEN 'high'
+                    WHEN SUM(CASE WHEN a.risk_level = 'medium' THEN 1 ELSE 0 END) > 0 THEN 'medium'
+                    ELSE 'low'
+                END as risk_level,
+                a.attack_type,
+                a.src_ip,
+                a.dst_ip,
+                MAX(a.confidence) as confidence,
+                MIN(a.created_at) as timestamp,
+                COUNT(*) as merged_count,
+                CASE
+                    WHEN SUM(CASE WHEN a.status = 'blocked' THEN 1 ELSE 0 END) > 0 THEN 'blocked'
+                    WHEN SUM(CASE WHEN a.status = 'false_positive' THEN 1 ELSE 0 END) > 0 THEN 'false_positive'
+                    WHEN SUM(CASE WHEN a.status = 'new' THEN 1 ELSE 0 END) > 0 THEN 'new'
+                    WHEN SUM(CASE WHEN a.status = 'reviewed' THEN 1 ELSE 0 END) > 0 THEN 'reviewed'
+                    WHEN SUM(CASE WHEN a.status = 'resolved' THEN 1 ELSE 0 END) > 0 THEN 'resolved'
+                    ELSE 'new'
+                END as status,
+                (SELECT a2.description FROM alerts a2
+                 WHERE a2.attack_type = a.attack_type AND a2.src_ip = a.src_ip AND a2.dst_ip = a.dst_ip
+                 ORDER BY a2.created_at DESC LIMIT 1) as description
+            FROM alerts a
+            {where_clause}
+            GROUP BY a.attack_type, a.src_ip, a.dst_ip
+        """
+        merge_order = """
+            ORDER BY
+                CASE risk_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                timestamp DESC
+        """
+        count_sql = f"SELECT COUNT(*) as c FROM ({merge_sql})"
+        total = query_one(count_sql, where_params)['c']
 
-    offset = (page - 1) * page_size
-    items = query_all(
-        f"SELECT id, risk_level, attack_type, src_ip, dst_ip, confidence, src_port, dst_port, protocol, created_at as timestamp, merged_count, status, description "
-        f"FROM alerts {where_clause} {order_clause} LIMIT ? OFFSET ?",
-        params + [page_size, offset],
-    )
+        offset = (page - 1) * page_size
+        items_sql = f"SELECT * FROM ({merge_sql}) {merge_order} LIMIT ? OFFSET ?"
+        items = query_all(items_sql, where_params + [page_size, offset])
+    else:
+        # 不合并模式：原始逐条显示
+        count_sql = f"SELECT COUNT(*) as c FROM alerts {where_clause}"
+        total = query_one(count_sql, where_params)['c']
+
+        offset = (page - 1) * page_size
+        items = query_all(
+            f"SELECT id, risk_level, attack_type, src_ip, dst_ip, confidence, src_port, dst_port, protocol, "
+            f"created_at as timestamp, 1 as merged_count, status, description "
+            f"FROM alerts {where_clause} {order_clause} LIMIT ? OFFSET ?",
+            where_params + [page_size, offset],
+        )
 
     return jsonify({
         'total': total,
@@ -365,20 +413,225 @@ def traffic_logs():
 # ---- Alert Actions ----
 @app.route('/api/alerts/<int:alert_id>/block', methods=['POST'])
 def block_ip(alert_id):
-    return jsonify({'success': True, 'message': f'IP blocked for alert #{alert_id}'})
+    """拉黑 IP：写入 policies 黑名单 + 更新告警状态 + 记录审计日志"""
+    alert = query_one(
+        "SELECT id, src_ip, attack_type, dst_ip, description FROM alerts WHERE id = ?",
+        (alert_id,),
+    )
+    if not alert:
+        return jsonify({'success': False, 'message': '告警不存在'}), 404
+
+    src_ip = alert['src_ip']
+    attack_type = alert['attack_type']
+
+    # 检查是否已在黑名单中
+    existing = query_one(
+        "SELECT id FROM policies WHERE policy_type = 'blacklist' AND target = ?",
+        (src_ip,),
+    )
+    if not existing:
+        execute(
+            "INSERT INTO policies (policy_type, target, action, description, enabled) VALUES (?, ?, ?, ?, 1)",
+            ('blacklist', src_ip, 'block', f'来自告警 #{alert_id}: {attack_type} 攻击，目标 {alert["dst_ip"]}'),
+        )
+
+    # 更新该 IP 的所有告警状态
+    execute(
+        "UPDATE alerts SET status = 'blocked', updated_at = datetime('now', 'localtime') WHERE src_ip = ?",
+        (src_ip,),
+    )
+
+    # 审计日志
+    log_action('block_ip', f'alert_id={alert_id}, ip={src_ip}, attack={attack_type}')
+
+    return jsonify({'success': True, 'message': f'已拉黑 IP: {src_ip}'})
+
+
+@app.route('/api/alerts/<int:alert_id>/unblock', methods=['POST'])
+def unblock_ip(alert_id):
+    """解除拉黑：删除黑名单 policy + 恢复该 IP 所有告警状态"""
+    alert = query_one("SELECT id, src_ip FROM alerts WHERE id = ?", (alert_id,))
+    if not alert:
+        return jsonify({'success': False, 'message': '告警不存在'}), 404
+
+    ip_address = alert['src_ip']
+
+    # 检查该 IP 是否有被拉黑的告警
+    blocked_count = query_one(
+        "SELECT COUNT(*) as c FROM alerts WHERE src_ip = ? AND status = 'blocked'",
+        (ip_address,),
+    )['c']
+    if blocked_count == 0:
+        return jsonify({'success': False, 'message': '该 IP 没有被拉黑的告警'}), 400
+
+    execute("DELETE FROM policies WHERE policy_type = 'blacklist' AND target = ?", (ip_address,))
+    execute(
+        "UPDATE alerts SET status = 'reviewed', updated_at = datetime('now', 'localtime') WHERE src_ip = ? AND status = 'blocked'",
+        (ip_address,),
+    )
+
+    log_action('unblock_ip', f'alert_id={alert_id}, ip={ip_address}')
+
+    return jsonify({'success': True, 'message': f'已解除对 {ip_address} 的拉黑'})
 
 
 @app.route('/api/alerts/<int:alert_id>/trace', methods=['POST'])
 def trace_alert(alert_id):
+    """溯源分析：生成溯源报告 + 更新告警状态"""
+    alert = query_one(
+        "SELECT id, src_ip, dst_ip, attack_type, risk_level, confidence, description, created_at "
+        "FROM alerts WHERE id = ?",
+        (alert_id,),
+    )
+    if not alert:
+        return jsonify({'success': False, 'message': '告警不存在'}), 404
+
+    # 查询同源 IP 的历史告警数
+    history = query_one(
+        "SELECT COUNT(*) as c FROM alerts WHERE src_ip = ? AND id != ?",
+        (alert['src_ip'], alert_id),
+    )
+
+    # 查询该 IP 关联的设备信息
+    asset = query_one(
+        "SELECT name, device_type, mac_address FROM assets WHERE ip_address = ?",
+        (alert['src_ip'],),
+    )
+
+    # 生成溯源报告
+    trace_parts = [
+        f"=== 溯源分析报告 ===\n",
+        f"告警编号: #{alert['id']}",
+        f"攻击来源 IP: {alert['src_ip']}",
+        f"攻击目标 IP: {alert['dst_ip']}",
+        f"攻击类型: {alert['attack_type']}",
+        f"风险等级: {alert['risk_level']}",
+        f"置信度: {alert['confidence']*100:.1f}%",
+        f"首次发现: {alert['created_at']}",
+    ]
+
+    if asset:
+        trace_parts.append(f"\n--- 关联设备信息 ---")
+        trace_parts.append(f"设备名称: {asset['name']}")
+        trace_parts.append(f"设备类型: {asset['device_type']}")
+        trace_parts.append(f"MAC 地址: {asset['mac_address'] or '未知'}")
+
+    if history:
+        trace_parts.append(f"\n--- 历史关联 ---")
+        trace_parts.append(f"同源 IP 历史告警: {history['c']} 条")
+        trace_parts.append(f"该 IP 活跃程度: {'频繁' if history['c'] > 10 else '偶发' if history['c'] > 3 else '首次'}")
+
+    # 攻击描述
+    trace_parts.append(f"\n--- 攻击描述 ---")
+    trace_parts.append(alert['description'] or f'{alert["attack_type"]} 网络攻击行为')
+
+    trace_info = '\n'.join(trace_parts)
+
+    # 更新告警
+    execute(
+        "UPDATE alerts SET trace_info = ?, status = 'reviewed', updated_at = datetime('now', 'localtime') WHERE id = ?",
+        (trace_info, alert_id),
+    )
+
+    log_action('trace_alert', f'alert_id={alert_id}, src_ip={alert["src_ip"]}')
+
     return jsonify({
         'success': True,
-        'trace_info': f'溯源完成：攻击来源位于社区网络3号区域，关联设备 192.168.1.105，历史关联告警 5 条'
+        'trace_info': trace_info,
     })
 
 
 @app.route('/api/alerts/<int:alert_id>/false-positive', methods=['POST'])
 def mark_false_positive(alert_id):
-    return jsonify({'success': True, 'message': f'Alert #{alert_id} marked as false positive'})
+    """标记误报：更新告警状态 + 记录审计日志"""
+    alert = query_one("SELECT id, src_ip, attack_type FROM alerts WHERE id = ?", (alert_id,))
+    if not alert:
+        return jsonify({'success': False, 'message': '告警不存在'}), 404
+
+    execute(
+        "UPDATE alerts SET status = 'false_positive', updated_at = datetime('now', 'localtime') WHERE id = ?",
+        (alert_id,),
+    )
+
+    log_action('mark_fp', f'alert_id={alert_id}, ip={alert["src_ip"]}, attack={alert["attack_type"]}')
+
+    return jsonify({'success': True, 'message': f'已将告警 #{alert_id} 标记为误报'})
+
+
+@app.route('/api/alerts/<int:alert_id>/unmark-false-positive', methods=['POST'])
+def unmark_false_positive(alert_id):
+    """撤销误报标记：恢复告警状态为 reviewed"""
+    alert = query_one("SELECT id, status FROM alerts WHERE id = ?", (alert_id,))
+    if not alert:
+        return jsonify({'success': False, 'message': '告警不存在'}), 404
+    if alert['status'] != 'false_positive':
+        return jsonify({'success': False, 'message': '该告警未被标记为误报'}), 400
+
+    execute(
+        "UPDATE alerts SET status = 'reviewed', updated_at = datetime('now', 'localtime') WHERE id = ?",
+        (alert_id,),
+    )
+
+    log_action('unmark_fp', f'alert_id={alert_id}')
+
+    return jsonify({'success': True, 'message': f'已撤销告警 #{alert_id} 的误报标记'})
+
+
+# ---- Blacklist Management ----
+@app.route('/api/blocklist', methods=['GET'])
+def blocklist_list():
+    """获取所有黑名单记录（关联告警信息）"""
+    # 对每个 IP 取风险最高的一条告警作为展示信息
+    rows = query_all(
+        "SELECT p.id, p.target AS ip_address, p.description AS reason, "
+        "p.created_at AS blocked_at, p.enabled, "
+        "a.id AS alert_id, a.attack_type, a.risk_level, a.dst_ip, a.status AS alert_status "
+        "FROM policies p "
+        "LEFT JOIN alerts a ON a.id = ("
+        "  SELECT a2.id FROM alerts a2"
+        "  WHERE a2.src_ip = p.target"
+        "  ORDER BY CASE a2.risk_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,"
+        "    a2.created_at DESC LIMIT 1"
+        ") "
+        "WHERE p.policy_type = 'blacklist' "
+        "ORDER BY p.created_at DESC"
+    )
+
+    # 对同一 IP 的多条记录去重
+    seen_ips = set()
+    deduped = []
+    for r in rows:
+        if r['ip_address'] not in seen_ips:
+            seen_ips.add(r['ip_address'])
+            deduped.append(r)
+
+    return jsonify({'total': len(deduped), 'items': deduped})
+
+
+@app.route('/api/blocklist/<int:policy_id>', methods=['DELETE'])
+def blocklist_delete(policy_id):
+    """解除拉黑：删除 policy 记录 + 恢复关联告警状态"""
+    policy = query_one(
+        "SELECT id, target FROM policies WHERE id = ? AND policy_type = 'blacklist'",
+        (policy_id,),
+    )
+    if not policy:
+        return jsonify({'success': False, 'message': '黑名单记录不存在'}), 404
+
+    ip_address = policy['target']
+
+    # 删除该 IP 的所有黑名单 policy
+    execute("DELETE FROM policies WHERE policy_type = 'blacklist' AND target = ?", (ip_address,))
+
+    # 恢复该 IP 关联的告警状态
+    execute(
+        "UPDATE alerts SET status = 'reviewed', updated_at = datetime('now', 'localtime') WHERE src_ip = ? AND status = 'blocked'",
+        (ip_address,),
+    )
+
+    log_action('unblock_ip', f'policy_id={policy_id}, ip={ip_address}')
+
+    return jsonify({'success': True, 'message': f'已解除对 {ip_address} 的拉黑'})
 
 
 # ---- Configuration ----
