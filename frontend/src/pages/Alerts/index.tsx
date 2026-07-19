@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Table, Tag, Button, Space, Tooltip, Modal, Descriptions, message, Spin, Tabs, Popconfirm, Switch } from 'antd';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Table, Tag, Button, Space, Tooltip, Modal, Descriptions, message, Spin, Tabs, Popconfirm, Switch, notification } from 'antd';
 import {
   StopOutlined,
   SearchOutlined,
@@ -58,6 +58,78 @@ export default function AlertsPage() {
   }, []);
 
   useEffect(() => { fetchAlerts(); fetchBlocklist(); }, [fetchAlerts, fetchBlocklist]);
+
+  // ---- 新告警实时轮询 ----
+  const lastCheckRef = useRef<number>(0);
+
+  // 初始化：拿到当前最新告警的 ID 作为基准
+  useEffect(() => {
+    fetch('/api/alerts/new?since=')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.max_id) lastCheckRef.current = data.max_id;
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const checkNewAlerts = () => {
+      fetch(`/api/alerts/new?since_id=${lastCheckRef.current}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.items && data.items.length > 0) {
+            // 更新基准 ID
+            lastCheckRef.current = data.max_id || lastCheckRef.current;
+            // 合并通知：不管多少条，只弹一条
+            const count = data.items.length;
+            const hottest = data.items.reduce((a: AlertItem, b: AlertItem) => {
+              const order = ['critical', 'high', 'medium', 'low'];
+              return order.indexOf(a.risk_level) <= order.indexOf(b.risk_level) ? a : b;
+            });
+
+            if (count === 1) {
+              notification.open({
+                message: `🛡️ 新告警：${hottest.attack_type} 攻击`,
+                description: `来源 IP: ${hottest.src_ip} → ${hottest.dst_ip} | 风险: ${hottest.risk_level} | ${hottest.timestamp}`,
+                duration: 8,
+                placement: 'topRight',
+                btn: (
+                  <Button size="small" type="primary" onClick={() => {
+                    setSelectedAlert(hottest);
+                    setDetailOpen(true);
+                    notification.destroy();
+                  }}>
+                    查看详情
+                  </Button>
+                ),
+              });
+            } else {
+              notification.open({
+                message: `🛡️ 检测到 ${count} 条新告警`,
+                description: `最高危：${hottest.attack_type} | 来源 ${hottest.src_ip} | 风险: ${hottest.risk_level}`,
+                duration: 10,
+                placement: 'topRight',
+                btn: (
+                  <Button size="small" type="primary" onClick={() => {
+                    setActiveTab('alerts');
+                    fetchAlerts();
+                    notification.destroy();
+                  }}>
+                    查看全部
+                  </Button>
+                ),
+              });
+            }
+            // 刷新告警列表
+            fetchAlerts();
+          }
+        })
+        .catch(() => {}); // 后端没响应时静默
+    };
+
+    const timer = setInterval(checkNewAlerts, 10000);
+    return () => clearInterval(timer);
+  }, [fetchAlerts]);
 
   // ---- Alert Actions ----
   const handleBlock = (record: AlertItem) => {

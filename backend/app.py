@@ -208,6 +208,25 @@ def alerts_list():
     })
 
 
+@app.route('/api/alerts/new')
+def alerts_new():
+    """查询新告警，用于前端实时轮询"""
+    since_id = request.args.get('since_id', 0, type=int)
+
+    items = query_all(
+        "SELECT id, risk_level, attack_type, src_ip, dst_ip, confidence, "
+        "created_at as timestamp, status, description "
+        "FROM alerts WHERE id > ? "
+        "ORDER BY id DESC LIMIT 20",
+        (since_id,),
+    )
+
+    max_id_row = query_one("SELECT MAX(id) as max_id FROM alerts")
+    max_id = max_id_row['max_id'] if max_id_row else 0
+
+    return jsonify({'items': items, 'max_id': max_id})
+
+
 # ---- Analysis Data ----
 @app.route('/api/analysis/topology')
 def topology_data():
