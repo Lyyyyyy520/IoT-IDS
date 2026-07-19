@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Table, Tag, Button, Space, Tooltip, Modal, Descriptions, message, Spin, Tabs, Popconfirm, Switch, notification } from 'antd';
+import { Table, Tag, Button, Space, Tooltip, Modal, Descriptions, message, Spin, Popconfirm, Switch, notification } from 'antd';
 import {
   StopOutlined,
   SearchOutlined,
@@ -9,7 +9,7 @@ import {
   UndoOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { api, type AlertItem, type BlocklistItem } from '../../api';
+import { api, type AlertItem } from '../../api';
 
 const riskColorMap: Record<string, string> = {
   critical: '#FF4444',
@@ -30,14 +30,7 @@ export default function AlertsPage() {
   const [loading, setLoading] = useState(true);
   const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('alerts');
   const [merged, setMerged] = useState(false);
-
-  // ---- Blacklist state ----
-  const [blocklist, setBlocklist] = useState<BlocklistItem[]>([]);
-  const [blocklistLoading, setBlocklistLoading] = useState(false);
-  const [selectedBlock, setSelectedBlock] = useState<BlocklistItem | null>(null);
-  const [blockDetailOpen, setBlockDetailOpen] = useState(false);
 
   const fetchAlerts = useCallback(() => {
     setLoading(true);
@@ -49,15 +42,7 @@ export default function AlertsPage() {
       .finally(() => setLoading(false));
   }, [merged]);
 
-  const fetchBlocklist = useCallback(() => {
-    setBlocklistLoading(true);
-    api.getBlocklist()
-      .then((res) => setBlocklist(res.items))
-      .catch(() => message.warning('无法获取黑名单数据'))
-      .finally(() => setBlocklistLoading(false));
-  }, []);
-
-  useEffect(() => { fetchAlerts(); fetchBlocklist(); }, [fetchAlerts, fetchBlocklist]);
+  useEffect(() => { fetchAlerts(); }, [fetchAlerts]);
 
   // ---- 新告警实时轮询 ----
   const lastCheckRef = useRef<number>(0);
@@ -111,7 +96,6 @@ export default function AlertsPage() {
                 placement: 'topRight',
                 btn: (
                   <Button size="small" type="primary" onClick={() => {
-                    setActiveTab('alerts');
                     fetchAlerts();
                     notification.destroy();
                   }}>
@@ -137,7 +121,6 @@ export default function AlertsPage() {
       .then((res) => {
         message.success(res.message || `已拉黑 IP: ${record.src_ip}`);
         fetchAlerts();
-        fetchBlocklist();
         setSelectedAlert((prev) => prev?.id === record.id ? { ...prev, status: 'blocked' } : prev);
       })
       .catch(() => message.error('拉黑失败，请检查后端服务是否运行'));
@@ -148,7 +131,6 @@ export default function AlertsPage() {
       .then((res) => {
         message.success(res.message || `已解除对 ${record.src_ip} 的拉黑`);
         fetchAlerts();
-        fetchBlocklist();
         setSelectedAlert((prev) => prev?.id === record.id ? { ...prev, status: 'reviewed' } : prev);
       })
       .catch(() => message.error('解除拉黑失败，请检查后端服务是否运行'));
@@ -185,17 +167,6 @@ export default function AlertsPage() {
         setSelectedAlert((prev) => prev?.id === record.id ? { ...prev, status: 'reviewed' } : prev);
       })
       .catch(() => message.error('操作失败，请检查后端服务是否运行'));
-  };
-
-  // ---- Blacklist Actions ----
-  const handleBlocklistUnblock = (record: BlocklistItem) => {
-    api.deleteBlocklist(record.id)
-      .then((res) => {
-        message.success(res.message || `已解除对 ${record.ip_address} 的拉黑`);
-        fetchBlocklist();
-        fetchAlerts(); // 同步刷新告警列表
-      })
-      .catch(() => message.error('解除拉黑失败，请检查后端服务是否运行'));
   };
 
   // ---- Alert Table Columns ----
@@ -278,97 +249,29 @@ export default function AlertsPage() {
     },
   ];
 
-  // ---- Blacklist Table Columns ----
-  const blocklistColumns: ColumnsType<BlocklistItem> = [
-    { title: 'IP 地址', dataIndex: 'ip_address', key: 'ip_address', width: 160 },
-    {
-      title: '风险等级',
-      dataIndex: 'risk_level',
-      key: 'risk_level',
-      width: 100,
-      render: (level: string | null) =>
-        level ? <Tag color={riskColorMap[level] || '#888'}>{riskLabelMap[level] || level}</Tag> : '-',
-    },
-    { title: '攻击类型', dataIndex: 'attack_type', key: 'attack_type', width: 110, render: (v: string | null) => v || '-' },
-    { title: '目标 IP', dataIndex: 'dst_ip', key: 'dst_ip', width: 150, render: (v: string | null) => v || '-' },
-    { title: '拉黑时间', dataIndex: 'blocked_at', key: 'blocked_at', width: 170 },
-    {
-      title: '操作', key: 'actions', width: 160,
-      render: (_, record) => (
-        <Space size="small">
-          <Tooltip title="查看详情">
-            <Button size="small" icon={<EyeOutlined />} type="text"
-              onClick={() => { setSelectedBlock(record); setBlockDetailOpen(true); }} />
-          </Tooltip>
-          <Popconfirm
-            title="确定解除拉黑？"
-            description={`将解除对 ${record.ip_address} 的拉黑`}
-            onConfirm={() => handleBlocklistUnblock(record)}
-            okText="确定"
-            cancelText="取消"
-          >
-            <Tooltip title="解除拉黑">
-              <Button size="small" icon={<UndoOutlined />} type="text" />
-            </Tooltip>
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ];
-
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>告警中心</h2>
-        <Button icon={<ExportOutlined />}>导出 Excel</Button>
+        <Space>
+          <Switch
+            size="small"
+            checked={merged}
+            onChange={(v) => setMerged(v)}
+          />
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>合并显示</span>
+          <Button icon={<ExportOutlined />}>导出 Excel</Button>
+        </Space>
       </div>
 
-      <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
-        items={[
-          {
-            key: 'alerts',
-            label: (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                📋 告警列表
-                <Switch
-                  size="small"
-                  checked={merged}
-                  onChange={(v) => setMerged(v)}
-                  onClick={(_, e) => e.stopPropagation()}
-                />
-                <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 400 }}>合并显示</span>
-              </span>
-            ),
-            children: (
-              <Table
-                columns={alertColumns}
-                dataSource={alerts}
-                rowKey="id"
-                loading={loading}
-                rowClassName={(record) => record.risk_level === 'critical' ? 'alert-row-critical' : ''}
-                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条告警` }}
-                size="middle"
-              />
-            ),
-          },
-          {
-            key: 'blocklist',
-            label: `🛑 黑名单`,
-            children: (
-              <Table
-                columns={blocklistColumns}
-                dataSource={blocklist}
-                rowKey="id"
-                loading={blocklistLoading}
-                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条记录` }}
-                size="middle"
-                locale={{ emptyText: '暂无被拉黑的 IP' }}
-              />
-            ),
-          },
-        ]}
+      <Table
+        columns={alertColumns}
+        dataSource={alerts}
+        rowKey="id"
+        loading={loading}
+        rowClassName={(record) => record.risk_level === 'critical' ? 'alert-row-critical' : ''}
+        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条告警` }}
+        size="middle"
       />
 
       {/* Alert Detail Modal */}
@@ -414,39 +317,6 @@ export default function AlertsPage() {
         )}
       </Modal>
 
-      {/* Blocklist Detail Modal */}
-      <Modal
-        title={`黑名单详情 — ${selectedBlock?.ip_address || ''}`}
-        open={blockDetailOpen}
-        onCancel={() => setBlockDetailOpen(false)}
-        footer={[
-          <Button key="unblock" danger icon={<UndoOutlined />}
-            onClick={() => { if (selectedBlock) { handleBlocklistUnblock(selectedBlock); setBlockDetailOpen(false); } }}>解除拉黑</Button>,
-          <Button key="close" type="primary" onClick={() => setBlockDetailOpen(false)}>关闭</Button>,
-        ]}
-        width={640}
-      >
-        {selectedBlock && (
-          <Descriptions column={2} size="small" bordered>
-            <Descriptions.Item label="IP 地址">{selectedBlock.ip_address}</Descriptions.Item>
-            <Descriptions.Item label="攻击类型">{selectedBlock.attack_type || '-'}</Descriptions.Item>
-            <Descriptions.Item label="风险等级">
-              {selectedBlock.risk_level ? (
-                <Tag color={riskColorMap[selectedBlock.risk_level]}>{riskLabelMap[selectedBlock.risk_level]}</Tag>
-              ) : '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="目标 IP">{selectedBlock.dst_ip || '-'}</Descriptions.Item>
-            <Descriptions.Item label="拉黑时间">{selectedBlock.blocked_at}</Descriptions.Item>
-            <Descriptions.Item label="关联告警">#{selectedBlock.alert_id || '无'}</Descriptions.Item>
-            <Descriptions.Item label="告警状态">
-              {selectedBlock.alert_status ? (
-                <Tag>{selectedBlock.alert_status}</Tag>
-              ) : '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="拉黑原因" span={2}>{selectedBlock.reason || '-'}</Descriptions.Item>
-          </Descriptions>
-        )}
-      </Modal>
     </div>
   );
 }

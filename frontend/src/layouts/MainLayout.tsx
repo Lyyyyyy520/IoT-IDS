@@ -16,6 +16,7 @@ import {
   SafetyOutlined,
   FileTextOutlined,
   SwapOutlined,
+  MonitorOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -28,6 +29,9 @@ const navItems: MenuItem[] = [
   { key: '/alerts', icon: <AlertOutlined />, label: '告警中心' },
   { key: '/analysis', icon: <RadarChartOutlined />, label: '分析视图' },
   { key: '/traffic', icon: <SwapOutlined />, label: '流量分析' },
+  { key: '/policy', icon: <SafetyOutlined />, label: '策略管理' },
+  { key: '/assets', icon: <MonitorOutlined />, label: '资产监控' },
+  { key: '/logs', icon: <FileTextOutlined />, label: '审计日志' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
 

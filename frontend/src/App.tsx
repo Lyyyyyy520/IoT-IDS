@@ -6,6 +6,9 @@ import Dashboard from './pages/Dashboard';
 import Alerts from './pages/Alerts';
 import Analysis from './pages/Analysis';
 import Traffic from './pages/Traffic';
+import Policy from './pages/Policy';
+import Assets from './pages/Assets';
+import Logs from './pages/Logs';
 import Settings from './pages/Settings';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
@@ -49,6 +52,9 @@ export default function App() {
           <Route path="alerts" element={<Alerts />} />
           <Route path="analysis" element={<Analysis />} />
           <Route path="traffic" element={<Traffic />} />
+          <Route path="policy" element={<Policy />} />
+          <Route path="assets" element={<Assets />} />
+          <Route path="logs" element={<Logs />} />
           <Route path="settings" element={<Settings />} />
         </Route>
 

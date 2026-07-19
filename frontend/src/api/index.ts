@@ -99,6 +99,25 @@ export const api = {
   getBlocklist: () => request<BlocklistResponse>('/blocklist'),
   deleteBlocklist: (id: number) => request<{ success: boolean; message: string }>(`/blocklist/${id}`, { method: 'DELETE' }),
 
+  // Policies
+  getPolicies: (type?: string) => {
+    const q = type ? `?type=${type}` : '';
+    return request<{ items: any[] }>(`/policies${q}`);
+  },
+  createPolicy: (data: any) => request<{ success: boolean; id: number }>('/policies', { method: 'POST', body: JSON.stringify(data) }),
+  updatePolicy: (id: number, data: any) => request<{ success: boolean }>(`/policies/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePolicy: (id: number) => request<{ success: boolean }>(`/policies/${id}`, { method: 'DELETE' }),
+
+  // Assets
+  getAssets: () => request<{ items: any[] }>('/assets'),
+  createAsset: (data: any) => request<{ success: boolean; id: number }>('/assets', { method: 'POST', body: JSON.stringify(data) }),
+  updateAsset: (id: number, data: any) => request<{ success: boolean }>(`/assets/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteAsset: (id: number) => request<{ success: boolean }>(`/assets/${id}`, { method: 'DELETE' }),
+
+  // Logs
+  getAuditLogs: () => request<{ items: any[] }>('/logs/audit'),
+  getTrafficLogs: () => request<{ items: any[] }>('/logs/traffic'),
+
   getConfig: () => request<any>('/config'),
 
   getTopology: () => request<any>('/analysis/topology'),

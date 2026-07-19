@@ -680,6 +680,125 @@ def blocklist_delete(policy_id):
     return jsonify({'success': True, 'message': f'已解除对 {ip_address} 的拉黑'})
 
 
+# ---- Policy Management ----
+@app.route('/api/policies', methods=['GET'])
+def policies_list():
+    """获取策略列表"""
+    policy_type = request.args.get('type', '')
+    where = "WHERE 1=1"
+    params = []
+    if policy_type:
+        where += " AND policy_type = ?"
+        params.append(policy_type)
+    rows = query_all(
+        f"SELECT * FROM policies {where} ORDER BY created_at DESC",
+        params,
+    )
+    return jsonify({'items': rows})
+
+
+@app.route('/api/policies', methods=['POST'])
+def policies_create():
+    """新增策略"""
+    data = request.get_json() or {}
+    policy_type = data.get('policy_type', 'blacklist')
+    target = data.get('target', '')
+    action = data.get('action', 'alert')
+    description = data.get('description', '')
+    enabled = data.get('enabled', 1)
+    if not target:
+        return jsonify({'success': False, 'message': '目标不能为空'}), 400
+    pid = execute(
+        "INSERT INTO policies (policy_type, target, action, description, enabled) VALUES (?,?,?,?,?)",
+        (policy_type, target, action, description, enabled),
+    )
+    log_action('create_policy', f'id={pid}, type={policy_type}, target={target}')
+    return jsonify({'success': True, 'id': pid})
+
+
+@app.route('/api/policies/<int:policy_id>', methods=['PUT'])
+def policies_update(policy_id):
+    """编辑策略"""
+    data = request.get_json() or {}
+    execute(
+        "UPDATE policies SET policy_type=?, target=?, action=?, description=?, enabled=? WHERE id=?",
+        (data.get('policy_type'), data.get('target'), data.get('action'),
+         data.get('description', ''), data.get('enabled', 1), policy_id),
+    )
+    log_action('update_policy', f'id={policy_id}')
+    return jsonify({'success': True})
+
+
+@app.route('/api/policies/<int:policy_id>', methods=['DELETE'])
+def policies_delete(policy_id):
+    """删除策略"""
+    execute("DELETE FROM policies WHERE id = ?", (policy_id,))
+    log_action('delete_policy', f'id={policy_id}')
+    return jsonify({'success': True})
+
+
+# ---- Asset Management ----
+@app.route('/api/assets', methods=['GET'])
+def assets_list():
+    """获取设备列表"""
+    rows = query_all("SELECT * FROM assets ORDER BY created_at DESC")
+    return jsonify({'items': rows})
+
+
+@app.route('/api/assets', methods=['POST'])
+def assets_create():
+    """新增设备"""
+    data = request.get_json() or {}
+    name = data.get('name', '').strip()
+    ip = data.get('ip_address', '').strip()
+    if not name or not ip:
+        return jsonify({'success': False, 'message': '设备名和IP不能为空'}), 400
+    aid = execute(
+        "INSERT INTO assets (name, ip_address, mac_address, device_type, status, risk_level, last_seen) VALUES (?,?,?,?,?,?,datetime('now','localtime'))",
+        (name, ip, data.get('mac_address', ''), data.get('device_type', 'other'),
+         data.get('status', 'online'), data.get('risk_level', 'low')),
+    )
+    return jsonify({'success': True, 'id': aid})
+
+
+@app.route('/api/assets/<int:asset_id>', methods=['PUT'])
+def assets_update(asset_id):
+    """编辑设备"""
+    data = request.get_json() or {}
+    execute(
+        "UPDATE assets SET name=?, ip_address=?, mac_address=?, device_type=?, status=?, risk_level=?, last_seen=datetime('now','localtime') WHERE id=?",
+        (data.get('name'), data.get('ip_address'), data.get('mac_address', ''),
+         data.get('device_type'), data.get('status'), data.get('risk_level'), asset_id),
+    )
+    return jsonify({'success': True})
+
+
+@app.route('/api/assets/<int:asset_id>', methods=['DELETE'])
+def assets_delete(asset_id):
+    """删除设备"""
+    execute("DELETE FROM assets WHERE id = ?", (asset_id,))
+    return jsonify({'success': True})
+
+
+# ---- Log Center ----
+@app.route('/api/logs/audit')
+def logs_audit():
+    """审计日志"""
+    rows = query_all(
+        "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 200"
+    )
+    return jsonify({'items': rows})
+
+
+@app.route('/api/logs/traffic')
+def logs_traffic():
+    """流量日志"""
+    rows = query_all(
+        "SELECT * FROM traffic_logs ORDER BY timestamp DESC LIMIT 200"
+    )
+    return jsonify({'items': rows})
+
+
 # ---- Configuration ----
 @app.route('/api/config', methods=['GET'])
 def get_config():
