@@ -63,6 +63,38 @@ def auth_me():
 
 
 # ---- Dashboard Stats ----
+def _get_traffic_history():
+    """统计最近 7 个 5 分钟间隔的流量，不足的填 0"""
+    result = []
+    attack_ips = [r['src_ip'] for r in query_all("SELECT DISTINCT src_ip FROM alerts")]
+
+    for i in range(6, -1, -1):
+        row = query_one(
+            "SELECT COUNT(*) as total FROM traffic_logs "
+            "WHERE timestamp >= datetime('now', ? || ' minutes', 'localtime') "
+            "AND timestamp < datetime('now', ? || ' minutes', 'localtime')",
+            (f'-{(i+1)*5}', f'-{i*5}'),
+        )
+        total = row['c'] if row else 0
+        time_label = f"{(i+1)*5}m前" if i < 6 else "现在"
+
+        if attack_ips:
+            atk_row = query_one(
+                "SELECT COUNT(*) as c FROM traffic_logs "
+                "WHERE timestamp >= datetime('now', ? || ' minutes', 'localtime') "
+                "AND timestamp < datetime('now', ? || ' minutes', 'localtime') "
+                "AND src_ip IN ({})".format(','.join('?' * len(attack_ips))),
+                [f'-{(i+1)*5}', f'-{i*5}'] + attack_ips,
+            )
+            atk = atk_row['c'] if atk_row else 0
+        else:
+            atk = 0
+
+        result.append({'time': time_label, 'normal': max(0, total - atk), 'attack': atk})
+
+    return result
+
+
 @app.route('/api/dashboard/stats')
 def dashboard_stats():
     # Count from real DB tables
@@ -103,15 +135,7 @@ def dashboard_stats():
         'online_assets': online_assets,
         'risk_score': risk_score,
         'system_status': 'normal' if risk_score > 60 else 'warning',
-        'traffic_history': [
-            {'time': '14:00', 'normal': 1200, 'attack': 45},
-            {'time': '14:05', 'normal': 1180, 'attack': 32},
-            {'time': '14:10', 'normal': 1350, 'attack': 28},
-            {'time': '14:15', 'normal': 1420, 'attack': 55},
-            {'time': '14:20', 'normal': 1280, 'attack': 38},
-            {'time': '14:25', 'normal': 1390, 'attack': 23},
-            {'time': '14:30', 'normal': 1450, 'attack': 42},
-        ],
+        'traffic_history': _get_traffic_history(),
         'attack_distribution': attack_distribution,
         'recent_alerts': recent,
     })

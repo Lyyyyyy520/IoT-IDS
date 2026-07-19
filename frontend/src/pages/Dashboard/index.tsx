@@ -76,7 +76,7 @@ export default function DashboardPage() {
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} lg={14}>
           <Card title="攻击趋势" size="small">
-            <TrafficChart />
+            <TrafficChart data={s.traffic_history} />
           </Card>
         </Col>
         <Col xs={24} lg={10}>

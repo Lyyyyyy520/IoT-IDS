@@ -3,9 +3,10 @@ import * as echarts from 'echarts';
 
 interface Props {
   showProtocol?: boolean;
+  data?: { time: string; normal: number; attack: number }[];
 }
 
-export default function TrafficChart({ showProtocol = false }: Props) {
+export default function TrafficChart({ showProtocol = false, data }: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -13,7 +14,6 @@ export default function TrafficChart({ showProtocol = false }: Props) {
     const chart = echarts.init(chartRef.current, 'dark');
 
     if (showProtocol) {
-      // Protocol distribution pie chart
       chart.setOption({
         tooltip: { trigger: 'item' },
         legend: { bottom: 0, textStyle: { color: '#8B949E', fontSize: 11 } },
@@ -34,8 +34,11 @@ export default function TrafficChart({ showProtocol = false }: Props) {
         ],
       });
     } else {
-      // Traffic line chart
-      const times = ['13:00', '13:15', '13:30', '13:45', '14:00', '14:15', '14:30'];
+      const hasData = data && data.length > 0;
+      const times = hasData ? data!.map((d) => d.time) : ['13:00', '13:15', '13:30', '13:45', '14:00', '14:15', '14:30'];
+      const normalData = hasData ? data!.map((d) => d.normal) : [1200, 1350, 1180, 1420, 1280, 1390, 1450];
+      const attackData = hasData ? data!.map((d) => d.attack) : [20, 15, 45, 38, 23, 55, 42];
+
       chart.setOption({
         tooltip: { trigger: 'axis' },
         legend: {
@@ -62,7 +65,7 @@ export default function TrafficChart({ showProtocol = false }: Props) {
             name: '正常流量',
             type: 'line',
             smooth: true,
-            data: [1200, 1350, 1180, 1420, 1280, 1390, 1450],
+            data: normalData,
             lineStyle: { color: '#00CC66', width: 2 },
             areaStyle: { color: 'rgba(0,204,102,0.08)' },
             symbol: 'none',
@@ -71,7 +74,7 @@ export default function TrafficChart({ showProtocol = false }: Props) {
             name: '攻击流量',
             type: 'line',
             smooth: true,
-            data: [20, 15, 45, 38, 23, 55, 42],
+            data: attackData,
             lineStyle: { color: '#FF4444', width: 2 },
             areaStyle: { color: 'rgba(255,68,68,0.10)' },
             symbol: 'none',
@@ -86,7 +89,7 @@ export default function TrafficChart({ showProtocol = false }: Props) {
       window.removeEventListener('resize', handleResize);
       chart.dispose();
     };
-  }, [showProtocol]);
+  }, [showProtocol, data]);
 
   return <div ref={chartRef} style={{ width: '100%', height: 280 }} />;
 }
