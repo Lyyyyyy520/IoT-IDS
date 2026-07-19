@@ -6,6 +6,12 @@ from flask_cors import CORS
 from datetime import datetime
 import os
 
+# Python的数据库库的查询所有函数（拓扑图需要用）
+from database import query_all
+
+# 引用数据库（热力图需要）
+import datetime
+
 app = Flask(__name__)
 app.secret_key = os.urandom(24).hex()  # Session encryption key
 app.config['SESSION_PERMANENT'] = True
@@ -211,49 +217,81 @@ def alerts_list():
 # ---- Analysis Data ----
 @app.route('/api/analysis/topology')
 def topology_data():
+
+    # 从 assets 表查所有设备作为节点
+    assets = query_all("SELECT id, name, device_type, status, ip_address FROM assets")
+    nodes = []
+    for row in assets:
+        # 状态 风险等级映射
+        risk_map = {
+            'online': 'normal',
+            'offline': 'high',
+            'alert': 'critical'
+        }
+        nodes.append({
+            'id': str(row['id']),
+            'label': row['name'],
+            'type': row['device_type'] if row['device_type'] else 'unknown',
+            'risk': risk_map.get(row['status'], 'normal'),
+            'ip': row['ip_address']
+        })
+    
+    # 从 alerts 表推导设备之间的连接关系
+    # 如果 alerts 表是空的，links 就是空数组，前端只显示节点不显示连线
+    links = []
+    try:
+        links_sql = """
+            SELECT DISTINCT 
+                a1.id as source_id,
+                a2.id as target_id
+            FROM alerts al
+            JOIN assets a1 ON al.src_ip = a1.ip_address
+            JOIN assets a2 ON al.dst_ip = a2.ip_address
+            WHERE a1.id != a2.id
+            LIMIT 100
+        """
+        conns = query_all(links_sql)
+        links = [{'source': str(row['source_id']), 'target': str(row['target_id'])} for row in conns]
+    except Exception as e:
+        # 如果 alerts 表是空的或者没有匹配的数据，就返回空 links
+        pass
+    
     return jsonify({
-        'nodes': [
-            {'id': 'router', 'label': '社区路由器', 'type': 'router', 'risk': 'normal'},
-            {'id': 'cam1', 'label': '摄像头-01', 'type': 'camera', 'risk': 'normal'},
-            {'id': 'cam2', 'label': '摄像头-02', 'type': 'camera', 'risk': 'critical'},
-            {'id': 'door1', 'label': '门禁-01', 'type': 'door', 'risk': 'normal'},
-            {'id': 'door2', 'label': '门禁-02', 'type': 'door', 'risk': 'high'},
-            {'id': 'sensor1', 'label': '烟感-01', 'type': 'sensor', 'risk': 'normal'},
-            {'id': 'sensor2', 'label': '温湿度-01', 'type': 'sensor', 'risk': 'normal'},
-            {'id': 'socket1', 'label': '智能插座-01', 'type': 'socket', 'risk': 'medium'},
-            {'id': 'lock1', 'label': '智能锁-01', 'type': 'lock', 'risk': 'normal'},
-            {'id': 'hub1', 'label': '智能网关', 'type': 'hub', 'risk': 'normal'},
-            {'id': 'phone1', 'label': '业主手机', 'type': 'phone', 'risk': 'normal'},
-            {'id': 'server', 'label': '管理服务器', 'type': 'server', 'risk': 'normal'},
-        ],
-        'links': [
-            {'source': 'router', 'target': 'cam1'}, {'source': 'router', 'target': 'cam2'},
-            {'source': 'router', 'target': 'door1'}, {'source': 'router', 'target': 'door2'},
-            {'source': 'router', 'target': 'hub1'},
-            {'source': 'hub1', 'target': 'sensor1'}, {'source': 'hub1', 'target': 'sensor2'},
-            {'source': 'hub1', 'target': 'socket1'}, {'source': 'hub1', 'target': 'lock1'},
-            {'source': 'router', 'target': 'server'}, {'source': 'router', 'target': 'phone1'},
-        ],
+        'nodes': nodes,
+        'links': links
     })
 
 
 @app.route('/api/analysis/heatmap')
 def heatmap_data():
-    import random
-    random.seed(42)
+    # 用 ECharts 画热力图
+    
+    # 统计最近 7 天、24 小时的告警分布
+    sql = """
+        SELECT 
+            strftime('%w', created_at) as dow,
+            strftime('%H', created_at) as hour,
+            COUNT(*) as count
+        FROM alerts
+        WHERE created_at >= datetime('now', '-7 days')
+        GROUP BY dow, hour
+        ORDER BY dow, hour
+    """
+    rows = query_all(sql)
+    
+    # 转成 ECharts 需要的格式
     data = []
-    hours = list(range(0, 24, 2))
-    for d in range(7):
-        for h_idx, h in enumerate(hours):
-            val = random.randint(5, 30)
-            if h < 4 or h > 20:
-                val += random.randint(10, 40)
-            if d >= 5:
-                val += random.randint(10, 20)
-            data.append({'day': d, 'hour': h_idx, 'value': min(val, 100)})
-    return jsonify({'data': data, 'days': ['周一','周二','周三','周四','周五','周六','周日'], 'hours': [f'{h:02d}' for h in hours]})
-
-
+    for row in rows:
+        data.append([int(row['dow']), int(row['hour']), row['count']])
+    
+    days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+    hours = [f'{h:02d}:00' for h in range(24)]
+    
+    return jsonify({
+        'data': data,
+        'days': days,
+        'hours': hours
+    })
 @app.route('/api/analysis/mitre')
 def mitre_data():
     return jsonify({
