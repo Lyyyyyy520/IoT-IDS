@@ -4,9 +4,10 @@ import * as echarts from 'echarts';
 interface Props {
   showProtocol?: boolean;
   data?: { time: string; normal: number; attack: number }[];
+  pieData?: { type: string; count: number }[];
 }
 
-export default function TrafficChart({ showProtocol = false, data }: Props) {
+export default function TrafficChart({ showProtocol = false, data, pieData }: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -14,8 +15,13 @@ export default function TrafficChart({ showProtocol = false, data }: Props) {
     const chart = echarts.init(chartRef.current, 'dark');
 
     if (showProtocol) {
+      const colors = ['#58A6FF', '#FF8800', '#39D2C0', '#FF4444', '#BC8CFF', '#FFCC00', '#484F58'];
+      const pieItems = pieData && pieData.length > 0
+        ? pieData.map((d, i) => ({ value: d.count, name: d.type, itemStyle: { color: colors[i % colors.length] } }))
+        : [{ value: 1, name: '暂无数据', itemStyle: { color: '#484F58' } }];
+
       chart.setOption({
-        tooltip: { trigger: 'item' },
+        tooltip: { trigger: 'item', formatter: '{b}: {c} 条 ({d}%)' },
         legend: { bottom: 0, textStyle: { color: '#8B949E', fontSize: 11 } },
         series: [
           {
@@ -23,21 +29,14 @@ export default function TrafficChart({ showProtocol = false, data }: Props) {
             radius: ['45%', '72%'],
             center: ['50%', '45%'],
             label: { show: false },
-            data: [
-              { value: 45, name: 'HTTP', itemStyle: { color: '#58A6FF' } },
-              { value: 22, name: 'MQTT', itemStyle: { color: '#39D2C0' } },
-              { value: 15, name: 'DNS', itemStyle: { color: '#BC8CFF' } },
-              { value: 10, name: 'CoAP', itemStyle: { color: '#FF8800' } },
-              { value: 8, name: '其他', itemStyle: { color: '#484F58' } },
-            ],
+            data: pieItems,
           },
         ],
       });
     } else {
-      const hasData = data && data.length > 0;
-      const times = hasData ? data!.map((d) => d.time) : ['13:00', '13:15', '13:30', '13:45', '14:00', '14:15', '14:30'];
-      const normalData = hasData ? data!.map((d) => d.normal) : [1200, 1350, 1180, 1420, 1280, 1390, 1450];
-      const attackData = hasData ? data!.map((d) => d.attack) : [20, 15, 45, 38, 23, 55, 42];
+      const times = (data || []).map((d) => d.time);
+      const normalData = (data || []).map((d) => d.normal);
+      const attackData = (data || []).map((d) => d.attack);
 
       chart.setOption({
         tooltip: { trigger: 'axis' },

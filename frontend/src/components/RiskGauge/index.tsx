@@ -68,7 +68,7 @@ export default function RiskGauge({ score = 0 }: Props) {
             formatter: '{value}',
             color: '#E6EDF3',
           },
-          data: [{ value: score, name: '安全评分' }],
+          data: [{ value: score, name: '风险评分' }],
         },
       ],
     });

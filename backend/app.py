@@ -75,8 +75,11 @@ def _get_traffic_history():
             "AND timestamp < datetime('now', ? || ' minutes', 'localtime')",
             (f'-{(i+1)*5}', f'-{i*5}'),
         )
-        total = row['c'] if row else 0
-        time_label = f"{(i+1)*5}m前" if i < 6 else "现在"
+        total = row['total'] if row else 0
+        # 用实际时钟时间作为标签，如 "18:30"、"18:35"
+        from datetime import datetime, timedelta
+        t = datetime.now() - timedelta(minutes=(i+1)*5)
+        time_label = t.strftime('%H:%M')
 
         if attack_ips:
             atk_row = query_one(
@@ -120,11 +123,38 @@ def dashboard_stats():
         "SELECT id, risk_level, attack_type, src_ip, dst_ip, confidence, created_at as timestamp, merged_count, status, description FROM alerts ORDER BY created_at DESC LIMIT 5"
     )
 
-    # Risk score: count critical/high alerts vs total
-    critical_count = query_one("SELECT COUNT(*) as c FROM alerts WHERE risk_level = 'critical' AND status = 'new'")['c']
-    high_count = query_one("SELECT COUNT(*) as c FROM alerts WHERE risk_level = 'high' AND status = 'new'")['c']
-    risk_score = max(5, 100 - (critical_count * 15 + high_count * 8))
-    risk_score = min(100, risk_score)
+    # Risk score: weighted logarithmic algorithm
+    import math
+    def _count(level):
+        r = query_one(
+            "SELECT COUNT(*) as c, COALESCE(AVG(confidence), 0.8) as avg_conf "
+            "FROM alerts WHERE risk_level = ? AND status = 'new'", (level,)
+        )
+        return r['c'], r['avg_conf']
+
+    crit_c, crit_conf = _count('critical')
+    high_c, high_conf = _count('high')
+    med_c, med_conf = _count('medium')
+    low_c, low_conf = _count('low')
+
+    threat_score = (
+        8 * math.log(1 + crit_c * crit_conf) +
+        4 * math.log(1 + high_c * high_conf) +
+        1.5 * math.log(1 + med_c * med_conf) +
+        0.3 * math.log(1 + low_c * low_conf)
+    )
+
+    # Source diversity penalty
+    src_count = query_one("SELECT COUNT(DISTINCT src_ip) as c FROM alerts WHERE status = 'new'")['c']
+    source_penalty = min(10, src_count * 1.0)
+
+    # Defense bonus for blocked alerts
+    total_all = query_one("SELECT COUNT(*) as c FROM alerts")['c']
+    blocked = query_one("SELECT COUNT(*) as c FROM alerts WHERE status = 'blocked'")['c']
+    defense_bonus = min(15, (blocked / max(1, total_all)) * 15) if total_all > 0 else 0
+
+    risk_score = round(100 - threat_score - source_penalty + defense_bonus)
+    risk_score = max(5, min(100, risk_score))
 
     return jsonify({
         'total_scanned': total_traffic,

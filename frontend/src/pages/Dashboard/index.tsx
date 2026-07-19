@@ -18,11 +18,23 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchStats = () => {
     api.getDashboardStats()
       .then(setStats)
       .catch(() => setStats(FALLBACK_DASH))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { fetchStats(); }, []);
+
+  // 每 5 秒自动刷新
+  useEffect(() => {
+    const timer = setInterval(() => {
+      api.getDashboardStats()
+        .then(setStats)
+        .catch(() => {});
+    }, 10000);
+    return () => clearInterval(timer);
   }, []);
 
   if (loading) {
@@ -81,7 +93,7 @@ export default function DashboardPage() {
         </Col>
         <Col xs={24} lg={10}>
           <Card title="攻击类型分布" size="small">
-            <TrafficChart showProtocol />
+            <TrafficChart showProtocol pieData={s.attack_distribution} />
           </Card>
         </Col>
       </Row>

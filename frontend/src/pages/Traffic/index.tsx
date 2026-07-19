@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Card, Row, Col, Table, Tag, Button, Space, Statistic } from 'antd';
 import { ReloadOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons';
-import TrafficChart from '../../components/TrafficChart';
 import { api } from '../../api';
 
 export default function TrafficPage() {
@@ -80,20 +79,6 @@ export default function TrafficPage() {
               suffix={`/ ${probeStatus?.total_probes || 0}`}
               valueStyle={{ color: 'var(--risk-low)', fontSize: 22 }}
             />
-          </Card>
-        </Col>
-      </Row>
-
-      {/* Traffic Chart + Protocol Distribution */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-        <Col xs={24} lg={14}>
-          <Card title="流量趋势" size="small">
-            <TrafficChart />
-          </Card>
-        </Col>
-        <Col xs={24} lg={10}>
-          <Card title="协议分布" size="small">
-            <TrafficChart showProtocol />
           </Card>
         </Col>
       </Row>
