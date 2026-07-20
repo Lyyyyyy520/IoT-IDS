@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { Card, Row, Col, Spin } from 'antd';
 import Topology from '../../components/Topology';
 import Heatmap from '../../components/Heatmap';
-import TrafficChart from '../../components/TrafficChart';
 import MitreAttack from '../../components/MitreAttack';
 import { api } from '../../api';
 
@@ -46,12 +45,7 @@ export default function AnalysisPage() {
       </Row>
 
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} lg={14}>
-          <Card title="流量统计">
-            <TrafficChart showProtocol />
-          </Card>
-        </Col>
-        <Col xs={24} lg={10}>
+        <Col xs={24}>
           <Card title="MITRE ATT&CK 攻击链路">
             <MitreAttack data={mitreData} />
           </Card>

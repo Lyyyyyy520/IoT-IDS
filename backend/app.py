@@ -356,23 +356,56 @@ def heatmap_data():
 
 @app.route('/api/analysis/mitre')
 def mitre_data():
-    return jsonify({
-        'stages': [
-            {'name': '初始侦查', 'mitre': 'Recon', 'desc': '端口扫描探测', 'active': True},
-            {'name': '武器构建', 'mitre': 'ResourceDev', 'desc': '恶意载荷生成', 'active': True},
-            {'name': '交付投递', 'mitre': 'InitAccess', 'desc': '漏洞利用投递', 'active': True},
-            {'name': '漏洞利用', 'mitre': 'Execution', 'desc': '远程代码执行', 'active': True},
-            {'name': 'C2通信', 'mitre': 'C2', 'desc': 'C2服务器通信', 'active': True},
-            {'name': '数据窃取', 'mitre': 'Exfil', 'desc': '敏感数据外传', 'active': False},
-        ],
-        'links': [
-            {'source': 'Recon', 'target': 'ResourceDev', 'value': 25},
-            {'source': 'ResourceDev', 'target': 'InitAccess', 'value': 22},
-            {'source': 'InitAccess', 'target': 'Execution', 'value': 18},
-            {'source': 'Execution', 'target': 'C2', 'value': 15},
-            {'source': 'C2', 'target': 'Exfil', 'value': 8},
-        ],
-    })
+    """根据告警数据动态生成 MITRE ATT&CK 链路"""
+    # 攻击类型 → MITRE 阶段映射
+    stage_map = {
+        'PortScan': 'Recon',
+        'BruteForce': 'InitAccess',
+        'Mirai': 'Execution',
+        'Gafgyt': 'Execution',
+        'Hajime': 'Execution',
+        'exploit': 'Execution',
+        'DDoS': 'C2',
+        'Other': 'Exfil',
+    }
+    # 统计各阶段告警数
+    rows = query_all("SELECT attack_type FROM alerts")
+    stage_counts = {}
+    for r in rows:
+        stage = stage_map.get(r['attack_type'], 'Recon')
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+
+    stages_def = [
+        {'name': '初始侦查', 'mitre': 'Recon', 'desc': '端口扫描探测'},
+        {'name': '初始访问', 'mitre': 'InitAccess', 'desc': '漏洞利用与暴力破解'},
+        {'name': '漏洞利用', 'mitre': 'Execution', 'desc': '远程代码/命令执行'},
+        {'name': 'C2通信', 'mitre': 'C2', 'desc': 'C2服务器通信与控制'},
+        {'name': '数据窃取', 'mitre': 'Exfil', 'desc': '敏感数据外传'},
+    ]
+
+    max_count = max(stage_counts.values()) if stage_counts else 1
+    stages = []
+    for s in stages_def:
+        cnt = stage_counts.get(s['mitre'], 0)
+        stages.append({
+            **s,
+            'alert_count': cnt,
+            'active': cnt > 0,
+            'intensity': round(cnt / max_count * 100),
+        })
+
+    total_alerts = sum(stage_counts.values()) or 1
+    links = []
+    for i in range(len(stages_def) - 1):
+        src = stages_def[i]['mitre']
+        tgt = stages_def[i + 1]['mitre']
+        links.append({
+            'source': src,
+            'target': tgt,
+            'value': round((stage_counts.get(src, 0) + stage_counts.get(tgt, 0)) / total_alerts * 100),
+        })
+
+    return jsonify({'stages': stages, 'links': links})
 
 
 # ---- Detection ----

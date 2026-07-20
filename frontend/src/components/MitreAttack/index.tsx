@@ -9,16 +9,15 @@ interface Props {
 }
 
 const FALLBACK_STAGES: MitreStage[] = [
-  { name: '初始侦查', mitre: 'Recon', desc: '端口扫描探测', active: true },
-  { name: '武器构建', mitre: 'ResourceDev', desc: '恶意载荷生成', active: true },
-  { name: '交付投递', mitre: 'InitAccess', desc: '漏洞利用投递', active: true },
-  { name: '漏洞利用', mitre: 'Execution', desc: '远程代码执行', active: true },
-  { name: 'C2通信', mitre: 'C2', desc: 'C2服务器通信', active: true },
+  { name: '初始侦查', mitre: 'Recon', desc: '端口扫描探测', active: false },
+  { name: '初始访问', mitre: 'InitAccess', desc: '漏洞利用与暴力破解', active: false },
+  { name: '漏洞利用', mitre: 'Execution', desc: '远程代码执行', active: false },
+  { name: 'C2通信', mitre: 'C2', desc: 'C2服务器通信', active: false },
   { name: '数据窃取', mitre: 'Exfil', desc: '敏感数据外传', active: false },
 ];
 
 const stageIcons: Record<string, string> = {
-  '初始侦查': '🔍', '武器构建': '⚙️', '交付投递': '📨', '漏洞利用': '💥', 'C2通信': '🕸️', '数据窃取': '📤',
+  '初始侦查': '🔍', '初始访问': '🔑', '漏洞利用': '💥', 'C2通信': '🕸️', '数据窃取': '📤',
 };
 
 export default function MitreAttack({ data }: Props) {
