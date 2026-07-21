@@ -71,7 +71,25 @@ export interface BlocklistResponse {
 export interface HealthResponse {
   status: string;
   model_loaded: boolean;
+  model_name?: string | null;
+  model_path?: string | null;
   uptime: number;
+}
+
+export interface ModelItem {
+  id: string;
+  name: string;
+  filename: string;
+  path: string;
+  size_bytes: number;
+  updated_at: number;
+  active: boolean;
+}
+
+export interface ModelListResponse {
+  items: ModelItem[];
+  active_model_id: string | null;
+  model_loaded: boolean;
 }
 
 // ---- API Methods ----
@@ -85,13 +103,13 @@ export const api = {
     return request<AlertListResponse>(`/alerts${query}`);
   },
 
-  blockIp: (id: number) => request<{ success: boolean }>(`/alerts/${id}/block`, { method: 'POST' }),
+  blockIp: (id: number) => request<{ success: boolean; message: string }>(`/alerts/${id}/block`, { method: 'POST' }),
 
   unblockIp: (id: number) => request<{ success: boolean; message: string }>(`/alerts/${id}/unblock`, { method: 'POST' }),
 
   traceAlert: (id: number) => request<{ success: boolean; trace_info: string }>(`/alerts/${id}/trace`, { method: 'POST' }),
 
-  markFalsePositive: (id: number) => request<{ success: boolean }>(`/alerts/${id}/false-positive`, { method: 'POST' }),
+  markFalsePositive: (id: number) => request<{ success: boolean; message: string }>(`/alerts/${id}/false-positive`, { method: 'POST' }),
 
   unmarkFalsePositive: (id: number) => request<{ success: boolean; message: string }>(`/alerts/${id}/unmark-false-positive`, { method: 'POST' }),
 
@@ -116,9 +134,21 @@ export const api = {
 
   // Logs
   getAuditLogs: () => request<{ items: any[] }>('/logs/audit'),
-  getTrafficLogs: () => request<{ items: any[] }>('/logs/traffic'),
+  getArchivedTrafficLogs: () => request<{ items: any[] }>('/logs/traffic'),
 
   getConfig: () => request<any>('/config'),
+
+  getModels: () => request<ModelListResponse>('/models'),
+  selectModel: (modelId: string) => request<{ success: boolean; message: string; active_model_id: string; model: ModelItem }>(
+    '/models/select',
+    { method: 'POST', body: JSON.stringify({ model_id: modelId }) },
+  ),
+  uploadModel: (file: File, dataFile?: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (dataFile) formData.append('data_file', dataFile);
+    return fetch(`${BASE}/models/upload`, { method: 'POST', body: formData }).then((r) => r.json());
+  },
 
   getTopology: () => request<any>('/analysis/topology'),
 
