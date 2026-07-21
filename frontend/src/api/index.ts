@@ -71,7 +71,25 @@ export interface BlocklistResponse {
 export interface HealthResponse {
   status: string;
   model_loaded: boolean;
+  model_name?: string | null;
+  model_path?: string | null;
   uptime: number;
+}
+
+export interface ModelItem {
+  id: string;
+  name: string;
+  filename: string;
+  path: string;
+  size_bytes: number;
+  updated_at: number;
+  active: boolean;
+}
+
+export interface ModelListResponse {
+  items: ModelItem[];
+  active_model_id: string | null;
+  model_loaded: boolean;
 }
 
 // ---- API Methods ----
@@ -119,6 +137,17 @@ export const api = {
   getArchivedTrafficLogs: () => request<{ items: any[] }>('/logs/traffic'),
 
   getConfig: () => request<any>('/config'),
+
+  getModels: () => request<ModelListResponse>('/models'),
+  selectModel: (modelId: string) => request<{ success: boolean; message: string; active_model_id: string; model: ModelItem }>(
+    '/models/select',
+    { method: 'POST', body: JSON.stringify({ model_id: modelId }) },
+  ),
+  uploadModel: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return fetch(`${BASE}/models/upload`, { method: 'POST', body: formData }).then((r) => r.json());
+  },
 
   getTopology: () => request<any>('/analysis/topology'),
 

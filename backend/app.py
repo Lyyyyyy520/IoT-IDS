@@ -3,6 +3,7 @@ IoT IDS Backend — Flask API Server v2.0
 """
 from flask import Flask, jsonify, session, request
 from flask_cors import CORS
+from werkzeug.utils import secure_filename
 from datetime import datetime
 import os
 
@@ -23,17 +24,92 @@ from api.probe import probe_bp
 app.register_blueprint(probe_bp)
 
 # ---- Health Check ----
-_MODEL_PATH = os.path.join(os.path.dirname(__file__), 'data', 'best_model.onnx')
-_model_loaded = os.path.exists(_MODEL_PATH)
+from models.inference import (
+    get_active_model_path,
+    get_engine,
+    is_active_model_loaded,
+    list_models,
+    resolve_model_path,
+    switch_model,
+)
+
+_USER_MODEL_DIR = os.path.join(os.path.dirname(__file__), 'data', 'models')
 
 @app.route('/api/health')
 def health():
+    active_model_path = get_active_model_path()
+    engine = get_engine()
     return jsonify({
         'status': 'ok',
-        'model_loaded': _model_loaded,
-        'model_path': _MODEL_PATH if _model_loaded else None,
+        'model_loaded': engine.model_loaded,
+        'model_path': active_model_path,
+        'model_name': os.path.basename(active_model_path) if active_model_path else None,
         'uptime': 0,
         'timestamp': datetime.now().isoformat(),
+    })
+
+
+@app.route('/api/models', methods=['GET'])
+def models_list():
+    active_model_path = get_active_model_path()
+    return jsonify({
+        'items': list_models(),
+        'active_model_id': os.path.basename(active_model_path) if active_model_path else None,
+        'model_loaded': is_active_model_loaded(),
+    })
+
+
+@app.route('/api/models/select', methods=['POST'])
+def models_select():
+    data = request.get_json() or {}
+    model_id = data.get('model_id', '')
+    model_path = resolve_model_path(model_id)
+    if not model_path:
+        return jsonify({'success': False, 'message': '模型不存在'}), 404
+    if not switch_model(model_path):
+        return jsonify({'success': False, 'message': '模型加载失败，请确认文件为有效 ONNX 模型'}), 400
+    log_action('switch_model', f'model={os.path.basename(model_path)}')
+    return jsonify({
+        'success': True,
+        'message': '模型切换成功',
+        'active_model_id': os.path.basename(model_path),
+        'model': next((m for m in list_models() if m['path'] == os.path.abspath(model_path)), None),
+    })
+
+
+@app.route('/api/models/upload', methods=['POST'])
+def models_upload():
+    upload = request.files.get('file')
+    if not upload:
+        return jsonify({'success': False, 'message': '请选择要上传的 ONNX 模型文件'}), 400
+
+    original_name = upload.filename or ''
+    if not original_name.lower().endswith('.onnx'):
+        return jsonify({'success': False, 'message': '仅支持上传 .onnx 模型文件'}), 400
+
+    os.makedirs(_USER_MODEL_DIR, exist_ok=True)
+    filename = secure_filename(original_name) or f'user_model_{os.urandom(4).hex()}.onnx'
+    if not filename.lower().endswith('.onnx'):
+        filename = f'{filename}.onnx'
+
+    base, ext = os.path.splitext(filename)
+    target_path = os.path.join(_USER_MODEL_DIR, filename)
+    counter = 1
+    while os.path.exists(target_path):
+        target_path = os.path.join(_USER_MODEL_DIR, f'{base}_{counter}{ext}')
+        counter += 1
+
+    upload.save(target_path)
+    if not switch_model(target_path):
+        return jsonify({'success': False, 'message': '文件已上传，但模型加载失败，请检查 ONNX 格式'}), 400
+
+    log_action('upload_model', f'model={os.path.basename(target_path)}')
+    return jsonify({
+        'success': True,
+        'message': '模型上传并切换成功',
+        'active_model_id': os.path.basename(target_path),
+        'model': next((m for m in list_models() if m['path'] == os.path.abspath(target_path)), None),
+        'items': list_models(),
     })
 
 # ---- Authentication Routes ----
@@ -889,15 +965,19 @@ def logs_traffic():
 # ---- Configuration ----
 @app.route('/api/config', methods=['GET'])
 def get_config():
+    active_model_path = get_active_model_path()
+    active_model_name = os.path.splitext(os.path.basename(active_model_path))[0] if active_model_path else '未加载'
     return jsonify({
         'detection_mode': 'offline',
         'confidence_threshold': 0.85,
         'merge_window_minutes': 5,
         'auto_block': False,
-        'model_name': 'CNN-LSTM-Light',
+        'model_name': active_model_name,
         'model_version': 'v1.0',
         'input_features': 21,
         'output_classes': 5,
+        'active_model_id': os.path.basename(active_model_path) if active_model_path else None,
+        'available_models': list_models(),
     })
 
 
