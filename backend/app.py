@@ -904,4 +904,5 @@ def get_config():
 if __name__ == '__main__':
     print('IoT IDS Backend starting...')
     print('    http://localhost:5000/api/health')
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    debug_mode = os.environ.get('IOT_IDS_DEBUG', '0').strip().lower() in {'1', 'true', 'yes', 'on'}
+    app.run(host='0.0.0.0', port=5000, debug=debug_mode, use_reloader=debug_mode)

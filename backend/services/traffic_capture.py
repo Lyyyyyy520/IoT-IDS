@@ -14,12 +14,15 @@ from typing import Optional, Callable
 from database import execute
 from services.rule_engine import get_rule_engine, FlowRecord
 
-# Try importing Scapy
+# Try importing Scapy. A broken packet-capture driver or platform-specific
+# Scapy initialization error must not prevent the rest of the web system from starting.
+SCAPY_ERROR = ''
 try:
     from scapy.all import sniff, IP, TCP, UDP, ICMP
     SCAPY_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     SCAPY_AVAILABLE = False
+    SCAPY_ERROR = str(exc)
 
 # Try ONNX inference
 try:
@@ -38,6 +41,8 @@ class TrafficCapture:
         self.thread: Optional[threading.Thread] = None
         self.packet_count = 0
         self.alert_count = 0
+        self.capture_mode = 'stopped'
+        self.last_error = SCAPY_ERROR
         self.on_alert: Optional[Callable] = None  # callback(alert_dict)
 
     def start(self, interface: Optional[str] = None, use_scapy: bool = False):
@@ -46,16 +51,20 @@ class TrafficCapture:
             return {'success': False, 'message': '抓包已在运行中'}
 
         self.running = True
+        self.last_error = SCAPY_ERROR if not SCAPY_AVAILABLE else ''
         if use_scapy and SCAPY_AVAILABLE:
+            self.capture_mode = 'scapy'
             self.thread = threading.Thread(target=self._capture_scapy, args=(interface,), daemon=True)
         else:
+            self.capture_mode = 'simulation'
             self.thread = threading.Thread(target=self._capture_simulate, daemon=True)
         self.thread.start()
-        return {'success': True, 'message': '抓包已启动', 'mode': 'scapy' if (use_scapy and SCAPY_AVAILABLE) else 'simulation'}
+        return {'success': True, 'message': '抓包已启动', 'mode': self.capture_mode}
 
     def stop(self):
         """Stop capture."""
         self.running = False
+        self.capture_mode = 'stopped'
         return {'success': True, 'packet_count': self.packet_count, 'alert_count': self.alert_count}
 
     def status(self):
@@ -64,7 +73,9 @@ class TrafficCapture:
             'running': self.running,
             'packet_count': self.packet_count,
             'alert_count': self.alert_count,
+            'mode': self.capture_mode,
             'scapy_available': SCAPY_AVAILABLE,
+            'scapy_error': self.last_error,
             'onnx_available': ONNX_AVAILABLE,
         }
 
@@ -143,7 +154,15 @@ class TrafficCapture:
 
             self._process_packet(ip.src, ip.dst, sport, dport, proto, len(pkt), flags)
 
-        sniff(prn=packet_handler, store=False, timeout=1)
+        try:
+            while self.running:
+                sniff(prn=packet_handler, store=False, timeout=1, iface=interface)
+        except Exception as exc:
+            # Keep the traffic page usable even if Npcap/driver access fails at runtime.
+            self.last_error = str(exc)
+            self.capture_mode = 'simulation'
+            if self.running:
+                self._capture_simulate()
 
     def _capture_simulate(self):
         """Simulated capture mode — generates realistic test traffic."""
