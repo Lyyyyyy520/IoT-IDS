@@ -78,10 +78,17 @@ export default function SettingsPage() {
     }
   };
 
-  const handleUploadModel = async (file: File) => {
+  const handleUploadModel = async (files: File[]) => {
+    const onnxFile = files.find((file) => file.name.toLowerCase().endsWith('.onnx'));
+    const dataFile = files.find((file) => file.name.toLowerCase().endsWith('.data'));
+    if (!onnxFile) {
+      message.error('请选择 .onnx 模型文件');
+      return;
+    }
+
     setUploadingModel(true);
     try {
-      const result = await api.uploadModel(file);
+      const result = await api.uploadModel(onnxFile, dataFile);
       if (result.success) {
         message.success(result.message || '模型上传成功');
         await loadModels();
@@ -93,7 +100,6 @@ export default function SettingsPage() {
     } finally {
       setUploadingModel(false);
     }
-    return false;
   };
 
   return (
@@ -155,13 +161,19 @@ export default function SettingsPage() {
                 }))}
               />
               <Upload
-                accept=".onnx"
+                accept=".onnx,.data"
+                multiple
                 showUploadList={false}
-                beforeUpload={(file) => handleUploadModel(file)}
+                beforeUpload={(file, fileList) => {
+                  if (file.uid === fileList[0]?.uid) {
+                    handleUploadModel(fileList);
+                  }
+                  return Upload.LIST_IGNORE;
+                }}
                 disabled={uploadingModel}
               >
                 <Button icon={<UploadOutlined />} loading={uploadingModel}>
-                  上传 ONNX
+                  上传模型
                 </Button>
               </Upload>
             </Space.Compact>

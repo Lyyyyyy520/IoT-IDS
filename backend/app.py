@@ -100,6 +100,14 @@ def models_upload():
         counter += 1
 
     upload.save(target_path)
+    data_upload = request.files.get('data_file')
+    if data_upload:
+        data_filename = secure_filename(data_upload.filename or '') or f'{os.path.basename(target_path)}.data'
+        if not data_filename.endswith('.data'):
+            return jsonify({'success': False, 'message': '外部权重文件必须以 .data 结尾'}), 400
+        data_target_path = os.path.join(_USER_MODEL_DIR, data_filename)
+        data_upload.save(data_target_path)
+
     if not switch_model(target_path):
         return jsonify({'success': False, 'message': '文件已上传，但模型加载失败，请检查 ONNX 格式'}), 400
 

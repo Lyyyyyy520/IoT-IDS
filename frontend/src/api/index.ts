@@ -143,9 +143,10 @@ export const api = {
     '/models/select',
     { method: 'POST', body: JSON.stringify({ model_id: modelId }) },
   ),
-  uploadModel: (file: File) => {
+  uploadModel: (file: File, dataFile?: File) => {
     const formData = new FormData();
     formData.append('file', file);
+    if (dataFile) formData.append('data_file', dataFile);
     return fetch(`${BASE}/models/upload`, { method: 'POST', body: formData }).then((r) => r.json());
   },
 
