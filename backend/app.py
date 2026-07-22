@@ -64,34 +64,30 @@ def auth_me():
 
 # ---- Dashboard Stats ----
 def _get_traffic_history():
-    """统计最近 7 个 5 分钟间隔的流量，不足的填 0"""
+    """统计最近 7 个 5 分钟间隔的流量"""
     result = []
-    attack_ips = [r['src_ip'] for r in query_all("SELECT DISTINCT src_ip FROM alerts")]
+    from datetime import datetime, timedelta
 
     for i in range(6, -1, -1):
-        row = query_one(
+        total_row = query_one(
             "SELECT COUNT(*) as total FROM traffic_logs "
             "WHERE timestamp >= datetime('now', ? || ' minutes', 'localtime') "
             "AND timestamp < datetime('now', ? || ' minutes', 'localtime')",
             (f'-{(i+1)*5}', f'-{i*5}'),
         )
-        total = row['total'] if row else 0
-        # 用实际时钟时间作为标签，如 "18:30"、"18:35"
-        from datetime import datetime, timedelta
-        t = datetime.now() - timedelta(minutes=(i+1)*5)
-        time_label = t.strftime('%H:%M')
+        # 攻击流量：ONNX 模型标记为非 normal 的流量
+        atk_row = query_one(
+            "SELECT COUNT(*) as c FROM traffic_logs "
+            "WHERE timestamp >= datetime('now', ? || ' minutes', 'localtime') "
+            "AND timestamp < datetime('now', ? || ' minutes', 'localtime') "
+            "AND onnx_label IS NOT NULL AND onnx_label != '' AND onnx_label != 'normal'",
+            (f'-{(i+1)*5}', f'-{i*5}'),
+        )
+        total = total_row['total'] if total_row else 0
+        atk = atk_row['c'] if atk_row else 0
 
-        if attack_ips:
-            atk_row = query_one(
-                "SELECT COUNT(*) as c FROM traffic_logs "
-                "WHERE timestamp >= datetime('now', ? || ' minutes', 'localtime') "
-                "AND timestamp < datetime('now', ? || ' minutes', 'localtime') "
-                "AND src_ip IN ({})".format(','.join('?' * len(attack_ips))),
-                [f'-{(i+1)*5}', f'-{i*5}'] + attack_ips,
-            )
-            atk = atk_row['c'] if atk_row else 0
-        else:
-            atk = 0
+        t = datetime.now() - timedelta(minutes=i*5)
+        time_label = t.strftime('%H:%M')
 
         result.append({'time': time_label, 'normal': max(0, total - atk), 'attack': atk})
 
@@ -112,11 +108,21 @@ def dashboard_stats():
     online_assets = query_one("SELECT COUNT(*) as c FROM assets WHERE status = 'online'")['c']
     total_traffic = query_one("SELECT COUNT(*) as c FROM traffic_logs")['c']
 
-    # Attack distribution
+    # 攻击类型分布：从 ONNX 模型分类结果统计
     dist_rows = query_all(
-        "SELECT attack_type, COUNT(*) as count FROM alerts GROUP BY attack_type ORDER BY count DESC LIMIT 6"
+        "SELECT onnx_label as label, COUNT(*) as count FROM traffic_logs "
+        "WHERE onnx_label IS NOT NULL AND onnx_label != '' "
+        "GROUP BY onnx_label ORDER BY count DESC LIMIT 7"
     )
-    attack_distribution = [{'type': r['attack_type'], 'count': r['count']} for r in dist_rows]
+    type_name_map = {
+        'normal': '正常流量', 'mirai': 'Mirai', 'gafgyt': 'Gafgyt',
+        'other': '其他攻击',
+        'ddos': 'Mirai', 'dos': 'Gafgyt', 'recon': '其他攻击', 'theft': '其他攻击',
+    }
+    attack_distribution = [
+        {'type': type_name_map.get(r['label'], r['label']).title(), 'count': r['count']}
+        for r in dist_rows
+    ]
 
     # Recent 5 alerts
     recent = query_all(
@@ -359,20 +365,16 @@ def mitre_data():
     """根据告警数据动态生成 MITRE ATT&CK 链路"""
     # 攻击类型 → MITRE 阶段映射
     stage_map = {
-        'PortScan': 'Recon',
-        'BruteForce': 'InitAccess',
         'Mirai': 'Execution',
         'Gafgyt': 'Execution',
-        'Hajime': 'Execution',
-        'exploit': 'Execution',
-        'DDoS': 'C2',
         'Other': 'Exfil',
+        'Normal': 'Recon',
     }
     # 统计各阶段告警数
     rows = query_all("SELECT attack_type FROM alerts")
     stage_counts = {}
     for r in rows:
-        stage = stage_map.get(r['attack_type'], 'Recon')
+        stage = stage_map.get(r['attack_type'], 'Exfil')
         stage_counts[stage] = stage_counts.get(stage, 0) + 1
 
     stages_def = [
@@ -482,7 +484,7 @@ def export_excel():
         [2, '高危', 'Mirai', '192.168.1.200', '192.168.1.1', 0.95, 8, '2026-07-14 14:20:47', '新', 'Mirai 暴力破解 Telnet'],
         [3, '中危', 'Gafgyt', '10.0.0.23', '10.0.0.1', 0.89, 3, '2026-07-14 14:28:15', '新', 'Gafgyt DDoS 攻击'],
         [4, '中危', 'Gafgyt', '10.0.0.45', '10.0.0.100', 0.87, 1, '2026-07-14 13:55:10', '已阅', 'Gafgyt UDP Flood'],
-        [5, '低危', 'Hajime', '172.16.0.8', '172.16.0.1', 0.76, 1, '2026-07-14 14:25:01', '新', 'Hajime P2P 传播'],
+        [5, '低危', 'Other', '172.16.0.8', '172.16.0.1', 0.76, 1, '2026-07-14 14:25:01', '新', '其他攻击行为'],
     ]
     for row in alerts:
         ws.append(row)
@@ -516,7 +518,8 @@ from services.traffic_capture import get_capture
 def capture_start():
     data = request.get_json() or {}
     use_scapy = data.get('use_scapy', False)
-    result = get_capture().start(use_scapy=use_scapy)
+    attack_ratio = data.get('attack_ratio', 0.25)
+    result = get_capture().start(use_scapy=use_scapy, attack_ratio=attack_ratio)
     log_action('capture_start', f'mode={result["mode"]}')
     return jsonify(result)
 
@@ -889,16 +892,27 @@ def logs_traffic():
 # ---- Configuration ----
 @app.route('/api/config', methods=['GET'])
 def get_config():
+    from database import get_config as gc
     return jsonify({
-        'detection_mode': 'offline',
-        'confidence_threshold': 0.85,
-        'merge_window_minutes': 5,
-        'auto_block': False,
-        'model_name': 'CNN-LSTM-Light',
-        'model_version': 'v1.0',
-        'input_features': 21,
-        'output_classes': 5,
+        'detection_mode': gc('detection_mode', 'offline'),
+        'confidence_threshold': float(gc('confidence_threshold', '0.85')),
+        'merge_window_minutes': int(gc('merge_window_minutes', '5')),
+        'auto_block': gc('auto_block', 'false') == 'true',
+        'model_name': 'CNN+LSTM Hybrid',
+        'model_version': 'v3.0',
+        'input_features': 20,
+        'output_classes': 4,
     })
+
+
+@app.route('/api/config', methods=['PUT'])
+def update_config():
+    from database import set_config as sc
+    data = request.get_json() or {}
+    for key in ('detection_mode', 'confidence_threshold', 'merge_window_minutes', 'auto_block'):
+        if key in data:
+            sc(key, str(data[key]))
+    return jsonify({'success': True})
 
 
 if __name__ == '__main__':

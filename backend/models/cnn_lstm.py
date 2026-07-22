@@ -8,7 +8,7 @@ Architecture:
   - Fusion: concatenate spatial + temporal features → FC → 5-class softmax
 
 Input:  (batch, 1, 21)  — 21-dim feature vector reshaped as 1-channel
-Output: (batch, 5)      — [Normal, Mirai, Gafgyt, Hajime, Other]
+Output: (batch, num_classes) — [Normal, Mirai, Gafgyt, Other]
 """
 import torch
 import torch.nn as nn
@@ -61,7 +61,7 @@ class CNNLSTMModel(nn.Module):
     def __init__(
         self,
         input_features: int = 21,
-        num_classes: int = 5,
+        num_classes: int = 4,
         lstm_hidden: int = 128,
         dropout: float = 0.25,
     ):
@@ -176,5 +176,5 @@ if __name__ == '__main__':
     with torch.no_grad():
         y = m(x)
     print(f'Input:  {x.shape}')
-    print(f'Output: {y.shape} (logits for 5 classes)')
+    print(f'Output: {y.shape}')
     print(f'Predicted classes: {y.argmax(dim=1).tolist()}')

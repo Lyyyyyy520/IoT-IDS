@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Card, Row, Col, Table, Tag, Button, Space, Statistic } from 'antd';
+import { Card, Row, Col, Table, Tag, Button, Space, Statistic, Slider } from 'antd';
 import { ReloadOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons';
 import { api } from '../../api';
 
@@ -8,6 +8,21 @@ export default function TrafficPage() {
   const [probeStatus, setProbeStatus] = useState<any>(null);
   const [trafficLogs, setTrafficLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [attackRatio, setAttackRatio] = useState(() => {
+    const saved = localStorage.getItem('attackRatio');
+    return saved ? parseInt(saved) : 25;
+  });
+
+  const handleRatioChange = (v: number) => {
+    setAttackRatio(v);
+    localStorage.setItem('attackRatio', String(v));
+  };
+
+  const handleStartCapture = () => {
+    api.startCapture(false, attackRatio / 100).then(() => {
+      fetchStatus();
+    });
+  };
 
   const fetchStatus = useCallback(() => {
     setLoading(true);
@@ -24,11 +39,11 @@ export default function TrafficPage() {
 
   useEffect(() => { fetchStatus(); }, [fetchStatus]);
 
-  const handleStartCapture = () => {
-    api.startCapture(false).then(() => {
-      fetchStatus();
-    });
-  };
+  // 每5秒自动刷新抓包状态
+  useEffect(() => {
+    const timer = setInterval(fetchStatus, 5000);
+    return () => clearInterval(timer);
+  }, [fetchStatus]);
 
   const handleStopCapture = () => {
     api.stopCapture().then(() => {
@@ -44,6 +59,22 @@ export default function TrafficPage() {
           <Button icon={<ReloadOutlined />} onClick={fetchStatus} loading={loading}>刷新</Button>
         </Space>
       </div>
+
+      {/* Attack Ratio Slider */}
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>攻击比例</span>
+          <Slider
+            min={0} max={100} value={attackRatio}
+            onChange={handleRatioChange}
+            style={{ flex: 1 }}
+            tooltip={{ formatter: (v) => `${v}%` }}
+          />
+          <span style={{ color: attackRatio > 50 ? 'var(--risk-critical)' : 'var(--text-secondary)', fontWeight: 600, minWidth: 40, textAlign: 'right' }}>
+            {attackRatio}%
+          </span>
+        </div>
+      </Card>
 
       {/* Capture Control */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>

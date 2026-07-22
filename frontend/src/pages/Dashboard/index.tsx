@@ -98,21 +98,8 @@ export default function DashboardPage() {
         </Col>
       </Row>
 
-      {/* Row 3: TOP5 IPs + Recent Alerts */}
+      {/* Row 3: TOP5 + Recent Alerts */}
       <Row gutter={[16, 16]}>
-        <Col xs={24} lg={10}>
-          <Card title="最近告警" size="small" styles={{ body: { padding: '4px 0' } }}>
-            {s.recent_alerts?.length ? (
-              s.recent_alerts.map((a: any) => (
-                <AlertCard key={a.id} alert={a} compact />
-              ))
-            ) : (
-              <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)', fontSize: 13 }}>
-                ✅ 暂无告警，系统运行正常
-              </div>
-            )}
-          </Card>
-        </Col>
         <Col xs={24} lg={14}>
           <Card title="攻击来源 TOP 5" size="small">
             <Table
@@ -127,6 +114,19 @@ export default function DashboardPage() {
               locale={{ emptyText: '暂无攻击数据' }}
               style={{ minHeight: 200 }}
             />
+          </Card>
+        </Col>
+        <Col xs={24} lg={10}>
+          <Card title="最近告警" size="small" styles={{ body: { padding: '4px 0' } }}>
+            {s.recent_alerts?.length ? (
+              s.recent_alerts.map((a: any) => (
+                <AlertCard key={a.id} alert={a} compact />
+              ))
+            ) : (
+              <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)', fontSize: 13 }}>
+                ✅ 暂无告警，系统运行正常
+              </div>
+            )}
           </Card>
         </Col>
       </Row>

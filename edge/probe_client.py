@@ -60,14 +60,14 @@ ALERT_TEMPLATES = [
     },
     {
         'risk_level': 'medium',
-        'attack_type': 'Hajime',
+        'attack_type': 'Other',
         'src_ip': '172.20.0.50',
         'dst_ip': '192.168.1.40',
         'src_port': 46370,
         'dst_port': 46370,
         'protocol': 'TCP',
         'confidence': 0.78,
-        'description': 'Suricata: ET MALWARE Hajime P2P Beacon',
+        'description': 'Suricata: ET Other Suspicious Activity',
     },
 ]
 

@@ -53,15 +53,23 @@ export default function Topology({ data }: Props) {
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove();
     const width = svgRef.current.clientWidth;
-    const height = 340;
+    const height = 380;
 
     const simulation = d3.forceSimulation(nodes as any)
-      .force('link', d3.forceLink(links).id((d: any) => d.id).distance(80))
-      .force('charge', d3.forceManyBody().strength(-300))
+      .force('link', d3.forceLink(links).id((d: any) => d.id).distance(60))
+      .force('charge', d3.forceManyBody().strength(-150))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide(30));
+      .force('collision', d3.forceCollide(20))
+      .force('x', d3.forceX(width / 2).strength(0.05))
+      .force('y', d3.forceY(height / 2).strength(0.05));
 
     const g = svg.append('g');
+
+    // 缩放/平移
+    const zoom = d3.zoom()
+      .scaleExtent([0.5, 3])
+      .on('zoom', (e) => { g.attr('transform', e.transform); });
+    svg.call(zoom as any);
 
     g.selectAll('line').data(links).join('line')
       .attr('stroke', '#30363D').attr('stroke-width', 1.5).attr('stroke-opacity', 0.8);
@@ -105,7 +113,7 @@ export default function Topology({ data }: Props) {
 
   return (
     <div className="topology-container" style={{ position: 'relative' }}>
-      <svg ref={svgRef} style={{ width: '100%', height: 340 }} />
+      <svg ref={svgRef} style={{ width: '100%', height: 380 }} viewBox="0 0 600 380" preserveAspectRatio="xMidYMid meet" />
       {selectedNode && (
         <div style={{
           position: 'absolute', top: 12, right: 12,

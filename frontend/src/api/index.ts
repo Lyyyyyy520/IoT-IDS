@@ -116,9 +116,9 @@ export const api = {
 
   // Logs
   getAuditLogs: () => request<{ items: any[] }>('/logs/audit'),
-  getTrafficLogs: () => request<{ items: any[] }>('/logs/traffic'),
 
   getConfig: () => request<any>('/config'),
+  updateConfig: (data: any) => request<any>('/config', { method: 'PUT', body: JSON.stringify(data) }),
 
   getTopology: () => request<any>('/analysis/topology'),
 
@@ -128,7 +128,7 @@ export const api = {
 
   // Capture control
   getCaptureStatus: () => request<any>('/capture/status'),
-  startCapture: (useScapy: boolean) => request<any>('/capture/start', { method: 'POST', body: JSON.stringify({ use_scapy: useScapy }) }),
+  startCapture: (useScapy: boolean, attackRatio?: number) => request<any>('/capture/start', { method: 'POST', body: JSON.stringify({ use_scapy: useScapy, attack_ratio: attackRatio ?? 0.25 }) }),
   stopCapture: () => request<any>('/capture/stop', { method: 'POST' }),
 
   // Probe
@@ -138,7 +138,7 @@ export const api = {
   // Traffic logs
   getTrafficLogs: (params?: Record<string, string>) => {
     const query = params ? '?' + new URLSearchParams(params).toString() : '';
-    return request<any>(`/traffic/logs${query}`);
+    return request<{ items: any[] }>(`/traffic/logs${query}`);
   },
 
   uploadPcap: (file: File) => {

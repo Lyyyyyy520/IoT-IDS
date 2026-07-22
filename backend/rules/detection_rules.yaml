@@ -44,7 +44,7 @@ rules:
     name: "Telnet 暴力破解检测"
     category: bruteforce
     severity: critical
-    description: "对 Telnet 端口(23)的高频连接尝试 (Mirai 特征)"
+    description: "对 Telnet 端口(23)的高频连接尝试 (僵尸网络扫描特征)"
     pattern:
       protocol: TCP
       dst_port: 23
@@ -69,7 +69,7 @@ rules:
     name: "UDP Flood 攻击检测"
     category: ddos
     severity: critical
-    description: "短时间内大量 UDP 数据包 (Gafgyt 特征)"
+    description: "短时间内大量 UDP 数据包 (DDoS攻击特征)"
     pattern:
       protocol: UDP
       condition: packet_count > 100

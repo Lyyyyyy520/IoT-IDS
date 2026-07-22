@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS alerts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     risk_level TEXT NOT NULL,         -- critical/high/medium/low
-    attack_type TEXT NOT NULL,        -- Mirai/Gafgyt/Hajime/PortScan/BruteForce/DDoS/Other
+    attack_type TEXT NOT NULL,        -- Mirai/Gafgyt/PortScan/BruteForce/DDoS/Other
     src_ip TEXT NOT NULL,
     dst_ip TEXT NOT NULL,
     src_port INTEGER,
@@ -82,6 +82,11 @@ CREATE TABLE IF NOT EXISTS policies (
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+CREATE TABLE IF NOT EXISTS config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -110,12 +115,19 @@ def init_db():
     conn = get_db()
     conn.executescript(SCHEMA)
 
-    # Migration: add trace_info column if it doesn't exist (for DBs created before v2.0)
+    # Migration: add trace_info column if it doesn't exist
     try:
         conn.execute("ALTER TABLE alerts ADD COLUMN trace_info TEXT")
         print('[DB] Migration: added trace_info column to alerts')
     except sqlite3.OperationalError:
-        pass  # column already exists
+        pass
+
+    # Migration: add onnx_label column
+    try:
+        conn.execute("ALTER TABLE traffic_logs ADD COLUMN onnx_label TEXT DEFAULT 'normal'")
+        print('[DB] Migration: added onnx_label column to traffic_logs')
+    except sqlite3.OperationalError:
+        pass
 
     conn.commit()
 
@@ -149,6 +161,16 @@ def init_db():
             "INSERT INTO assets (name, ip_address, mac_address, device_type, status, risk_level, last_seen) VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))",
             demo_assets,
         )
+
+    # Seed default config
+    defaults = {
+        'detection_mode': 'offline',
+        'confidence_threshold': '0.85',
+        'merge_window_minutes': '5',
+        'auto_block': 'false',
+    }
+    for k, v in defaults.items():
+        conn.execute("INSERT OR IGNORE INTO config (key, value) VALUES (?,?)", (k, v))
 
     conn.commit()
     conn.close()
@@ -189,3 +211,14 @@ def execute_many(sql: str, params_list):
     conn.executemany(sql, params_list)
     conn.commit()
     conn.close()
+
+
+def get_config(key: str, default=None):
+    """Read a config value."""
+    row = query_one("SELECT value FROM config WHERE key = ?", (key,))
+    return row['value'] if row else default
+
+
+def set_config(key: str, value):
+    """Write a config value."""
+    execute("INSERT OR REPLACE INTO config (key, value) VALUES (?,?)", (key, str(value)))

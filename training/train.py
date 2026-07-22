@@ -3,7 +3,7 @@ CNN+LSTM Model Training Script
 
 Data: Expects CSV files in training/data/ with columns:
   - 21 feature columns (as named in FEATURE_NAMES)
-  - 'label' column (0=Normal, 1=Mirai, 2=Gafgyt, 3=Hajime, 4=Other)
+  - 'label' column (0=Normal, 1=Mirai, 2=Gafgyt, 3=Other)
 
 Usage:
   python train.py --data_dir ./data --epochs 50 --batch_size 256
@@ -43,59 +43,51 @@ def generate_synthetic_data(n_samples: int = 10000):
             y[i] = 0
         elif r < 0.68:  # 18% Mirai
             X[i] = np.random.normal(0.2, 0.3, 21)
-            X[i, [0, 3, 4, 18]] += np.random.uniform(0.5, 1.0, 4)  # Spike on flow/packet/syn
+            X[i, [0, 3, 4, 18]] += np.random.uniform(0.5, 1.0, 4)
             y[i] = 1
         elif r < 0.83:  # 15% Gafgyt
             X[i] = np.random.normal(0.25, 0.25, 21)
             X[i, [1, 2, 12, 13]] += np.random.uniform(0.4, 0.9, 4)
             y[i] = 2
-        elif r < 0.94:  # 11% Hajime
-            X[i] = np.random.normal(0.28, 0.2, 21)
-            X[i, [5, 6, 7]] += np.random.uniform(0.3, 0.8, 3)
-            y[i] = 3
-        else:  # 6% Other
+        else:  # 17% Other
             X[i] = np.random.normal(0.22, 0.28, 21)
-            y[i] = 4
+            y[i] = 3
 
     # Clip to [0, 1]
     X = np.clip(X, 0, 1)
     return X, y
 
 
-def load_or_generate_data(data_dir: str):
-    """Try to load CSV data, fall back to synthetic."""
-    train_csv = os.path.join(data_dir, 'train.csv')
-    test_csv = os.path.join(data_dir, 'test.csv')
+def load_data(data_dir: str):
+    """Load preprocessed CSV data."""
+    train_csv = os.path.join(data_dir, 'processed', 'train.csv')
+    test_csv = os.path.join(data_dir, 'processed', 'test.csv')
+    weights_path = os.path.join(data_dir, 'processed', 'class_weights.pkl')
 
-    if os.path.exists(train_csv) and os.path.exists(test_csv):
-        print(f'Loading data from {data_dir}...')
-        import pandas as pd
-        train_df = pd.read_csv(train_csv)
-        test_df = pd.read_csv(test_csv)
+    if not (os.path.exists(train_csv) and os.path.exists(test_csv)):
+        print(f'未找到预处理数据，请先运行: python training/preprocess.py')
+        sys.exit(1)
 
-        # Assume last column is label
-        X_train = train_df.iloc[:, :-1].values.astype(np.float32)
-        y_train = train_df.iloc[:, -1].values.astype(np.int64)
-        X_test = test_df.iloc[:, :-1].values.astype(np.float32)
-        y_test = test_df.iloc[:, -1].values.astype(np.int64)
-    else:
-        print(f'No dataset found. Generating synthetic data ({data_dir})...')
-        X, y = generate_synthetic_data(10000)
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+    print(f'加载预处理数据: {data_dir}/processed/')
+    import pandas as pd
+    train_df = pd.read_csv(train_csv)
+    test_df = pd.read_csv(test_csv)
 
-    # Normalize
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train).astype(np.float32)
-    X_test = scaler.transform(X_test).astype(np.float32)
+    X_train = train_df.iloc[:, :-1].values.astype(np.float32)
+    y_train = train_df.iloc[:, -1].values.astype(np.int64)
+    X_test = test_df.iloc[:, :-1].values.astype(np.float32)
+    y_test = test_df.iloc[:, -1].values.astype(np.int64)
 
-    # Save scaler
-    os.makedirs(os.path.join(os.path.dirname(__file__), '..', 'backend', 'data'), exist_ok=True)
-    scaler_path = os.path.join(os.path.dirname(__file__), '..', 'backend', 'data', 'scaler.pkl')
-    with open(scaler_path, 'wb') as f:
-        pickle.dump(scaler, f)
-    print(f'Scaler saved to {scaler_path}')
+    # 类别权重
+    class_weights = None
+    if os.path.exists(weights_path):
+        class_weights = torch.from_numpy(pickle.load(open(weights_path, 'rb')))
+        print(f'类别权重: {class_weights.numpy().round(4)}')
 
-    return X_train, X_test, y_train, y_test
+    print(f'特征维度: {X_train.shape[1]}, 类别数: {len(np.unique(y_train))}')
+    print(f'各类样本: {dict(zip(*np.unique(y_train, return_counts=True)))}')
+
+    return X_train, X_test, y_train, y_test, class_weights
 
 
 def train_epoch(model, loader, optimizer, criterion, device):
@@ -131,7 +123,7 @@ def evaluate(model, loader, criterion, device):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', default='./data')
-    parser.add_argument('--epochs', type=int, default=30)
+    parser.add_argument('--epochs', type=int, default=80)
     parser.add_argument('--batch_size', type=int, default=256)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--output_dir', default='../backend/data')
@@ -141,9 +133,10 @@ def main():
     print(f'Device: {device}')
 
     # Data
-    X_train, X_test, y_train, y_test = load_or_generate_data(args.data_dir)
+    X_train, X_test, y_train, y_test, class_weights = load_data(args.data_dir)
+    in_features = X_train.shape[1]
+    num_classes = len(np.unique(y_train))
     print(f'Train: {X_train.shape[0]} samples, Test: {X_test.shape[0]} samples')
-    print(f'Class distribution — Train: {np.bincount(y_train)}, Test: {np.bincount(y_test)}')
 
     train_ds = TensorDataset(torch.from_numpy(X_train), torch.from_numpy(y_train))
     test_ds = TensorDataset(torch.from_numpy(X_test), torch.from_numpy(y_test))
@@ -151,16 +144,19 @@ def main():
     test_loader = DataLoader(test_ds, batch_size=args.batch_size)
 
     # Model
-    model = create_model(input_features=21, num_classes=5).to(device)
+    model = create_model(input_features=in_features, num_classes=num_classes).to(device)
     total_params, m_params = count_parameters(model)
     print(f'Model: {total_params:,} params ({m_params:.2f}M)')
 
-    # Training setup
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    criterion = nn.CrossEntropyLoss()
+    if class_weights is not None:
+        class_weights = class_weights.to(device)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     best_acc = 0
+    best_f1 = 0
+    patience_counter = 0
     best_model_path = os.path.join(args.output_dir, 'best_model.pt')
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -173,31 +169,53 @@ def main():
         test_loss, test_acc = evaluate(model, test_loader, criterion, device)
         scheduler.step()
 
-        if test_acc > best_acc:
-            best_acc = test_acc
-            torch.save(model.state_dict(), best_model_path)
+        # 每轮计算完整指标
+        model.eval()
+        with torch.no_grad():
+            all_preds, all_labels = [], []
+            for xb, yb in test_loader:
+                logits = model(xb.to(device))
+                all_preds.extend(logits.argmax(1).cpu().tolist())
+                all_labels.extend(yb.tolist())
+        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+        epoch_prec = precision_score(all_labels, all_preds, average='weighted', zero_division=0)
+        epoch_rec = recall_score(all_labels, all_preds, average='weighted', zero_division=0)
+        epoch_f1 = f1_score(all_labels, all_preds, average='weighted', zero_division=0)
 
-        if epoch % 5 == 0 or epoch == 1:
-            print(f'Epoch {epoch:3d}/{args.epochs} | '
-                  f'Train Loss: {train_loss:.4f}, Acc: {train_acc:.4f} | '
-                  f'Test Loss: {test_loss:.4f}, Acc: {test_acc:.4f}')
+        # 早停：F1连续10轮不上升
+        if epoch_f1 > best_f1:
+            best_f1 = epoch_f1
+            best_acc = test_acc
+            patience_counter = 0
+            torch.save(model.state_dict(), best_model_path)
+        else:
+            patience_counter += 1
+
+        print(f'Epoch {epoch:3d}/{args.epochs} | '
+              f'Train Loss: {train_loss:.4f} Acc: {train_acc:.4f} | '
+              f'Test P:{epoch_prec:.4f} R:{epoch_rec:.4f} F1:{epoch_f1:.4f} | '
+              f'Best F1:{best_f1:.4f} [{"·"*patience_counter}{" "*(10-patience_counter)}]')
+
+        if patience_counter >= 10:
+            print(f'Early stopping at epoch {epoch} (F1 not improved for 10 epochs)')
+            break
 
     print(f'{">"*60}')
-    print(f'Best test accuracy: {best_acc:.4f}')
+    print(f'Best accuracy: {best_acc:.4f} | Best F1: {best_f1:.4f}')
     print(f'Model saved to: {best_model_path}')
 
     # Export to ONNX
-    export_onnx(model, best_model_path, args.output_dir)
+    export_onnx(model, best_model_path, args.output_dir, in_features)
 
 
-def export_onnx(model, weights_path, output_dir):
+def export_onnx(model, weights_path, output_dir, in_features):
     """Export trained model to ONNX format."""
     try:
         model.load_state_dict(torch.load(weights_path, map_location='cpu'))
         model.eval()
 
         onnx_path = os.path.join(output_dir, 'best_model.onnx')
-        dummy_input = torch.randn(1, 21)
+        dummy_input = torch.randn(1, in_features)
 
         torch.onnx.export(
             model,

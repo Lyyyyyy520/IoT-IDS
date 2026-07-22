@@ -55,3 +55,4 @@ temp/
 # Environment
 .env
 .env.local
+training/data/

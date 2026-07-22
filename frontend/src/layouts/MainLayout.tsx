@@ -195,8 +195,7 @@ export default function MainLayout() {
                 { value: 'all', label: '全部攻击类型' },
                 { value: 'Mirai', label: 'Mirai' },
                 { value: 'Gafgyt', label: 'Gafgyt' },
-                { value: 'Hajime', label: 'Hajime' },
-                { value: 'PortScan', label: '端口扫描' },
+                { value: 'Other', label: '其他攻击' },
               ]}
             />
             <Select

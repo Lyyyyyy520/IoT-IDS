@@ -15,9 +15,15 @@ export default function TrafficChart({ showProtocol = false, data, pieData }: Pr
     const chart = echarts.init(chartRef.current, 'dark');
 
     if (showProtocol) {
-      const colors = ['#58A6FF', '#FF8800', '#39D2C0', '#FF4444', '#BC8CFF', '#FFCC00', '#484F58'];
+      const colorMap: Record<string, string> = {
+        '正常流量': '#00CC66', 'Mirai': '#FF4444', 'Gafgyt': '#FF8800', '其他攻击': '#FFCC00',
+      };
+      const fallbackColors = ['#58A6FF', '#FF8800', '#39D2C0', '#FF4444'];
       const pieItems = pieData && pieData.length > 0
-        ? pieData.map((d, i) => ({ value: d.count, name: d.type, itemStyle: { color: colors[i % colors.length] } }))
+        ? pieData.map((d, i) => ({
+            value: d.count, name: d.type,
+            itemStyle: { color: colorMap[d.type] || fallbackColors[i % fallbackColors.length] }
+          }))
         : [{ value: 1, name: '暂无数据', itemStyle: { color: '#484F58' } }];
 
       chart.setOption({

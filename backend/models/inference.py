@@ -6,13 +6,13 @@ Loads a trained CNN+LSTM model exported as ONNX and runs inference.
 Usage:
     engine = InferenceEngine('data/best_model.onnx')
     result = engine.predict(feature_vector)  # 21-dim numpy array
-    # result = {'class': 'Mirai', 'confidence': 0.97, 'risk_level': 'critical'}
+    # result = {'class_name': 'Mirai', 'confidence': 0.97, 'risk_level': 'critical'}
 """
 import os
 import numpy as np
 from typing import Optional
 
-CLASS_NAMES = ['Normal', 'Mirai', 'Gafgyt', 'Hajime', 'Other']
+CLASS_NAMES = ['Normal', 'Mirai', 'Gafgyt', 'Other']
 
 RISK_THRESHOLDS = {
     'critical': 0.95,  # >= 0.95 AND attack class
@@ -134,15 +134,13 @@ class InferenceEngine:
         # Deterministic "random" from feature hash for demo
         h = int(hashlib.md5(x.tobytes()).hexdigest()[:8], 16) % 100
         if h < 30:
-            return self._build_result(0, 0.4 + (h / 100))
+            return self._build_result(0, 0.4 + (h / 100))   # Normal
         elif h < 55:
-            return self._build_result(1, 0.85 + (h % 15) / 100)
+            return self._build_result(1, 0.85 + (h % 15) / 100)  # Mirai
         elif h < 75:
-            return self._build_result(2, 0.80 + (h % 20) / 100)
-        elif h < 88:
-            return self._build_result(3, 0.70 + (h % 15) / 100)
+            return self._build_result(2, 0.80 + (h % 20) / 100)  # Gafgyt
         else:
-            return self._build_result(4, 0.60 + (h % 25) / 100)
+            return self._build_result(3, 0.70 + (h % 15) / 100)  # Other
 
 
 # ---- Global singleton ----

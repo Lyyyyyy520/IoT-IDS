@@ -5,7 +5,6 @@ Contains realistic Ethernet/IP/TCP packets that mimic:
 - Normal IoT device communication (MQTT, HTTP, DNS)
 - Mirai botnet scanning patterns (SYN floods to port 23)
 - Gafgyt DDoS patterns (UDP floods)
-- Hajime P2P beacon patterns
 
 Output: test_traffic.pcap
 """
@@ -203,7 +202,7 @@ for t in range(0, 300):
                           payload=b'\x00' * 64,
                           sport=random.randint(30000, 40000), dport=80)
 
-    # --- Hajime P2P Beacon ---
+    # --- Other Attack Pattern ---
     if t % 60 == 0 and t > 120:
         build_and_add(t, 'attacker2', 'c2_server', 6, 52341+t, 46370, 0x18,
                       payload=b'\x00\x00\x00\x10\x02\x00\x00\x00\x01\x00\x00\x00version=2.1',
