@@ -78,7 +78,10 @@ export interface HealthResponse {
 export const api = {
   health: () => request<HealthResponse>('/health'),
 
-  getDashboardStats: () => request<DashboardStats>('/dashboard/stats'),
+  getDashboardStats: (params?: Record<string, string>) => {
+    const q = params ? '?' + new URLSearchParams(params).toString() : '';
+    return request<DashboardStats>(`/dashboard/stats${q}`);
+  },
 
   getAlerts: (params?: Record<string, string>) => {
     const query = params ? '?' + new URLSearchParams(params).toString() : '';

@@ -63,25 +63,27 @@ def auth_me():
 
 
 # ---- Dashboard Stats ----
-def _get_traffic_history():
+def _get_traffic_history(source: str = ''):
     """统计最近 7 个 5 分钟间隔的流量"""
     result = []
     from datetime import datetime, timedelta
+    src_filter = "AND source = ?" if source else ""
+    src_params_extra = [source] if source else []
 
     for i in range(6, -1, -1):
+        p1, p2 = f'-{(i+1)*5}', f'-{i*5}'
         total_row = query_one(
-            "SELECT COUNT(*) as total FROM traffic_logs "
-            "WHERE timestamp >= datetime('now', ? || ' minutes', 'localtime') "
-            "AND timestamp < datetime('now', ? || ' minutes', 'localtime')",
-            (f'-{(i+1)*5}', f'-{i*5}'),
+            f"SELECT COUNT(*) as total FROM traffic_logs "
+            f"WHERE timestamp >= datetime('now', ? || ' minutes', 'localtime') "
+            f"AND timestamp < datetime('now', ? || ' minutes', 'localtime') {src_filter}",
+            [p1, p2] + src_params_extra,
         )
-        # 攻击流量：ONNX 模型标记为非 normal 的流量
         atk_row = query_one(
-            "SELECT COUNT(*) as c FROM traffic_logs "
-            "WHERE timestamp >= datetime('now', ? || ' minutes', 'localtime') "
-            "AND timestamp < datetime('now', ? || ' minutes', 'localtime') "
-            "AND onnx_label IS NOT NULL AND onnx_label != '' AND onnx_label != 'normal'",
-            (f'-{(i+1)*5}', f'-{i*5}'),
+            f"SELECT COUNT(*) as c FROM traffic_logs "
+            f"WHERE timestamp >= datetime('now', ? || ' minutes', 'localtime') "
+            f"AND timestamp < datetime('now', ? || ' minutes', 'localtime') "
+            f"AND onnx_label IS NOT NULL AND onnx_label != '' AND onnx_label != 'normal' {src_filter}",
+            [p1, p2] + src_params_extra,
         )
         total = total_row['total'] if total_row else 0
         atk = atk_row['c'] if atk_row else 0
@@ -96,20 +98,27 @@ def _get_traffic_history():
 
 @app.route('/api/dashboard/stats')
 def dashboard_stats():
-    # Count from real DB tables
-    total_alerts = query_one("SELECT COUNT(*) as c FROM alerts")['c']
+    source = request.args.get('source', '')  # '' = all, 'sim' or 'real'
+    src_prefix = f'[{source}]' if source else ''
+    src_where = f"AND description LIKE '{src_prefix}%'" if source else ''
+    tlog_where = f"WHERE source = '{source}'" if source else ''
+
+    total_alerts = query_one(f"SELECT COUNT(*) as c FROM alerts WHERE 1=1 {src_where}")['c']
     alerts_today = query_one(
-        "SELECT COUNT(*) as c FROM alerts WHERE date(created_at) = date('now', 'localtime')"
+        f"SELECT COUNT(*) as c FROM alerts WHERE date(created_at) = date('now', 'localtime') {src_where}"
     )['c']
     active_threats = query_one(
-        "SELECT COUNT(DISTINCT src_ip) as c FROM alerts WHERE status = 'new' AND risk_level IN ('critical','high')"
+        f"SELECT COUNT(DISTINCT src_ip) as c FROM alerts WHERE status = 'new' AND risk_level IN ('critical','high') {src_where}"
     )['c']
     total_assets = query_one("SELECT COUNT(*) as c FROM assets")['c']
     online_assets = query_one("SELECT COUNT(*) as c FROM assets WHERE status = 'online'")['c']
-    total_traffic = query_one("SELECT COUNT(*) as c FROM traffic_logs")['c']
+    total_traffic = query_one(f"SELECT COUNT(*) as c FROM traffic_logs {tlog_where}")['c'] if tlog_where else query_one("SELECT COUNT(*) as c FROM traffic_logs")
 
-    # 攻击类型分布：从 ONNX 模型分类结果统计
     dist_rows = query_all(
+        f"SELECT onnx_label as label, COUNT(*) as count FROM traffic_logs "
+        f"{tlog_where} AND onnx_label IS NOT NULL AND onnx_label != '' "
+        f"GROUP BY onnx_label ORDER BY count DESC LIMIT 7"
+    ) if tlog_where else query_all(
         "SELECT onnx_label as label, COUNT(*) as count FROM traffic_logs "
         "WHERE onnx_label IS NOT NULL AND onnx_label != '' "
         "GROUP BY onnx_label ORDER BY count DESC LIMIT 7"
@@ -124,17 +133,15 @@ def dashboard_stats():
         for r in dist_rows
     ]
 
-    # Recent 5 alerts
     recent = query_all(
-        "SELECT id, risk_level, attack_type, src_ip, dst_ip, confidence, created_at as timestamp, merged_count, status, description FROM alerts ORDER BY created_at DESC LIMIT 5"
+        f"SELECT id, risk_level, attack_type, src_ip, dst_ip, confidence, created_at as timestamp, merged_count, status, description FROM alerts WHERE 1=1 {src_where} ORDER BY created_at DESC LIMIT 5"
     )
 
-    # Risk score: weighted logarithmic algorithm
     import math
     def _count(level):
         r = query_one(
-            "SELECT COUNT(*) as c, COALESCE(AVG(confidence), 0.8) as avg_conf "
-            "FROM alerts WHERE risk_level = ? AND status = 'new'", (level,)
+            f"SELECT COUNT(*) as c, COALESCE(AVG(confidence), 0.8) as avg_conf "
+            f"FROM alerts WHERE risk_level = ? AND status = 'new' {src_where}", (level,)
         )
         return r['c'], r['avg_conf']
 
@@ -171,7 +178,7 @@ def dashboard_stats():
         'online_assets': online_assets,
         'risk_score': risk_score,
         'system_status': 'normal' if risk_score > 60 else 'warning',
-        'traffic_history': _get_traffic_history(),
+        'traffic_history': _get_traffic_history(source) if source else _get_traffic_history(),
         'attack_distribution': attack_distribution,
         'recent_alerts': recent,
     })
@@ -527,8 +534,16 @@ def export_excel():
 
 @app.route('/api/data/cleanup', methods=['POST'])
 def data_cleanup():
-    """清空历史记录"""
+    """清空全部历史数据"""
     from database import get_config
+    data = request.get_json() or {}
+    if data.get('all'):
+        # 立即清空全部
+        execute("DELETE FROM alerts")
+        execute("DELETE FROM traffic_logs")
+        execute("DELETE FROM audit_logs")
+        return jsonify({'success': True, 'message': '已清空全部历史数据'})
+    # 按保留天数清理
     days = int(get_config('retention_days', '30'))
     execute("DELETE FROM alerts WHERE created_at < datetime('now', ? || ' days', 'localtime')", (f'-{days}',))
     execute("DELETE FROM traffic_logs WHERE timestamp < datetime('now', ? || ' days', 'localtime')", (f'-{days}',))
@@ -564,10 +579,18 @@ def capture_status():
 # ---- Traffic Logs ----
 @app.route('/api/traffic/logs')
 def traffic_logs():
-    rows = query_all(
-        "SELECT id, timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length, flags "
-        "FROM traffic_logs ORDER BY timestamp DESC LIMIT 50"
-    )
+    source = request.args.get('source', '')
+    if source:
+        rows = query_all(
+            "SELECT id, timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length, flags "
+            "FROM traffic_logs WHERE source = ? ORDER BY timestamp DESC LIMIT 50",
+            (source,)
+        )
+    else:
+        rows = query_all(
+            "SELECT id, timestamp, src_ip, dst_ip, src_port, dst_port, protocol, length, flags "
+            "FROM traffic_logs ORDER BY timestamp DESC LIMIT 50"
+        )
     return jsonify({'items': rows})
 
 

@@ -23,7 +23,7 @@ for i in range(25):
         (t[0], t[1], random.choice(src_ips), '192.168.1.1',
          random.randint(1024, 65535), random.choice([80, 443, 22, 23, 1883]),
          random.choice(['TCP', 'UDP']), round(random.uniform(0.70, 0.99), 2),
-         '[演示] ' + t[2], random.choice(['new', 'new', 'new', 'reviewed', 'resolved']),
+         '[sim] ' + t[2], random.choice(['new', 'new', 'new', 'reviewed', 'resolved']),
          f'-{random.randint(0, 1440)} minutes'),
     )
 

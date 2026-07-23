@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Card, Row, Col, Spin, Table, Tag } from 'antd';
+import { Card, Row, Col, Spin, Table, Tag, Button, Space } from 'antd';
 import { ArrowUpOutlined } from '@ant-design/icons';
 import TrafficChart from '../../components/TrafficChart';
 import AlertCard from '../../components/AlertCard';
 import RiskGauge from '../../components/RiskGauge';
 import Topology from '../../components/Topology';
 import Heatmap from '../../components/Heatmap';
-import MitreAttack from '../../components/MitreAttack';
 import { api, type DashboardStats } from '../../api';
 
 const FALLBACK_DASH: DashboardStats = {
@@ -21,32 +20,34 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [topoData, setTopoData] = useState(null);
   const [heatData, setHeatData] = useState(null);
-  const [mitreData, setMitreData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [dashSource, setDashSource] = useState<'sim' | 'real'>(() => {
+    return (localStorage.getItem('dashSource') === 'real') ? 'real' : 'sim';
+  });
 
   const fetchAll = () => {
+    setLoading(true);
+    const params: Record<string, string> = { source: dashSource };
     Promise.all([
-      api.getDashboardStats().catch(() => FALLBACK_DASH),
+      api.getDashboardStats(params).catch(() => FALLBACK_DASH),
       api.getTopology().catch(() => null),
       api.getHeatmap().catch(() => null),
-      api.getMitre().catch(() => null),
-    ]).then(([s, topo, heat, mitre]) => {
+    ]).then(([s, topo, heat]) => {
       setStats(s as DashboardStats);
       setTopoData(topo);
       setHeatData(heat);
-      setMitreData(mitre);
     }).finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => { fetchAll(); }, [dashSource]);
 
   // 每 10 秒刷新 KPI
   useEffect(() => {
     const timer = setInterval(() => {
-      api.getDashboardStats().then(setStats).catch(() => {});
+      api.getDashboardStats({ source: dashSource }).then(setStats).catch(() => {});
     }, 10000);
     return () => clearInterval(timer);
-  }, []);
+  }, [dashSource]);
 
   if (loading) {
     return <div style={{ textAlign: 'center', paddingTop: 100 }}><Spin size="large" /></div>;
@@ -56,7 +57,19 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <h2 style={{ marginBottom: 20, fontSize: 20, fontWeight: 600 }}>态势感知大屏</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>态势感知大屏</h2>
+        <Space>
+          <Button type={dashSource === 'sim' ? 'primary' : 'default'} size="small"
+            onClick={() => { setDashSource('sim'); localStorage.setItem('dashSource', 'sim'); }}>
+            🎮 仿真
+          </Button>
+          <Button type={dashSource === 'real' ? 'primary' : 'default'} size="small"
+            onClick={() => { setDashSource('real'); localStorage.setItem('dashSource', 'real'); }}>
+            🛰️ 真实
+          </Button>
+        </Space>
+      </div>
 
       {/* Row 1: Risk Gauge + KPI Cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
@@ -141,14 +154,6 @@ export default function DashboardPage() {
         </Col>
       </Row>
 
-      {/* Row 5: MITRE ATT&CK */}
-      <Row gutter={[16, 16]}>
-        <Col xs={24}>
-          <Card title="MITRE ATT&CK 攻击链路" size="small">
-            <MitreAttack data={mitreData} />
-          </Card>
-        </Col>
-      </Row>
     </div>
   );
 }

@@ -84,6 +84,21 @@ def push_data():
 
     # Process alerts
     for alert in data.get('alerts', []):
+        # 匹配目标设备
+        dst_ip = alert.get('dst_ip', '')
+        device_name = None
+        if dst_ip:
+            asset_row = query_one("SELECT id, name FROM assets WHERE ip_address = ? AND device_type != 'probe'", (dst_ip,))
+            if asset_row:
+                device_name = asset_row['name']
+                # 更新设备风险等级
+                execute("UPDATE assets SET risk_level = ?, status = 'alert', last_seen = datetime('now','localtime') WHERE id = ?",
+                        (alert.get('risk_level', 'high'), asset_row['id']))
+
+        desc = f"[Probe:{probe_name}] {alert.get('description', '')}"
+        if device_name:
+            desc = f"[Probe:{probe_name}] 目标: {device_name}({dst_ip}) - {alert.get('description', '')}"
+
         execute(
             "INSERT INTO alerts (risk_level, attack_type, src_ip, dst_ip, src_port, dst_port, protocol, confidence, description, status) "
             "VALUES (?,?,?,?,?,?,?,?,?,'new')",
@@ -91,12 +106,12 @@ def push_data():
                 alert.get('risk_level', 'medium'),
                 alert.get('attack_type', 'Other'),
                 alert.get('src_ip', ''),
-                alert.get('dst_ip', ''),
+                dst_ip,
                 alert.get('src_port', 0),
                 alert.get('dst_port', 0),
                 alert.get('protocol', ''),
                 alert.get('confidence', 0.8),
-                f"[Probe:{probe_name}] {alert.get('description', '')}",
+                desc,
             ),
         )
         alerts_received += 1
@@ -104,7 +119,7 @@ def push_data():
     # Process flows
     for flow in data.get('flows', []):
         execute(
-            "INSERT INTO traffic_logs (src_ip, dst_ip, src_port, dst_port, protocol, length, flags) VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO traffic_logs (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, source) VALUES (?,?,?,?,?,?,?,?)",
             (
                 flow.get('src_ip', ''),
                 flow.get('dst_ip', ''),
@@ -113,6 +128,7 @@ def push_data():
                 flow.get('protocol', ''),
                 flow.get('length', 0),
                 flow.get('flags', ''),
+                flow.get('source', 'real'),
             ),
         )
         flows_received += 1
@@ -146,3 +162,41 @@ def probe_status():
         'offline_probes': offline,
         'alerts_from_probes': alerts_from_probes,
     })
+
+
+@probe_bp.route('/api/probe/control', methods=['POST'])
+def probe_control():
+    data = request.get_json() or {}
+    action = data.get('action', '')
+    probe_name = data.get('probe_name', '')
+    if not action or not probe_name:
+        return jsonify({'success': False}), 400
+    from database import execute
+    execute("INSERT OR REPLACE INTO config (key, value) VALUES (?,?)",
+            (f'probe_control_{probe_name}', action))
+    return jsonify({'success': True, 'action': action})
+
+
+@probe_bp.route('/api/probe/control-status', methods=['GET'])
+def probe_control_status():
+    from database import query_one, execute
+    name = request.args.get('name', 'Pi-001')
+    row = query_one("SELECT value FROM config WHERE key = ?", (f'probe_control_{name}',))
+    status_row = query_one("SELECT value FROM config WHERE key = ?", (f'probe_status_{name}',))
+    return jsonify({
+        'action': row['value'] if row else 'stop',
+        'capturing': status_row['value'] == 'running' if status_row else False
+    })
+
+
+@probe_bp.route('/api/probe/status-report', methods=['POST'])
+def probe_status_report():
+    """探头主动上报运行状态"""
+    from database import execute
+    data = request.get_json() or {}
+    name = data.get('name', '')
+    status = data.get('status', 'stopped')  # running / stopped
+    if name:
+        execute("INSERT OR REPLACE INTO config (key, value) VALUES (?,?)",
+                (f'probe_status_{name}', status))
+    return jsonify({'success': True})

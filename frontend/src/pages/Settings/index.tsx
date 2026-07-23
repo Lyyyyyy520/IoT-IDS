@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Form, Select, Slider, InputNumber, Switch, Button, Divider, Descriptions, Space, message } from 'antd';
+import { Card, Form, Select, Slider, InputNumber, Switch, Button, Divider, Descriptions, Space, message, Popconfirm } from 'antd';
 import { api } from '../../api';
 
 export default function SettingsPage() {
@@ -73,10 +73,13 @@ export default function SettingsPage() {
           </Form.Item>
           <Form.Item>
             <Space>
-              <Button danger onClick={() => {
-                api.getTrafficLogs().catch(()=>{});
-                fetch(`/api/data/cleanup`, { method: 'POST' }).then(() => message.success('已清理')).catch(() => message.error('清理失败'));
-              }}>清空历史记录</Button>
+              <Popconfirm title="确定清空全部数据？此操作不可恢复" onConfirm={() => {
+                fetch('/api/data/cleanup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({all:true}) })
+                  .then(() => { message.success('已清空全部数据'); window.location.reload(); })
+                  .catch(() => message.error('清理失败'));
+              }}>
+                <Button danger>清空全部数据</Button>
+              </Popconfirm>
               <Button onClick={() => window.open('/api/export/excel')}>导出全部数据</Button>
             </Space>
           </Form.Item>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, Row, Col, Table, Tag, Button, Space, Statistic, Slider, Upload, message, Switch } from 'antd';
 import { ReloadOutlined, PlayCircleOutlined, PauseCircleOutlined, UploadOutlined, InboxOutlined } from '@ant-design/icons';
 import TrafficChart from '../../components/TrafficChart';
@@ -7,16 +7,30 @@ import { api } from '../../api';
 const { Dragger } = Upload;
 
 export default function TrafficPage() {
-  const [detectMode, setDetectMode] = useState<'offline' | 'realtime'>('realtime');
-  const [captureStatus, setCaptureStatus] = useState<any>(null);
-  const [probeStatus, setProbeStatus] = useState<any>(null);
+  const [detectMode, setDetectMode] = useState<'offline' | 'realtime'>(() => {
+    const saved = localStorage.getItem('detectMode');
+    return (saved === 'offline' || saved === 'realtime') ? saved : 'realtime';
+  });
+
+  const switchMode = (mode: 'offline' | 'realtime') => {
+    setDetectMode(mode);
+    localStorage.setItem('detectMode', mode);
+  };
+  const [captureStatus, setCaptureStatus] = useState<any>(null);     // 仿真状态
+  const [realProbeStatus, setRealProbeStatus] = useState<any>(null);  // 真实探头状态
   const [trafficLogs, setTrafficLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [attackRatio, setAttackRatio] = useState(() => {
     const saved = localStorage.getItem('attackRatio');
     return saved ? parseInt(saved) : 25;
   });
-  const [useRealCapture, setUseRealCapture] = useState(false);
+  const [useRealCapture, setUseRealCapture] = useState(() => {
+    return localStorage.getItem('useRealCapture') === 'true';
+  });
+  const switchCaptureMode = (v: boolean) => {
+    setUseRealCapture(v);
+    localStorage.setItem('useRealCapture', String(v));
+  };
   const [pcapResult, setPcapResult] = useState<any>(() => {
     try { const s = localStorage.getItem('pcapResult'); return s ? JSON.parse(s) : null; }
     catch { return null; }
@@ -39,25 +53,57 @@ export default function TrafficPage() {
   };
 
   const handleStartCapture = () => {
-    api.startCapture(useRealCapture, attackRatio / 100).then(() => fetchStatus());
+    if (useRealCapture) {
+      pendingRef.current = true;
+      setRealProbeStatus((prev: any) => ({ ...(prev || {}), capturing: true }));
+      fetch('/api/probe/control', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ action: 'start', probe_name: 'Pi-001' }) })
+        .then(() => { message.success('已向树莓派发送启动指令'); })
+        .catch(() => { message.error('指令发送失败'); setRealProbeStatus((prev:any)=>({...(prev||{}),capturing:false})); })
+        .finally(() => { setTimeout(() => { pendingRef.current = false; }, 8000); });
+    } else {
+      api.startCapture(false, attackRatio / 100).then(() => fetchStatus());
+    }
   };
 
   const handleStopCapture = () => {
-    api.stopCapture().then(() => fetchStatus());
+    if (useRealCapture) {
+      pendingRef.current = true;
+      setRealProbeStatus((prev: any) => ({ ...(prev || {}), capturing: false }));
+      fetch('/api/probe/control', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ action: 'stop', probe_name: 'Pi-001' }) })
+        .then(() => { message.info('已向树莓派发送停止指令'); })
+        .catch(() => { message.error('指令发送失败'); setRealProbeStatus((prev:any)=>({...(prev||{}),capturing:true})); })
+        .finally(() => { setTimeout(() => { pendingRef.current = false; }, 8000); });
+    } else {
+      api.stopCapture().then(() => fetchStatus());
+    }
   };
+
+  const pendingRef = useRef(false);  // 防止手动操作被轮询覆盖
 
   const fetchStatus = useCallback(() => {
     setLoading(true);
-    Promise.all([
-      api.getCaptureStatus().catch(() => null),
-      api.getProbeStatus().catch(() => null),
-      api.getTrafficLogs().catch(() => []),
-    ]).then(([cap, probe, logs]) => {
-      setCaptureStatus(cap);
-      setProbeStatus(probe);
-      setTrafficLogs(logs?.items || []);
-    }).finally(() => setLoading(false));
-  }, []);
+    const source = useRealCapture ? 'real' : 'sim';
+    if (useRealCapture) {
+      api.getTrafficLogs({ source: 'real' }).then(logs => {
+        console.log('REAL logs:', logs?.items?.length, '条');
+        setTrafficLogs(logs?.items || []);
+        fetch('/api/probe/control-status?name=Pi-001').then(r => r.json()).catch(() => ({ capturing: false }))
+          .then(ctrl => {
+            setRealProbeStatus((prev: any) => ({ ...(prev || {}), capturing: ctrl?.capturing || false }));
+          });
+      }).finally(() => setLoading(false));
+    } else {
+      Promise.all([
+        api.getCaptureStatus().catch(() => null),
+        api.getTrafficLogs({ source }).catch(() => ({ items: [] })),
+      ]).then(([cap, logs]) => {
+        setCaptureStatus(cap);
+        setTrafficLogs(logs?.items || []);
+      }).finally(() => setLoading(false));
+    }
+  }, [useRealCapture]);
 
   useEffect(() => { if (detectMode === 'realtime') fetchStatus(); }, [fetchStatus, detectMode]);
 
@@ -119,10 +165,10 @@ export default function TrafficPage() {
 
       {/* 模式切换 */}
       <div style={{ marginBottom: 16, display: 'flex', gap: 8 }}>
-        <Button type={detectMode === 'realtime' ? 'primary' : 'default'} onClick={() => setDetectMode('realtime')}>
+        <Button type={detectMode === 'realtime' ? 'primary' : 'default'} onClick={() => switchMode('realtime')}>
           📡 实时网卡检测
         </Button>
-        <Button type={detectMode === 'offline' ? 'primary' : 'default'} onClick={() => setDetectMode('offline')}>
+        <Button type={detectMode === 'offline' ? 'primary' : 'default'} onClick={() => switchMode('offline')}>
           📁 离线文件检测
         </Button>
       </div>
@@ -203,12 +249,18 @@ export default function TrafficPage() {
           <Card size="small" style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
               <Space>
-                <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>抓包模式</span>
-                <Switch checked={useRealCapture} onChange={setUseRealCapture}
+                <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>检测模式</span>
+                <Switch checked={useRealCapture} onChange={switchCaptureMode}
                   checkedChildren="真实" unCheckedChildren="仿真" />
-                {useRealCapture && <span style={{ fontSize: 11, color: 'var(--risk-high)' }}>需安装 Npcap</span>}
+                <Tag color={useRealCapture ? 'green' : 'blue'}>
+                  {useRealCapture ? '树莓派探针' : '社区IoT仿真'}
+                </Tag>
               </Space>
-              {!useRealCapture && (
+              {useRealCapture ? (
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  等待树莓派推送数据 — 确保已部署探针
+                </span>
+              ) : (
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12, minWidth: 200 }}>
                   <span style={{ color: 'var(--text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>攻击比例</span>
                   <Slider min={0} max={100} value={attackRatio} onChange={handleRatioChange} style={{ flex: 1 }}
@@ -221,26 +273,56 @@ export default function TrafficPage() {
 
           {/* Stats */}
           <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-            <Col xs={24} sm={12} md={6}>
-              <Card size="small">
-                <Statistic title="抓包状态" value={captureStatus?.running ? '运行中' : '已停止'}
-                  valueStyle={{ color: captureStatus?.running ? 'var(--risk-low)' : 'var(--text-muted)', fontSize: 22 }}
-                  suffix={captureStatus?.running
-                    ? <PauseCircleOutlined onClick={handleStopCapture} style={{ cursor: 'pointer', color: 'var(--risk-critical)' }} />
-                    : <PlayCircleOutlined onClick={handleStartCapture} style={{ cursor: 'pointer', color: 'var(--risk-low)' }} />} />
-              </Card>
-            </Col>
-            <Col xs={24} sm={12} md={6}>
-              <Card size="small"><Statistic title="已抓数据包" value={captureStatus?.packet_count || 0} valueStyle={{ fontSize: 22 }} /></Card>
-            </Col>
-            <Col xs={24} sm={12} md={6}>
-              <Card size="small"><Statistic title="产生告警" value={captureStatus?.alert_count || 0}
-                valueStyle={{ color: 'var(--risk-critical)', fontSize: 22 }} /></Card>
-            </Col>
-            <Col xs={24} sm={12} md={6}>
-              <Card size="small"><Statistic title="在线探针" value={probeStatus?.online_probes || 0}
-                suffix={`/ ${probeStatus?.total_probes || 0}`} valueStyle={{ color: 'var(--risk-low)', fontSize: 22 }} /></Card>
-            </Col>
+            {useRealCapture ? (
+              <>
+                <Col xs={24} sm={12} md={6}>
+                  <Card size="small">
+                    <Statistic title="探针采集"
+                      value={realProbeStatus?.capturing ? '采集中' : '已停止'}
+                      valueStyle={{ color: realProbeStatus?.capturing ? 'var(--risk-low)' : 'var(--text-muted)', fontSize: 22 }}
+                      suffix={realProbeStatus?.capturing
+                        ? <PauseCircleOutlined onClick={handleStopCapture} style={{ cursor: 'pointer', color: 'var(--risk-critical)' }} />
+                        : <PlayCircleOutlined onClick={handleStartCapture} style={{ cursor: 'pointer', color: 'var(--risk-low)' }} />} />
+                  </Card>
+                </Col>
+                <Col xs={24} sm={12} md={6}>
+                  <Card size="small"><Statistic title="在线探针" value={realProbeStatus?.online_probes || 0}
+                    suffix={`/ ${realProbeStatus?.total_probes || 0}`} valueStyle={{ fontSize: 22 }} /></Card>
+                </Col>
+                <Col xs={24} sm={12} md={6}>
+                  <Card size="small"><Statistic title="探头告警" value={realProbeStatus?.alerts_from_probes || 0}
+                    valueStyle={{ color: 'var(--risk-critical)', fontSize: 22 }} /></Card>
+                </Col>
+                <Col xs={24} sm={12} md={6}>
+                  <Card size="small">
+                    <Statistic title="连接状态" value="遥控中" valueStyle={{ color: 'var(--accent-blue)', fontSize: 22 }} />
+                  </Card>
+                </Col>
+              </>
+            ) : (
+              <>
+                <Col xs={24} sm={12} md={6}>
+                  <Card size="small">
+                    <Statistic title="抓包状态" value={captureStatus?.running ? '运行中' : '已停止'}
+                      valueStyle={{ color: captureStatus?.running ? 'var(--risk-low)' : 'var(--text-muted)', fontSize: 22 }}
+                      suffix={captureStatus?.running
+                        ? <PauseCircleOutlined onClick={handleStopCapture} style={{ cursor: 'pointer', color: 'var(--risk-critical)' }} />
+                        : <PlayCircleOutlined onClick={handleStartCapture} style={{ cursor: 'pointer', color: 'var(--risk-low)' }} />} />
+                  </Card>
+                </Col>
+                <Col xs={24} sm={12} md={6}>
+                  <Card size="small"><Statistic title="已抓数据包" value={captureStatus?.packet_count || 0} valueStyle={{ fontSize: 22 }} /></Card>
+                </Col>
+                <Col xs={24} sm={12} md={6}>
+                  <Card size="small"><Statistic title="产生告警" value={captureStatus?.alert_count || 0}
+                    valueStyle={{ color: 'var(--risk-critical)', fontSize: 22 }} /></Card>
+                </Col>
+                <Col xs={24} sm={12} md={6}>
+                  <Card size="small"><Statistic title="在线探针" value={realProbeStatus?.online_probes || 0}
+                    suffix={`/ ${realProbeStatus?.total_probes || 0}`} valueStyle={{ color: 'var(--risk-low)', fontSize: 22 }} /></Card>
+                </Col>
+              </>
+            )}
           </Row>
 
           {/* Traffic Logs */}

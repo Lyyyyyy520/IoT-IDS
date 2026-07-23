@@ -51,8 +51,8 @@ export default function AlertsPage() {
     api.getAlerts(params)
       .then((res) => {
         let items = res.items;
-        if (sourceFilter === 'sim') items = items.filter((a: any) => (a.description||'').startsWith('[仿真]'));
-        else if (sourceFilter === 'real') items = items.filter((a: any) => (a.description||'').startsWith('[真实]'));
+        if (sourceFilter === 'sim') items = items.filter((a: any) => (a.description||'').startsWith('[sim]'));
+        else if (sourceFilter === 'real') items = items.filter((a: any) => (a.description||'').startsWith('[real]'));
         setAlerts(items); setTotal(items.length);
       })
       .catch(() => message.warning('无法连接后端，显示离线数据'))
@@ -221,9 +221,9 @@ export default function AlertsPage() {
       title: '来源', key: 'source', width: 70,
       render: (_, r) => {
         const d = r.description || '';
-        if (d.startsWith('[真实]')) return <Tag color="green">真实</Tag>;
-        if (d.startsWith('[仿真]')) return <Tag color="orange">仿真</Tag>;
-        return <Tag color="default">演示</Tag>;
+        if (d.startsWith('[real]')) return <Tag color="green">真实</Tag>;
+        if (d.startsWith('[sim]')) return <Tag color="orange">仿真</Tag>;
+        return <Tag color="default">-</Tag>;
       },
     },
     {
@@ -325,8 +325,8 @@ export default function AlertsPage() {
         <Select value={sourceFilter} onChange={setSourceFilter} style={{ width: 120 }}
           options={[
             { value: 'all', label: '全部来源' },
-            { value: 'sim', label: '仿真数据' },
-            { value: 'real', label: '真实数据' },
+            { value: 'sim', label: '仿真' },
+            { value: 'real', label: '真实' },
           ]} />
         <Button icon={<ReloadOutlined />} type="text" onClick={fetchAlerts} style={{ color: 'var(--text-secondary)' }}>
           刷新

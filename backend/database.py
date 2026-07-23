@@ -122,6 +122,13 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    # Migration: add source column to traffic_logs
+    try:
+        conn.execute("ALTER TABLE traffic_logs ADD COLUMN source TEXT DEFAULT 'sim'")
+        print('[DB] Migration: added source column to traffic_logs')
+    except sqlite3.OperationalError:
+        pass
+
     # Migration: add onnx_label column
     try:
         conn.execute("ALTER TABLE traffic_logs ADD COLUMN onnx_label TEXT DEFAULT 'normal'")

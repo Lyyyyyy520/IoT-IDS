@@ -47,7 +47,7 @@ class TrafficCapture:
             return {'success': False, 'message': '抓包已在运行中'}
 
         self.attack_ratio = max(0, min(1, attack_ratio))
-        self.capture_mode = '真实' if (use_scapy and SCAPY_AVAILABLE) else '仿真'
+        self.capture_mode = 'real' if (use_scapy and SCAPY_AVAILABLE) else 'sim'
 
         self.running = True
         if use_scapy and SCAPY_AVAILABLE:
@@ -115,8 +115,8 @@ class TrafficCapture:
 
         # 3. Save traffic log with ONNX label
         execute(
-            "INSERT INTO traffic_logs (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, onnx_label) VALUES (?,?,?,?,?,?,?,?)",
-            (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, onnx_label),
+            "INSERT INTO traffic_logs (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, onnx_label, source) VALUES (?,?,?,?,?,?,?,?,?)",
+            (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, onnx_label, self.capture_mode),
         )
 
         # 4. ONNX 检测到攻击 → 生成告警（已知正常流量跳过）
@@ -168,12 +168,19 @@ class TrafficCapture:
                             "VALUES ('blacklist',?,'block',?,1)",
                             (src_ip, f'自动拉黑: {onnx_label.title()}攻击(风险{total:.0f})'))
 
+                # 匹配目标设备
+                dev_row = _q("SELECT name FROM assets WHERE ip_address = ? AND device_type != 'probe'", (dst_ip,))
+                dev_name = f' 目标:{dev_row["name"]}({dst_ip})' if dev_row else ''
+                if dev_row:
+                    execute("UPDATE assets SET risk_level=?, status='alert', last_seen=datetime('now','localtime') WHERE ip_address=?",
+                            (risk_level, dst_ip))
+
                 execute(
                     "INSERT INTO alerts (risk_level, attack_type, src_ip, dst_ip, src_port, dst_port, protocol, confidence, description, status) "
                     "VALUES (?,?,?,?,?,?,?,?,?,'new')",
                     (risk_level, onnx_label.title(), src_ip, dst_ip,
                      src_port, dst_port, protocol, round(result['confidence'], 2),
-                     f'[{self.capture_mode}] {result["class_name"]} (置信度 {result["confidence"]:.1%})'),
+                     f'[{self.capture_mode}]{dev_name} {result["class_name"]} (置信度 {result["confidence"]:.1%})'),
                 )
 
         # 5. Rule engine: log matches only (no alerts, ONNX is primary)
@@ -207,42 +214,61 @@ class TrafficCapture:
         sniff(prn=packet_handler, store=False, timeout=1)
 
     def _capture_simulate(self):
-        """Simulated capture mode — generates realistic test traffic."""
-        src_ips = [f'192.168.1.{i}' for i in range(10, 50)]
-        attacker_ips = ['10.99.1.100', '10.99.1.200', '172.20.0.50']
+        """模拟真实社区IoT场景：多设备+正常通信+攻击混合"""
+        cameras = [f'192.168.1.{i}' for i in range(10, 15)]
+        doors = [f'192.168.1.{i}' for i in range(20, 23)]
+        sensors = [f'192.168.1.{i}' for i in range(30, 38)]
+        plugs = [f'192.168.1.{i}' for i in range(40, 44)]
+        hub = '192.168.1.1'
+        cloud = '10.0.0.1'
+        all_devices = cameras + doors + sensors + plugs + [hub]
+        attackers = ['10.99.1.100', '10.99.1.200', '172.20.0.50', '45.33.32.156']
 
         while self.running:
-            time.sleep(random.uniform(0.3, 2.0))
+            time.sleep(random.uniform(0.05, 0.3))
+            r = random.random()
 
-            is_attack = random.random() < self.attack_ratio
-            src = random.choice(attacker_ips) if is_attack else random.choice(src_ips)
-            dst = '192.168.1.1'
-
-            if is_attack:
-                # Simulate various attack patterns
-                attack_type = random.choice(['mirai_scan', 'mirai_flood', 'gafgyt_udp', 'c2'])
-                if attack_type == 'mirai_scan':
-                    self._process_packet(src, dst, random.randint(50000, 60000),
-                                         random.randint(1, 1000), 'TCP', 60, 'SYN')
-                elif attack_type == 'mirai_flood':
+            if r < self.attack_ratio:
+                src = random.choice(attackers)
+                target = random.choice(all_devices)
+                at = random.random()
+                if at < 0.35:
                     for _ in range(random.randint(3, 8)):
-                        self._process_packet(src, dst, random.randint(30000, 40000),
-                                             80, 'UDP', 1400)
-                elif attack_type == 'gafgyt_udp':
-                    for _ in range(random.randint(2, 5)):
-                        self._process_packet(src, dst, random.randint(50000, 60000),
+                        self._process_packet(src, target, random.randint(50000, 60000),
+                                             random.choice([23, 2323, 80]), 'TCP', 60, 'SYN')
+                        time.sleep(0.05)
+                elif at < 0.6:
+                    for _ in range(random.randint(5, 15)):
+                        self._process_packet(src, target, random.randint(30000, 40000),
+                                             random.choice([80, 443]), 'UDP', 1400)
+                        time.sleep(0.03)
+                elif at < 0.8:
+                    for _ in range(random.randint(2, 4)):
+                        self._process_packet(src, target, random.randint(50000, 60000),
                                              22, 'TCP', 80, 'SYN')
                         time.sleep(0.1)
-                elif attack_type == 'c2':
-                    self._process_packet(src, '172.20.0.50', 52341,
-                                         46370, 'TCP', 200, 'PSH', payload='/bin/sh')
+                else:
+                    self._process_packet(src, random.choice(attackers), 52341,
+                                         46370, 'TCP', 200, 'PSH')
             else:
-                # Normal IoT traffic
-                normal_ports = [80, 443, 1883, 5683, 53]
-                self._process_packet(src, dst, random.randint(40000, 50000),
-                                     random.choice(normal_ports),
-                                     random.choice(['TCP', 'UDP']),
-                                     random.randint(60, 800), known_normal=True)
+                dev = random.choice(all_devices)
+                nt = random.random()
+                if nt < 0.3:
+                    self._process_packet(random.choice(cameras), cloud, random.randint(40000,50000),
+                                         443, 'TCP', random.randint(800,1500), 'PSH')
+                elif nt < 0.55:
+                    self._process_packet(random.choice(sensors), hub, random.randint(40000,50000),
+                                         1883, 'TCP', random.randint(60,200), 'PA')
+                elif nt < 0.7:
+                    self._process_packet(hub, random.choice(plugs), 80, random.randint(40000,50000),
+                                         1883, 'TCP', random.randint(80,300), 'PA')
+                elif nt < 0.85:
+                    self._process_packet(random.choice(doors), cloud, random.randint(40000,50000),
+                                         443, 'TCP', random.randint(200,600), 'A')
+                else:
+                    self._process_packet(dev, hub, random.randint(40000,50000),
+                                         random.choice([53,80]), random.choice(['TCP','UDP']),
+                                         random.randint(60,500), known_normal=True)
 
 
 # ---- Global singleton ----
