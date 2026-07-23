@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Table, Tag, Button, Space, Tooltip, Modal, Descriptions, message, Spin, Popconfirm, Switch, notification } from 'antd';
+import { Table, Tag, Button, Space, Tooltip, Modal, Descriptions, message, Spin, Popconfirm, Switch, notification, Select } from 'antd';
 import {
   StopOutlined,
   SearchOutlined,
@@ -7,6 +7,7 @@ import {
   ExportOutlined,
   EyeOutlined,
   UndoOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { api, type AlertItem } from '../../api';
@@ -15,32 +16,51 @@ const riskColorMap: Record<string, string> = {
   critical: '#FF4444',
   high: '#FF8800',
   medium: '#FFCC00',
-  low: '#00CC66',
 };
 
 const riskLabelMap: Record<string, string> = {
   critical: '高危',
   high: '中危',
   medium: '低危',
-  low: '安全',
 };
 
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [loading, setLoading] = useState(true);
   const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [merged, setMerged] = useState(false);
+  const [riskFilter, setRiskFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [timeFilter, setTimeFilter] = useState('24h');
+  const [sourceFilter, setSourceFilter] = useState('all'); // 全部/仿真/真实
 
   const fetchAlerts = useCallback(() => {
     setLoading(true);
-    const params: Record<string, string> = {};
+    const params: Record<string, string> = {
+      page: String(page),
+      page_size: String(pageSize),
+    };
     if (merged) params.merged = 'true';
+    if (riskFilter !== 'all') params.risk_level = riskFilter;
+    if (typeFilter !== 'all') params.attack_type = typeFilter;
+    if (timeFilter) params.time_range = timeFilter;
     api.getAlerts(params)
-      .then((res) => setAlerts(res.items))
+      .then((res) => {
+        let items = res.items;
+        if (sourceFilter === 'sim') items = items.filter((a: any) => (a.description||'').startsWith('[仿真]'));
+        else if (sourceFilter === 'real') items = items.filter((a: any) => (a.description||'').startsWith('[真实]'));
+        setAlerts(items); setTotal(items.length);
+      })
       .catch(() => message.warning('无法连接后端，显示离线数据'))
       .finally(() => setLoading(false));
-  }, [merged]);
+  }, [merged, riskFilter, typeFilter, timeFilter, sourceFilter, page, pageSize]);
+
+  // 筛选变化时重置页码
+  useEffect(() => { setPage(1); }, [riskFilter, typeFilter, timeFilter]);
 
   useEffect(() => { fetchAlerts(); }, [fetchAlerts]);
 
@@ -198,6 +218,15 @@ export default function AlertsPage() {
     },
     { title: '时间', dataIndex: 'timestamp', key: 'timestamp', width: 170 },
     {
+      title: '来源', key: 'source', width: 70,
+      render: (_, r) => {
+        const d = r.description || '';
+        if (d.startsWith('[真实]')) return <Tag color="green">真实</Tag>;
+        if (d.startsWith('[仿真]')) return <Tag color="orange">仿真</Tag>;
+        return <Tag color="default">演示</Tag>;
+      },
+    },
+    {
       title: '状态', dataIndex: 'status', key: 'status', width: 80,
       render: (s: string) => {
         const map: Record<string, { color: string; label: string }> = {
@@ -260,9 +289,49 @@ export default function AlertsPage() {
             onChange={(v) => setMerged(v)}
           />
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>合并显示</span>
-          <Button icon={<ExportOutlined />}>导出 Excel</Button>
+          <Button icon={<ExportOutlined />} onClick={() => {
+            const params = new URLSearchParams();
+            if (riskFilter !== 'all') params.set('risk_level', riskFilter);
+            if (typeFilter !== 'all') params.set('attack_type', typeFilter);
+            if (sourceFilter !== 'all') params.set('source', sourceFilter);
+            if (merged) params.set('merged', 'true');
+            window.open(`/api/export/excel?${params.toString()}`);
+          }}>导出 Excel</Button>
         </Space>
       </div>
+
+      {/* 筛选栏 */}
+      <Space wrap size="small" style={{ marginBottom: 16 }}>
+        <Select value={riskFilter} onChange={setRiskFilter} style={{ width: 140 }}
+          options={[
+            { value: 'all', label: '全部风险等级' },
+            { value: 'critical', label: '高危' },
+            { value: 'high', label: '中危' },
+            { value: 'medium', label: '低危' },
+          ]} />
+        <Select value={typeFilter} onChange={setTypeFilter} style={{ width: 140 }}
+          options={[
+            { value: 'all', label: '全部攻击类型' },
+            { value: 'Mirai', label: 'Mirai' },
+            { value: 'Gafgyt', label: 'Gafgyt' },
+            { value: 'Other', label: '其他攻击' },
+          ]} />
+        <Select value={timeFilter} onChange={setTimeFilter} style={{ width: 130 }}
+          options={[
+            { value: '1h', label: '最近1小时' },
+            { value: '24h', label: '最近24小时' },
+            { value: '7d', label: '最近7天' },
+          ]} />
+        <Select value={sourceFilter} onChange={setSourceFilter} style={{ width: 120 }}
+          options={[
+            { value: 'all', label: '全部来源' },
+            { value: 'sim', label: '仿真数据' },
+            { value: 'real', label: '真实数据' },
+          ]} />
+        <Button icon={<ReloadOutlined />} type="text" onClick={fetchAlerts} style={{ color: 'var(--text-secondary)' }}>
+          刷新
+        </Button>
+      </Space>
 
       <Table
         columns={alertColumns}
@@ -270,7 +339,11 @@ export default function AlertsPage() {
         rowKey="id"
         loading={loading}
         rowClassName={(record) => record.risk_level === 'critical' ? 'alert-row-critical' : ''}
-        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条告警` }}
+        pagination={{
+          current: page, pageSize, total,
+          showSizeChanger: true, showTotal: (t) => `共 ${t} 条告警`,
+          onChange: (p, ps) => { setPage(p); if (ps !== pageSize) setPageSize(ps); },
+        }}
         size="middle"
       />
 

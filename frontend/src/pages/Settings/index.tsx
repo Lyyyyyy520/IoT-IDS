@@ -26,16 +26,6 @@ export default function SettingsPage() {
 
       <Card title="检测设置" style={{ marginBottom: 16 }}>
         <Form layout="vertical" style={{ maxWidth: 600 }}>
-          <Form.Item label="检测模式">
-            <Select
-              value={config.detection_mode || 'offline'}
-              onChange={(v) => set('detection_mode', v)}
-              options={[
-                { value: 'offline', label: '离线文件检测' },
-                { value: 'realtime', label: '实时网卡检测' },
-              ]}
-            />
-          </Form.Item>
           <Form.Item label="置信度阈值">
             <Slider
               min={0.5} max={1.0} step={0.05}
@@ -78,12 +68,16 @@ export default function SettingsPage() {
       <Card title="数据管理">
         <Form layout="vertical" style={{ maxWidth: 400 }}>
           <Form.Item label="历史数据保留天数">
-            <InputNumber min={1} max={365} defaultValue={30} />
+            <InputNumber min={1} max={365} value={config.retention_days || 30}
+              onChange={(v) => set('retention_days', v)} />
           </Form.Item>
           <Form.Item>
             <Space>
-              <Button danger>清空历史记录</Button>
-              <Button>导出全部数据</Button>
+              <Button danger onClick={() => {
+                api.getTrafficLogs().catch(()=>{});
+                fetch(`/api/data/cleanup`, { method: 'POST' }).then(() => message.success('已清理')).catch(() => message.error('清理失败'));
+              }}>清空历史记录</Button>
+              <Button onClick={() => window.open('/api/export/excel')}>导出全部数据</Button>
             </Space>
           </Form.Item>
         </Form>

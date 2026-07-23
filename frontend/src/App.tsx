@@ -4,7 +4,6 @@ import MainLayout from './layouts/MainLayout';
 import LoginPage from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Alerts from './pages/Alerts';
-import Analysis from './pages/Analysis';
 import Traffic from './pages/Traffic';
 import Policy from './pages/Policy';
 import Assets from './pages/Assets';
@@ -50,7 +49,6 @@ export default function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="alerts" element={<Alerts />} />
-          <Route path="analysis" element={<Analysis />} />
           <Route path="traffic" element={<Traffic />} />
           <Route path="policy" element={<Policy />} />
           <Route path="assets" element={<Assets />} />

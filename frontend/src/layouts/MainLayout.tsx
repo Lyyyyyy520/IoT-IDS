@@ -5,7 +5,6 @@ import type { MenuProps } from 'antd';
 import {
   DashboardOutlined,
   AlertOutlined,
-  RadarChartOutlined,
   SettingOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -27,7 +26,6 @@ type MenuItem = Required<MenuProps>['items'][number];
 const navItems: MenuItem[] = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '态势大屏' },
   { key: '/alerts', icon: <AlertOutlined />, label: '告警中心' },
-  { key: '/analysis', icon: <RadarChartOutlined />, label: '分析视图' },
   { key: '/traffic', icon: <SwapOutlined />, label: '流量分析' },
   { key: '/policy', icon: <SafetyOutlined />, label: '策略管理' },
   { key: '/assets', icon: <MonitorOutlined />, label: '资产监控' },
@@ -174,55 +172,6 @@ export default function MainLayout() {
 
       {/* ---- Main Area ---- */}
       <Layout>
-        {/* Top Filter Bar */}
-        <div className="filter-bar">
-          <Space wrap size="small">
-            <Select
-              defaultValue="all"
-              style={{ width: 140 }}
-              options={[
-                { value: 'all', label: '全部风险等级' },
-                { value: 'critical', label: '🔴 高危' },
-                { value: 'high', label: '🟠 中危' },
-                { value: 'medium', label: '🟡 低危' },
-                { value: 'low', label: '🟢 安全' },
-              ]}
-            />
-            <Select
-              defaultValue="all"
-              style={{ width: 140 }}
-              options={[
-                { value: 'all', label: '全部攻击类型' },
-                { value: 'Mirai', label: 'Mirai' },
-                { value: 'Gafgyt', label: 'Gafgyt' },
-                { value: 'Other', label: '其他攻击' },
-              ]}
-            />
-            <Select
-              defaultValue="24h"
-              style={{ width: 130 }}
-              options={[
-                { value: '1h', label: '最近1小时' },
-                { value: '24h', label: '最近24小时' },
-                { value: '7d', label: '最近7天' },
-              ]}
-            />
-            <Button icon={<ReloadOutlined />} type="text" style={{ color: 'var(--text-secondary)' }}>
-              刷新
-            </Button>
-          </Space>
-          {/* Right-side: logout shortcut */}
-          <div style={{ marginLeft: 'auto' }}>
-            <Button
-              type="text"
-              icon={<LogoutOutlined />}
-              onClick={handleLogout}
-              style={{ color: 'var(--text-muted)', fontSize: 12 }}
-            >
-              退出
-            </Button>
-          </div>
-        </div>
 
         {/* Page Content */}
         <Content className="page-container">

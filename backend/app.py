@@ -185,6 +185,7 @@ def alerts_list():
     page_size = request.args.get('page_size', 20, type=int)
     risk_filter = request.args.get('risk_level', '')
     type_filter = request.args.get('attack_type', '')
+    time_filter = request.args.get('time_range', '')
     merged = request.args.get('merged', 'false').lower() == 'true'
 
     # 筛选条件
@@ -196,6 +197,12 @@ def alerts_list():
     if type_filter and type_filter != 'all':
         where_parts.append("attack_type = ?")
         where_params.append(type_filter)
+    if time_filter == '1h':
+        where_parts.append("created_at >= datetime('now', '-1 hour', 'localtime')")
+    elif time_filter == '24h':
+        where_parts.append("created_at >= datetime('now', '-24 hour', 'localtime')")
+    elif time_filter == '7d':
+        where_parts.append("created_at >= datetime('now', '-7 days', 'localtime')")
     where_clause = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
 
     order_clause = """
@@ -466,49 +473,67 @@ def detect_upload():
 # ---- Export ----
 @app.route('/api/export/excel')
 def export_excel():
-    from flask import Response
+    from flask import Response, request
     from openpyxl import Workbook
     from io import BytesIO
+
+    risk_filter = request.args.get('risk_level', '')
+    type_filter = request.args.get('attack_type', '')
+    source_filter = request.args.get('source', '')
+    merged = request.args.get('merged', 'false').lower() == 'true'
+
+    where = []
+    params = []
+    if risk_filter and risk_filter != 'all':
+        where.append("risk_level = ?"); params.append(risk_filter)
+    if type_filter and type_filter != 'all':
+        where.append("attack_type = ?"); params.append(type_filter)
+    if source_filter == 'sim':
+        where.append("description LIKE '[仿真]%'")
+    elif source_filter == 'real':
+        where.append("description LIKE '[真实]%'")
+    w = ("WHERE " + " AND ".join(where)) if where else ""
+
+    if merged:
+        sql = f"SELECT MIN(id) as id,risk_level,attack_type,src_ip,dst_ip,MAX(confidence) as confidence,MAX(created_at) as created_at,COUNT(*) as cnt,status,description FROM alerts {w} GROUP BY attack_type,src_ip,dst_ip ORDER BY MAX(created_at) DESC LIMIT 50000"
+    else:
+        sql = f"SELECT id,risk_level,attack_type,src_ip,dst_ip,confidence,created_at,status,description FROM alerts {w} ORDER BY created_at DESC LIMIT 50000"
 
     wb = Workbook()
     ws = wb.active
     ws.title = '告警记录'
+    if merged:
+        ws.append(['ID', '风险等级', '攻击类型', '源IP', '目标IP', '置信度', '重复次数', '时间', '状态', '描述'])
+    else:
+        ws.append(['ID', '风险等级', '攻击类型', '源IP', '目标IP', '置信度', '时间', '状态', '描述'])
+    alerts = query_all(sql, params)
+    for a in alerts:
+        ws.append([a.get('id',''), a['risk_level'], a['attack_type'],
+                    a['src_ip'], a['dst_ip'], a['confidence'], a['created_at'],
+                    a.get('cnt', 1), a['status'], a['description']])
 
-    # Header
-    headers = ['ID', '风险等级', '攻击类型', '源IP', '目标IP', '置信度', '重复次数', '时间', '状态', '描述']
-    ws.append(headers)
-
-    # Data (same mock data as /api/alerts)
-    alerts = [
-        [1, '高危', 'Mirai', '192.168.1.105', '192.168.1.1', 0.97, 5, '2026-07-14 14:30:22', '新', 'Mirai 僵尸网络扫描'],
-        [2, '高危', 'Mirai', '192.168.1.200', '192.168.1.1', 0.95, 8, '2026-07-14 14:20:47', '新', 'Mirai 暴力破解 Telnet'],
-        [3, '中危', 'Gafgyt', '10.0.0.23', '10.0.0.1', 0.89, 3, '2026-07-14 14:28:15', '新', 'Gafgyt DDoS 攻击'],
-        [4, '中危', 'Gafgyt', '10.0.0.45', '10.0.0.100', 0.87, 1, '2026-07-14 13:55:10', '已阅', 'Gafgyt UDP Flood'],
-        [5, '低危', 'Other', '172.16.0.8', '172.16.0.1', 0.76, 1, '2026-07-14 14:25:01', '新', '其他攻击行为'],
-    ]
-    for row in alerts:
-        ws.append(row)
-
-    # Style header
     from openpyxl.styles import Font, PatternFill
     for cell in ws[1]:
         cell.font = Font(bold=True, color='FFFFFF')
         cell.fill = PatternFill(start_color='2B5797', end_color='2B5797', fill_type='solid')
 
-    # Set column widths
-    widths = [5, 8, 10, 18, 18, 8, 8, 20, 8, 30]
-    for i, w in enumerate(widths, 1):
-        ws.column_dimensions[chr(64 + i) if i <= 26 else 'A'].width = w
-
     output = BytesIO()
     wb.save(output)
     output.seek(0)
-
-    return Response(
-        output.getvalue(),
+    return Response(output.getvalue(),
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        headers={'Content-Disposition': 'attachment; filename=iot_ids_alerts.xlsx'},
-    )
+        headers={'Content-Disposition': 'attachment; filename=iot_ids_alerts.xlsx'})
+
+
+@app.route('/api/data/cleanup', methods=['POST'])
+def data_cleanup():
+    """清空历史记录"""
+    from database import get_config
+    days = int(get_config('retention_days', '30'))
+    execute("DELETE FROM alerts WHERE created_at < datetime('now', ? || ' days', 'localtime')", (f'-{days}',))
+    execute("DELETE FROM traffic_logs WHERE timestamp < datetime('now', ? || ' days', 'localtime')", (f'-{days}',))
+    execute("DELETE FROM audit_logs WHERE created_at < datetime('now', ? || ' days', 'localtime')", (f'-{days}',))
+    return jsonify({'success': True, 'message': f'已清理 {days} 天前的历史数据'})
 
 
 # ---- Traffic Capture Control ----
@@ -897,7 +922,8 @@ def get_config():
         'detection_mode': gc('detection_mode', 'offline'),
         'confidence_threshold': float(gc('confidence_threshold', '0.85')),
         'merge_window_minutes': int(gc('merge_window_minutes', '5')),
-        'auto_block': gc('auto_block', 'false') == 'true',
+        'auto_block': gc('auto_block', 'false').lower() == 'true',
+        'retention_days': int(gc('retention_days', '30')),
         'model_name': 'CNN+LSTM Hybrid',
         'model_version': 'v3.0',
         'input_features': 20,
@@ -909,9 +935,9 @@ def get_config():
 def update_config():
     from database import set_config as sc
     data = request.get_json() or {}
-    for key in ('detection_mode', 'confidence_threshold', 'merge_window_minutes', 'auto_block'):
+    for key in ('detection_mode', 'confidence_threshold', 'merge_window_minutes', 'auto_block', 'retention_days'):
         if key in data:
-            sc(key, str(data[key]))
+            sc(key, str(data[key]).lower())
     return jsonify({'success': True})
 
 

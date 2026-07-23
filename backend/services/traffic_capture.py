@@ -47,6 +47,7 @@ class TrafficCapture:
             return {'success': False, 'message': '抓包已在运行中'}
 
         self.attack_ratio = max(0, min(1, attack_ratio))
+        self.capture_mode = '真实' if (use_scapy and SCAPY_AVAILABLE) else '仿真'
 
         self.running = True
         if use_scapy and SCAPY_AVAILABLE:
@@ -72,8 +73,9 @@ class TrafficCapture:
         }
 
     def _process_packet(self, src_ip: str, dst_ip: str, src_port: int, dst_port: int,
-                         protocol: str, length: int, flags: str = '', payload: str = ''):
-        """Process a single packet through the dual-engine detection pipeline."""
+                         protocol: str, length: int, flags: str = '', payload: str = '',
+                         known_normal: bool = False):
+        """Process a single packet through the detection pipeline."""
         self.packet_count += 1
 
         # 1. Rule Engine
@@ -117,23 +119,61 @@ class TrafficCapture:
             (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, onnx_label),
         )
 
-        # 4. ONNX 检测到攻击 → 生成告警（同攻击+同IP 5分钟内不重复）
-        if onnx_attack:
-            from database import query_one as _q
+        # 4. ONNX 检测到攻击 → 生成告警（已知正常流量跳过）
+        if onnx_attack and not known_normal:
+            from database import query_one as _q, get_config
+            window = int(get_config('merge_window_minutes', '5'))
             dup = _q(
                 "SELECT COUNT(*) as c FROM alerts WHERE attack_type = ? AND src_ip = ? "
-                "AND created_at > datetime('now', '-5 minutes', 'localtime')",
-                (onnx_label.title(), src_ip),
+                "AND created_at > datetime('now', ? || ' minutes', 'localtime')",
+                (onnx_label.title(), src_ip, f'-{window}'),
             )
             if not dup or dup['c'] == 0:
                 self.alert_count += 1
-                risk_level = 'critical' if onnx_label in ('mirai', 'gafgyt') else 'high'
+
+                # 多因子风险评分
+                attack_scores = {'mirai': 10, 'gafgyt': 8, 'other': 5}
+                base = attack_scores.get(onnx_label, 5) * result.get('confidence', 0.85)
+                base_score = base / 10 * 100
+
+                freq = _q(
+                    "SELECT COUNT(*) as c FROM alerts WHERE src_ip = ? "
+                    "AND created_at > datetime('now', '-5 minutes', 'localtime')",
+                    (src_ip,),
+                )['c']
+                freq_map = {0: 1, 1: 3, 2: 3, 3: 5, 4: 5, 5: 5}
+                freq_score = freq_map.get(freq, 7 if freq <= 10 else 10)
+
+                asset = _q(
+                    "SELECT device_type FROM assets WHERE ip_address = ?", (dst_ip,)
+                )
+                target_map = {'lock': 10, 'door': 10, 'camera': 7, 'hub': 7, 'sensor': 5, 'router': 5}
+                target_score = target_map.get(asset['device_type'] if asset else '', 3)
+
+                total = base_score * 0.4 + freq_score * 10 * 0.35 + target_score * 10 * 0.25
+                if total >= 80: risk_level = 'critical'
+                elif total >= 60: risk_level = 'high'
+                else: risk_level = 'medium'
+
+                # 自动拉黑：开关开启 + 高危 || (中危且持续攻击≥5次)
+                should_block = get_config('auto_block', 'false') == 'true' and (
+                    risk_level == 'critical' or
+                    (risk_level == 'high' and freq >= 5)
+                )
+                if should_block:
+                    existing = _q("SELECT id FROM policies WHERE policy_type='blacklist' AND target=? AND enabled=1", (src_ip,))
+                    if not existing or existing['c'] == 0:
+                        execute(
+                            "INSERT INTO policies (policy_type, target, action, description, enabled) "
+                            "VALUES ('blacklist',?,'block',?,1)",
+                            (src_ip, f'自动拉黑: {onnx_label.title()}攻击(风险{total:.0f})'))
+
                 execute(
                     "INSERT INTO alerts (risk_level, attack_type, src_ip, dst_ip, src_port, dst_port, protocol, confidence, description, status) "
                     "VALUES (?,?,?,?,?,?,?,?,?,'new')",
                     (risk_level, onnx_label.title(), src_ip, dst_ip,
                      src_port, dst_port, protocol, round(result['confidence'], 2),
-                     f'[ONNX] 深度学习检测: {result["class_name"]} (置信度 {result["confidence"]:.1%})'),
+                     f'[{self.capture_mode}] {result["class_name"]} (置信度 {result["confidence"]:.1%})'),
                 )
 
         # 5. Rule engine: log matches only (no alerts, ONNX is primary)
@@ -202,7 +242,7 @@ class TrafficCapture:
                 self._process_packet(src, dst, random.randint(40000, 50000),
                                      random.choice(normal_ports),
                                      random.choice(['TCP', 'UDP']),
-                                     random.randint(60, 800))
+                                     random.randint(60, 800), known_normal=True)
 
 
 # ---- Global singleton ----

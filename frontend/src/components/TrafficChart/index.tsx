@@ -16,13 +16,15 @@ export default function TrafficChart({ showProtocol = false, data, pieData }: Pr
 
     if (showProtocol) {
       const colorMap: Record<string, string> = {
-        '正常流量': '#00CC66', 'Mirai': '#FF4444', 'Gafgyt': '#FF8800', '其他攻击': '#FFCC00',
+        '正常流量': '#00CC66', 'Normal': '#00CC66',
+        'Mirai': '#FF4444', 'Gafgyt': '#FF8800',
+        'Other': '#FFCC00', '其他攻击': '#FFCC00',
       };
-      const fallbackColors = ['#58A6FF', '#FF8800', '#39D2C0', '#FF4444'];
+      const distinctColors = ['#FF4444', '#FF8800', '#00CC66', '#FFCC00', '#58A6FF', '#BC8CFF', '#39D2C0', '#FF9933'];
       const pieItems = pieData && pieData.length > 0
         ? pieData.map((d, i) => ({
             value: d.count, name: d.type,
-            itemStyle: { color: colorMap[d.type] || fallbackColors[i % fallbackColors.length] }
+            itemStyle: { color: colorMap[d.type] || distinctColors[i % distinctColors.length] }
           }))
         : [{ value: 1, name: '暂无数据', itemStyle: { color: '#484F58' } }];
 
