@@ -79,16 +79,16 @@ export default function SettingsPage() {
   };
 
   const handleUploadModel = async (files: File[]) => {
-    const onnxFile = files.find((file) => file.name.toLowerCase().endsWith('.onnx'));
+    const modelFile = files.find((file) => /\.(onnx|ts|torchscript|ptl|pt|pth)$/i.test(file.name));
     const dataFile = files.find((file) => file.name.toLowerCase().endsWith('.data'));
-    if (!onnxFile) {
-      message.error('请选择 .onnx 模型文件');
+    if (!modelFile) {
+      message.error('请选择 .ts、.pt/.pth 或 .onnx 模型文件');
       return;
     }
 
     setUploadingModel(true);
     try {
-      const result = await api.uploadModel(onnxFile, dataFile);
+      const result = await api.uploadModel(modelFile, dataFile);
       if (result.success) {
         message.success(result.message || '模型上传成功');
         await loadModels();
@@ -161,7 +161,7 @@ export default function SettingsPage() {
                 }))}
               />
               <Upload
-                accept=".onnx,.data"
+                accept=".ts,.torchscript,.ptl,.pt,.pth,.onnx,.data"
                 multiple
                 showUploadList={false}
                 beforeUpload={(file, fileList) => {
@@ -199,12 +199,12 @@ export default function SettingsPage() {
           <Descriptions.Item label="更新时间">
             {activeModel ? formatUpdatedAt(activeModel.updated_at) : '-'}
           </Descriptions.Item>
-          <Descriptions.Item label="模型格式">ONNX Runtime</Descriptions.Item>
-          <Descriptions.Item label="输入维度">21 维社区特征集</Descriptions.Item>
-          <Descriptions.Item label="输出类别">5 分类</Descriptions.Item>
-          <Descriptions.Item label="框架">PyTorch → ONNX</Descriptions.Item>
+          <Descriptions.Item label="模型格式">{activeModel?.format || '-'}</Descriptions.Item>
+          <Descriptions.Item label="输入维度">16 × 21 时序特征</Descriptions.Item>
+          <Descriptions.Item label="输出类别">3 分类（Normal / Mirai / Gafgyt）</Descriptions.Item>
+          <Descriptions.Item label="框架">PyTorch CNN + LSTM</Descriptions.Item>
           <Descriptions.Item label="推理延迟">&lt; 10 ms</Descriptions.Item>
-          <Descriptions.Item label="基线准确率">99.91% (N-BaIoT)</Descriptions.Item>
+          <Descriptions.Item label="测试准确率">98.22%（设备 8、9 留出测试）</Descriptions.Item>
           <Descriptions.Item label="部署平台">树莓派 4B / Windows</Descriptions.Item>
         </Descriptions>
       </Card>

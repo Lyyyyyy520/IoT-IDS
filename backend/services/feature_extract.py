@@ -1,144 +1,206 @@
+"""Feature preparation for the trained N-BaIoT CNN+LSTM model.
+
+The real model uses 21 selected N-BaIoT statistical features over 16
+consecutive records.  ``scaler.json`` is preferred because it is independent
+of the local scikit-learn version; the original ``scaler.pkl`` remains as a
+compatibility fallback.
 """
-Feature Extraction Service — 21-dim IoT Community-specific Feature Set
+from __future__ import annotations
 
-Pipeline: Raw PCAP/flow data → 46-dim basic features → 3-layer filtering → 21-dim
-
-Layer 1: Variance filter (remove near-zero variance features)
-Layer 2: Pearson correlation (remove highly correlated features, r > 0.9)
-Layer 3: Community scene rules (keep only IoT-community relevant features)
-
-For the MVP / demo phase, this module provides:
-1. A mapping of the 21 selected feature names
-2. A mock extractor that generates plausible feature vectors
-3. A placeholder for real extraction (will use Scapy + Pandas)
-"""
+import json
 import os
 import pickle
+from pathlib import Path
+from typing import List, Optional
+
 import numpy as np
-from typing import Optional, List
 
-# The 21-dim community-specific feature set (final selected features)
-FEATURE_NAMES = [
-    # Time-based features (6)
-    'flow_duration',           # Session duration
-    'fwd_packet_length_mean',  # Mean forward packet length
-    'bwd_packet_length_mean',  # Mean backward packet length
-    'flow_bytes_per_sec',      # Bytes per second
-    'flow_packets_per_sec',    # Packets per second
-    'flow_iat_mean',           # Mean inter-arrival time
+_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+_SCHEMA_PATH = _DATA_DIR / "feature_schema.json"
+_DEFAULT_SCALER_JSON = _DATA_DIR / "scaler.json"
+_DEFAULT_SCALER_PKL = _DATA_DIR / "scaler.pkl"
 
-    # Packet structure (5)
-    'fwd_packet_length_std',   # Std forward packet length
-    'bwd_packet_length_std',   # Std backward packet length
-    'fwd_packets_per_sec',     # Forward packets/second
-    'bwd_packets_per_sec',     # Backward packets/second
-    'min_packet_length',       # Minimum packet length
 
-    # Protocol & port (3)
-    'protocol_type',           # TCP/UDP/ICMP
-    'src_port',                # Source port
-    'dst_port',                # Destination port
+def _read_schema() -> dict:
+    try:
+        return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
-    # Session statistics (4)
-    'fwd_iat_mean',            # Forward inter-arrival time mean
-    'bwd_iat_mean',            # Backward inter-arrival time mean
-    'active_mean',             # Mean active time
-    'idle_mean',               # Mean idle time
 
-    # Connection behavior (3)
-    'syn_count',               # SYN flag count
-    'ack_count',               # ACK flag count
-    'urg_count',               # URG flag count
-]
+_SCHEMA = _read_schema()
+FEATURE_NAMES = _SCHEMA.get("selected_features", [])
+FEATURE_DIM = int(_SCHEMA.get("selected_feature_count", len(FEATURE_NAMES) or 21))
+SEQUENCE_LENGTH = int(_SCHEMA.get("sequence_length", 16))
 
-FEATURE_DIM = len(FEATURE_NAMES)  # 21
+
+class JsonStandardScaler:
+    """Minimal StandardScaler transform loaded from a portable JSON file."""
+
+    def __init__(self, payload: dict):
+        self.mean_ = np.asarray(payload["mean"], dtype=np.float64)
+        self.scale_ = np.asarray(payload["scale"], dtype=np.float64)
+        self.scale_ = np.where(self.scale_ == 0.0, 1.0, self.scale_)
+        self.n_features_in_ = int(payload.get("n_features_in", len(self.mean_)))
+        if len(self.mean_) != self.n_features_in_ or len(self.scale_) != self.n_features_in_:
+            raise ValueError("scaler.json 的参数长度不一致")
+
+    def transform(self, rows: np.ndarray) -> np.ndarray:
+        rows = np.asarray(rows, dtype=np.float64)
+        if rows.shape[-1] != self.n_features_in_:
+            raise ValueError(
+                f"标准化器需要 {self.n_features_in_} 个特征，实际收到 {rows.shape[-1]} 个"
+            )
+        return (rows - self.mean_) / self.scale_
 
 
 class FeatureExtractor:
-    """21-dim feature extraction from network flow data."""
-
     def __init__(self, scaler_path: Optional[str] = None):
+        self.feature_names = list(FEATURE_NAMES)
+        self.sequence_length = SEQUENCE_LENGTH
         self.scaler = None
-        if scaler_path and os.path.exists(scaler_path):
-            with open(scaler_path, 'rb') as f:
-                self.scaler = pickle.load(f)
+        self.scaler_path: Optional[Path] = None
+        self.load_error = ""
+        self._load_scaler(scaler_path)
+
+    def _load_scaler(self, scaler_path: Optional[str]) -> None:
+        candidates: List[Path]
+        if scaler_path:
+            requested = Path(scaler_path)
+            candidates = [requested]
+            if requested.suffix.lower() == ".pkl":
+                candidates.insert(0, requested.with_suffix(".json"))
+        else:
+            candidates = [_DEFAULT_SCALER_JSON, _DEFAULT_SCALER_PKL]
+
+        errors = []
+        for candidate in candidates:
+            if not candidate.exists():
+                continue
+            try:
+                if candidate.suffix.lower() == ".json":
+                    payload = json.loads(candidate.read_text(encoding="utf-8"))
+                    self.scaler = JsonStandardScaler(payload)
+                else:
+                    with candidate.open("rb") as handle:
+                        self.scaler = pickle.load(handle)
+                self.scaler_path = candidate
+                return
+            except Exception as exc:
+                errors.append(f"{candidate.name}: {type(exc).__name__}: {exc}")
+
+        if errors:
+            self.load_error = "; ".join(errors)
+        else:
+            self.load_error = "未找到 scaler.json 或 scaler.pkl"
+
+    def validate_bundle(self) -> None:
+        if not self.feature_names or len(self.feature_names) != FEATURE_DIM:
+            raise RuntimeError("feature_schema.json 缺失、损坏或特征数不一致")
+        if self.scaler is None:
+            raise RuntimeError(f"模型标准化器不可用：{self.load_error}")
+        scaler_features = getattr(self.scaler, "n_features_in_", FEATURE_DIM)
+        if int(scaler_features) != FEATURE_DIM:
+            raise RuntimeError(
+                f"标准化器特征数为 {scaler_features}，模型需要 {FEATURE_DIM}"
+            )
+
+    def _scale(self, rows: np.ndarray) -> np.ndarray:
+        self.validate_bundle()
+        rows = np.asarray(rows, dtype=np.float64)
+        if rows.ndim != 2 or rows.shape[1] != FEATURE_DIM:
+            raise ValueError(f"需要二维 ({FEATURE_DIM} 特征) 数据，实际为 {rows.shape}")
+        rows[~np.isfinite(rows)] = np.nan
+        if np.isnan(rows).any():
+            medians = np.nanmedian(rows, axis=0)
+            medians = np.where(np.isfinite(medians), medians, 0.0)
+            row_idx, col_idx = np.where(np.isnan(rows))
+            rows[row_idx, col_idx] = medians[col_idx]
+        rows = self.scaler.transform(rows)
+        return np.asarray(rows, dtype=np.float32)
 
     def extract_from_flow(self, flow_data: dict) -> np.ndarray:
-        """
-        Extract 21-dim features from a parsed network flow.
+        self.validate_bundle()
+        row = np.array(
+            [float(flow_data.get(name, 0.0)) for name in self.feature_names],
+            dtype=np.float64,
+        ).reshape(1, -1)
+        return self._scale(row).reshape(-1)
 
-        Args:
-            flow_data: dict with raw flow fields from Scapy/pandas
+    def extract_from_csv(
+        self,
+        csv_path: str,
+        max_sequences: int = 2000,
+        stride: Optional[int] = None,
+    ) -> List[np.ndarray]:
+        import pandas as pd
 
-        Returns:
-            numpy array of shape (21,), normalized
-        """
-        # For now: use field values if present, else 0
-        vector = np.zeros(FEATURE_DIM, dtype=np.float32)
-        for i, name in enumerate(FEATURE_NAMES):
-            vector[i] = float(flow_data.get(name, 0.0))
-
-        if self.scaler is not None:
-            vector = self.scaler.transform(vector.reshape(1, -1)).flatten()
-        else:
-            # Simple min-max normalization fallback
-            v_min, v_max = vector.min(), vector.max()
-            if v_max > v_min:
-                vector = (vector - v_min) / (v_max - v_min)
-
-        return vector.astype(np.float32)
-
-    def extract_from_pcap(self, pcap_path: str) -> List[np.ndarray]:
-        """
-        Extract features from a PCAP file.
-        In production, this would use Scapy to parse packets and build flow records.
-        For MVP, returns mock data.
-        """
+        self.validate_bundle()
+        stride = int(stride or self.sequence_length)
+        if stride <= 0:
+            raise ValueError("stride 必须大于 0")
+        max_rows = max_sequences * stride + self.sequence_length
         try:
-            import scapy
-            from scapy.all import rdpcap, IP, TCP, UDP
-            # TODO: Full PCAP parsing and flow aggregation
-            # This will be implemented when Scapy is installed
-            return self._mock_extract(num_samples=50)
-        except ImportError:
-            return self._mock_extract(num_samples=50)
+            frame = pd.read_csv(
+                csv_path,
+                usecols=self.feature_names,
+                nrows=max_rows,
+                low_memory=False,
+            )
+        except ValueError as exc:
+            try:
+                header = pd.read_csv(csv_path, nrows=0).columns.tolist()
+                missing = [name for name in self.feature_names if name not in header]
+            except Exception:
+                missing = []
+            detail = f"，缺少字段：{', '.join(missing[:8])}" if missing else ""
+            raise ValueError(f"CSV 与 N-BaIoT 115 维字段结构不兼容{detail}") from exc
 
-    @staticmethod
-    def _mock_extract(num_samples: int = 1) -> List[np.ndarray]:
-        """Generate plausible feature vectors for demo/testing."""
-        vectors = []
-        for _ in range(num_samples):
-            # Simulate a normal IoT device flow with some noise
-            base = np.array([
-                np.random.uniform(0.5, 5.0),    # flow_duration
-                np.random.uniform(40, 150),      # fwd_packet_length_mean
-                np.random.uniform(30, 120),      # bwd_packet_length_mean
-                np.random.uniform(100, 2000),    # flow_bytes_per_sec
-                np.random.uniform(5, 50),        # flow_packets_per_sec
-                np.random.uniform(0.01, 1.0),    # flow_iat_mean
-                np.random.uniform(10, 80),       # fwd_packet_length_std
-                np.random.uniform(10, 80),       # bwd_packet_length_std
-                np.random.uniform(1, 30),        # fwd_packets_per_sec
-                np.random.uniform(1, 30),        # bwd_packets_per_sec
-                np.random.uniform(20, 100),      # min_packet_length
-                np.random.choice([6, 17, 1]),    # protocol_type
-                np.random.uniform(1024, 65535),  # src_port
-                np.random.choice([80, 443, 1883, 5683, 22, 23]),  # dst_port
-                np.random.uniform(0.01, 0.5),    # fwd_iat_mean
-                np.random.uniform(0.01, 0.5),    # bwd_iat_mean
-                np.random.uniform(0.1, 10),      # active_mean
-                np.random.uniform(0, 60),        # idle_mean
-                np.random.randint(0, 10),        # syn_count
-                np.random.randint(0, 20),        # ack_count
-                np.random.randint(0, 3),         # urg_count
-            ], dtype=np.float32)
-            vectors.append(base)
-        return vectors
+        rows = self._scale(frame.to_numpy())
+        if len(rows) < self.sequence_length:
+            return []
+        view = np.lib.stride_tricks.sliding_window_view(
+            rows, window_shape=(self.sequence_length, rows.shape[1])
+        )[:, 0, :, :]
+        return [
+            np.ascontiguousarray(sequence, dtype=np.float32)
+            for sequence in view[::stride][:max_sequences]
+        ]
+
+    def extract_from_pcap(self, path: str) -> List[np.ndarray]:
+        # N-BaIoT CSV is the real supported input. The legacy PCAP route is
+        # retained as a UI demonstration until exact 115-feature incremental
+        # extraction is implemented.
+        if Path(path).suffix.lower() == ".csv":
+            return self.extract_from_csv(path)
+        return self._mock_extract(num_samples=50)
+
+    def _mock_extract(self, num_samples: int = 1) -> List[np.ndarray]:
+        self.validate_bundle()
+        rng = np.random.default_rng(42)
+        return [
+            rng.normal(
+                0.0, 1.0, size=(self.sequence_length, FEATURE_DIM)
+            ).astype(np.float32)
+            for _ in range(num_samples)
+        ]
 
 
-# ---- Scaler persistence ----
 def save_scaler(scaler, path: str):
-    """Save StandardScaler/MinMaxScaler to disk."""
-    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-    with open(path, 'wb') as f:
-        pickle.dump(scaler, f)
+    """Save both the original pickle and a portable JSON representation."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("wb") as handle:
+        pickle.dump(scaler, handle)
+
+    json_target = target.with_suffix(".json")
+    payload = {
+        "type": "StandardScaler",
+        "n_features_in": int(getattr(scaler, "n_features_in_", len(scaler.mean_))),
+        "mean": np.asarray(scaler.mean_, dtype=float).tolist(),
+        "scale": np.asarray(scaler.scale_, dtype=float).tolist(),
+        "var": np.asarray(getattr(scaler, "var_", np.square(scaler.scale_)), dtype=float).tolist(),
+    }
+    json_target.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )

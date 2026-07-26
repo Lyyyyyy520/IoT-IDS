@@ -1,0 +1,49 @@
+CNN + LSTM 模型导入修复清单
+============================
+
+主要修复：
+1. 支持 .ts、.torchscript、.ptl、.pt、.pth、.onnx 模型导入。
+2. .pt/.pth checkpoint 会按本项目 CNN+LSTM 结构加载，不再被当成 ONNX。
+3. 同时兼容新模型 (batch,16,21) 与旧 ONNX (batch,21) 输入。
+4. 模型上传后先做真实推理校验；无效模型自动撤销，不留错误文件。
+5. 新增 scaler.json，优先使用跨 scikit-learn 版本的标准化参数。
+6. 自动清除 model_config.json 中可能失效的旧绝对路径。
+7. 修复原补丁压缩包中中文文件名乱码问题。
+8. 新增一键导入和模型验证脚本。
+9. CSV 缺少 N-BaIoT 必需字段时返回明确错误，不再直接 500。
+
+修改文件：
+- README.md
+- backend/app.py
+- backend/models/cnn_lstm.py
+- backend/models/inference.py
+- backend/services/feature_extract.py
+- backend/requirements.txt
+- edge/edge_detect.py
+- frontend/src/api/index.ts
+- frontend/src/pages/Settings/index.tsx
+- training/train.py
+- training/predict_csv.py
+
+新增文件：
+- backend/data/best_model.ts
+- backend/data/scaler.json
+- backend/data/feature_schema.json
+- training/verify_model.py
+- script/import_model.ps1
+- import_model.bat
+- 导入CNN_LSTM模型.bat
+- MODEL_IMPORT_GUIDE.txt
+- model_bundle/*
+- docs/CNN_LSTM模型导入与修复.md
+- docs/CNN_LSTM训练结果.md
+- training/训练说明.md
+- 训练CNN_LSTM.bat
+
+验证结果：
+- Python 全部源码编译通过。
+- best_model.ts 加载与推理通过。
+- best_model.pt checkpoint 加载与推理通过。
+- scaler.json 加载通过。
+- 使用第 9 组 Mirai Scan 的真实 115 列 CSV 完成端到端预测验证。
+- TypeScript 类型检查通过。

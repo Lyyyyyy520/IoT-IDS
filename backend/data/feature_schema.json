@@ -1,0 +1,43 @@
+{
+  "dataset": "N-BaIoT",
+  "original_feature_count": 115,
+  "selected_feature_count": 21,
+  "selected_features": [
+    "MI_dir_L1_variance",
+    "MI_dir_L0.01_weight",
+    "MI_dir_L0.1_mean",
+    "MI_dir_L0.1_weight",
+    "HH_L0.01_std",
+    "MI_dir_L5_variance",
+    "MI_dir_L5_mean",
+    "HH_L0.1_std",
+    "HpHp_L0.1_std",
+    "HH_L0.01_radius",
+    "MI_dir_L5_weight",
+    "HH_L5_mean",
+    "MI_dir_L1_weight",
+    "HH_L5_std",
+    "HH_L0.1_radius",
+    "HpHp_L5_std",
+    "HpHp_L0.01_radius",
+    "HH_L1_radius",
+    "HH_L5_radius",
+    "HpHp_L0.1_radius",
+    "HpHp_L1_radius"
+  ],
+  "sequence_length": 16,
+  "input_shape": [
+    null,
+    16,
+    21
+  ],
+  "classes": {
+    "0": "Normal",
+    "1": "Mirai",
+    "2": "Gafgyt"
+  },
+  "test_devices": [
+    8,
+    9
+  ]
+}

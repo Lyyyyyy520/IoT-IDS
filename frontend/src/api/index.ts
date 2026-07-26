@@ -84,6 +84,7 @@ export interface ModelItem {
   size_bytes: number;
   updated_at: number;
   active: boolean;
+  format?: string;
 }
 
 export interface ModelListResponse {

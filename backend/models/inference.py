@@ -1,238 +1,429 @@
-"""
-ONNX Runtime Inference Engine
+"""Unified inference engine for TorchScript, PyTorch checkpoints and ONNX.
 
-Loads a trained CNN+LSTM model exported as ONNX and runs inference.
-
-Usage:
-    engine = InferenceEngine('data/best_model.onnx')
-    result = engine.predict(feature_vector)  # 21-dim numpy array
-    # result = {'class': 'Mirai', 'confidence': 0.97, 'risk_level': 'critical'}
+The trained N-BaIoT CNN+LSTM model consumes a sequence shaped ``(T, 21)``.
+Legacy ONNX models that consume one ``(21,)`` feature row remain supported so
+that switching models does not break the existing project.
 """
-import os
+from __future__ import annotations
+
 import json
+import os
+from pathlib import Path
+from typing import Dict, List, Optional
+
 import numpy as np
-from typing import Optional, List, Dict
 
-CLASS_NAMES = ['Normal', 'Mirai', 'Gafgyt', 'Hajime', 'Other']
+_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+_SCHEMA_PATH = _DATA_DIR / "feature_schema.json"
+_USER_MODEL_DIR = _DATA_DIR / "models"
+_DEFAULT_TS_PATH = _DATA_DIR / "best_model.ts"
+_DEFAULT_PT_PATH = _DATA_DIR / "best_model.pt"
+_DEFAULT_ONNX_PATH = _DATA_DIR / "best_model.onnx"
+_MODEL_CONFIG_PATH = _DATA_DIR / "model_config.json"
 
-RISK_THRESHOLDS = {
-    'critical': 0.95,  # >= 0.95 AND attack class
-    'high': 0.85,      # >= 0.85
-    'medium': 0.70,    # >= 0.70
-    # below 0.70 → low (normal traffic)
-}
+
+def _load_schema() -> dict:
+    try:
+        return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+_SCHEMA = _load_schema()
+_DEFAULT_CLASS_MAP = _SCHEMA.get(
+    "classes", {"0": "Normal", "1": "Mirai", "2": "Gafgyt"}
+)
+DEFAULT_CLASS_NAMES = [
+    _DEFAULT_CLASS_MAP[str(index)] for index in range(len(_DEFAULT_CLASS_MAP))
+]
+DEFAULT_SEQUENCE_LENGTH = int(_SCHEMA.get("sequence_length", 16))
+DEFAULT_FEATURE_COUNT = int(_SCHEMA.get("selected_feature_count", 21))
+
+RISK_THRESHOLDS = {"critical": 0.95, "high": 0.85, "medium": 0.70}
+_SUPPORTED_EXTENSIONS = {".ts", ".torchscript", ".ptl", ".pt", ".pth", ".onnx"}
 
 
 class InferenceEngine:
-    """Wrapper around ONNX Runtime for IoT IDS model inference."""
+    """Load and run compatible IoT IDS models with clear validation errors."""
 
     def __init__(self, model_path: Optional[str] = None):
         self.session = None
+        self.torch_model = None
+        self.backend: Optional[str] = None
         self.model_loaded = False
         self.model_path: Optional[str] = None
-
+        self.last_error = ""
+        self.class_names = list(DEFAULT_CLASS_NAMES)
+        self.sequence_length = DEFAULT_SEQUENCE_LENGTH
+        self.feature_count = DEFAULT_FEATURE_COUNT
+        self.input_rank = 3
         if model_path:
             self.load(model_path)
 
+    def _reset_runtime(self) -> None:
+        self.session = None
+        self.torch_model = None
+        self.backend = None
+        self.model_loaded = False
+        self.model_path = None
+        self.last_error = ""
+        self.class_names = list(DEFAULT_CLASS_NAMES)
+        self.sequence_length = DEFAULT_SEQUENCE_LENGTH
+        self.feature_count = DEFAULT_FEATURE_COUNT
+        self.input_rank = 3
+
     def load(self, model_path: str) -> bool:
-        """Load ONNX model from file. Returns True on success."""
-        resolved_path = os.path.abspath(model_path)
-        if not os.path.exists(resolved_path):
-            print(f'[Inference] Model not found: {resolved_path}')
+        self._reset_runtime()
+        resolved = os.path.abspath(model_path)
+        if not os.path.exists(resolved):
+            self.last_error = f"模型文件不存在：{resolved}"
+            print(f"[Inference] {self.last_error}")
+            return False
+
+        suffix = Path(resolved).suffix.lower()
+        if suffix not in _SUPPORTED_EXTENSIONS:
+            self.last_error = f"不支持的模型格式：{suffix or '无扩展名'}"
+            print(f"[Inference] {self.last_error}")
             return False
 
         try:
-            import onnxruntime as ort
-            session = ort.InferenceSession(
-                resolved_path,
-                providers=['CPUExecutionProvider'],
-            )
-            self.session = session
+            if suffix in {".ts", ".torchscript", ".ptl"}:
+                self._load_torchscript(resolved)
+            elif suffix in {".pt", ".pth"}:
+                self._load_checkpoint(resolved)
+            else:
+                self._load_onnx(resolved)
+
+            self._validate_loaded_model()
             self.model_loaded = True
-            self.model_path = resolved_path
-            # Print model info
-            input_name = self.session.get_inputs()[0].name
-            input_shape = self.session.get_inputs()[0].shape
-            output_name = self.session.get_outputs()[0].name
-            print(f'[Inference] Model loaded: {os.path.basename(resolved_path)}')
-            print(f'  Input : {input_name} {input_shape}')
-            print(f'  Output: {output_name}')
+            self.model_path = resolved
+            print(
+                f"[Inference] Loaded {os.path.basename(resolved)} with {self.backend}; "
+                f"input_rank={self.input_rank}, sequence={self.sequence_length}, "
+                f"features={self.feature_count}"
+            )
             return True
-        except ImportError:
-            print('[Inference] onnxruntime not installed')
+        except Exception as exc:
+            detail = str(exc).strip().splitlines()[0] if str(exc).strip() else "未知错误"
+            if len(detail) > 300:
+                detail = detail[:300] + "..."
+            self.last_error = f"{type(exc).__name__}: {detail}"
+            self.session = None
+            self.torch_model = None
+            self.backend = None
+            self.model_loaded = False
+            self.model_path = None
+            print(f"[Inference] Failed to load model: {self.last_error}")
             return False
-        except Exception as e:
-            print(f'[Inference] Failed to load model: {e}')
-            return False
 
-    def predict(self, features: np.ndarray) -> dict:
-        """
-        Run inference on a single feature vector (or batch).
+    def _load_torchscript(self, path: str) -> None:
+        import torch
 
-        Args:
-            features: numpy array of shape (21,) or (N, 21)
+        self.torch_model = torch.jit.load(path, map_location="cpu")
+        self.torch_model.eval()
+        self.backend = "torchscript"
+        self.input_rank = 3
 
-        Returns:
-            dict with class_name, class_id, confidence, risk_level, probabilities
-        """
-        if not self.model_loaded:
-            return self._dummy_result(features)
+    def _load_checkpoint(self, path: str) -> None:
+        import torch
+        from .cnn_lstm import create_model
 
-        # Ensure float32 and correct shape
+        try:
+            checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+        except TypeError:
+            checkpoint = torch.load(path, map_location="cpu")
+
+        if not isinstance(checkpoint, dict) or "state_dict" not in checkpoint:
+            raise ValueError(
+                ".pt/.pth 文件不是本项目的 checkpoint；请改用 TorchScript .ts 文件"
+            )
+
+        self.feature_count = int(checkpoint.get("input_features", DEFAULT_FEATURE_COUNT))
+        self.sequence_length = int(
+            checkpoint.get("sequence_length", DEFAULT_SEQUENCE_LENGTH)
+        )
+        num_classes = int(checkpoint.get("num_classes", len(DEFAULT_CLASS_NAMES)))
+        class_names = checkpoint.get("class_names")
+        if isinstance(class_names, (list, tuple)) and len(class_names) == num_classes:
+            self.class_names = [str(name) for name in class_names]
+        else:
+            self.class_names = [f"Class_{index}" for index in range(num_classes)]
+
+        model = create_model(self.feature_count, num_classes)
+        model.load_state_dict(checkpoint["state_dict"], strict=True)
+        model.eval()
+        self.torch_model = model
+        self.backend = "pytorch-checkpoint"
+        self.input_rank = 3
+
+    def _load_onnx(self, path: str) -> None:
+        import onnxruntime as ort
+
+        self.session = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+        model_input = self.session.get_inputs()[0]
+        shape = list(model_input.shape)
+        self.input_rank = len(shape)
+        if self.input_rank not in {2, 3}:
+            raise ValueError(f"ONNX 输入维度必须为 2 或 3，当前为 {shape}")
+
+        feature_dim = shape[-1]
+        if isinstance(feature_dim, int) and feature_dim > 0:
+            self.feature_count = feature_dim
+        if self.input_rank == 3:
+            sequence_dim = shape[-2]
+            if isinstance(sequence_dim, int) and sequence_dim > 0:
+                self.sequence_length = sequence_dim
+        self.backend = "onnx"
+
+    def _validate_loaded_model(self) -> None:
+        if self.backend in {"torchscript", "pytorch-checkpoint"}:
+            import torch
+
+            candidate_shapes = [
+                (1, self.sequence_length, self.feature_count),
+                (1, self.feature_count),
+            ]
+            last_error = None
+            for shape in candidate_shapes:
+                try:
+                    with torch.no_grad():
+                        output = self.torch_model(torch.zeros(shape, dtype=torch.float32))
+                    if output.ndim != 2:
+                        raise ValueError(f"模型输出应为二维 logits，当前为 {tuple(output.shape)}")
+                    self.input_rank = len(shape)
+                    return
+                except Exception as exc:
+                    last_error = exc
+            raise ValueError(f"模型输入与项目不兼容：{last_error}")
+
+        if self.backend == "onnx":
+            input_name = self.session.get_inputs()[0].name
+            if self.input_rank == 3:
+                sample = np.zeros(
+                    (1, self.sequence_length, self.feature_count), dtype=np.float32
+                )
+            else:
+                sample = np.zeros((1, self.feature_count), dtype=np.float32)
+            output = self.session.run(None, {input_name: sample})[0]
+            if np.asarray(output).ndim != 2:
+                raise ValueError(f"ONNX 输出应为二维 logits，当前为 {np.asarray(output).shape}")
+            return
+
+        raise RuntimeError("模型后端没有初始化")
+
+    def _prepare_input(self, features: np.ndarray) -> tuple[np.ndarray, bool]:
         x = np.asarray(features, dtype=np.float32)
-        single = (x.ndim == 1)
-        if single:
-            x = x.reshape(1, -1)
+        single = False
 
-        # Run ONNX inference
-        input_name = self.session.get_inputs()[0].name
-        logits = self.session.run(None, {input_name: x})[0]  # (N, 5)
+        if x.ndim == 1:
+            if x.shape[0] != self.feature_count:
+                raise ValueError(
+                    f"需要 {self.feature_count} 个特征，实际收到 {x.shape[0]} 个"
+                )
+            single = True
+            if self.input_rank == 3:
+                x = np.repeat(
+                    x.reshape(1, 1, -1), self.sequence_length, axis=1
+                )
+            else:
+                x = x.reshape(1, -1)
 
-        # Softmax
-        probs = self._softmax(logits)
-        class_ids = np.argmax(probs, axis=1)
-        confidences = np.max(probs, axis=1)
+        elif x.ndim == 2:
+            if x.shape[1] != self.feature_count:
+                raise ValueError(
+                    f"需要 {self.feature_count} 个特征，实际收到 {x.shape[1]} 个"
+                )
+            if self.input_rank == 3:
+                if x.shape[0] == self.sequence_length:
+                    x = x.reshape(1, self.sequence_length, self.feature_count)
+                    single = True
+                else:
+                    x = np.repeat(x[:, None, :], self.sequence_length, axis=1)
+            else:
+                # A sequence from the new extractor can still be passed to a
+                # legacy one-row ONNX model. Use the latest row as one sample.
+                if x.shape[0] == self.sequence_length:
+                    x = x[-1:, :]
+                    single = True
 
-        if single:
-            class_id = int(class_ids[0])
-            conf = float(confidences[0])
-            return self._build_result(class_id, conf)
+        elif x.ndim == 3:
+            if x.shape[-1] != self.feature_count:
+                raise ValueError(
+                    f"需要 {self.feature_count} 个特征，实际收到 {x.shape[-1]} 个"
+                )
+            if self.input_rank == 3:
+                if x.shape[1] != self.sequence_length:
+                    raise ValueError(
+                        f"需要长度为 {self.sequence_length} 的序列，实际为 {x.shape[1]}"
+                    )
+            else:
+                x = x[:, -1, :]
+        else:
+            raise ValueError(f"不支持的输入形状：{x.shape}")
 
-        return [
-            self._build_result(int(cid), float(cf))
-            for cid, cf in zip(class_ids, confidences)
+        return np.ascontiguousarray(x, dtype=np.float32), single
+
+    def predict(self, features: np.ndarray):
+        if not self.model_loaded:
+            return self._dummy_result()
+
+        x, single = self._prepare_input(features)
+        if self.backend in {"torchscript", "pytorch-checkpoint"}:
+            import torch
+
+            with torch.no_grad():
+                logits = self.torch_model(torch.from_numpy(x)).cpu().numpy()
+        elif self.backend == "onnx":
+            input_name = self.session.get_inputs()[0].name
+            logits = self.session.run(None, {input_name: x})[0]
+        else:
+            raise RuntimeError("没有可用的推理后端")
+
+        logits = np.asarray(logits, dtype=np.float32)
+        if logits.ndim == 1:
+            logits = logits.reshape(1, -1)
+        probabilities = self._softmax(logits)
+        class_ids = np.argmax(probabilities, axis=1)
+        confidences = np.max(probabilities, axis=1)
+        results = [
+            self._build_result(int(class_id), float(confidence), probabilities[index])
+            for index, (class_id, confidence) in enumerate(zip(class_ids, confidences))
         ]
+        return results[0] if single else results
 
-    def _build_result(self, class_id: int, confidence: float) -> dict:
-        class_name = CLASS_NAMES[class_id] if class_id < len(CLASS_NAMES) else 'Unknown'
-        risk_level = self._determine_risk(class_id, confidence)
-        return {
-            'class_id': class_id,
-            'class_name': class_name,
-            'confidence': round(confidence, 4),
-            'risk_level': risk_level,
-            'is_attack': class_id != 0,
+    def _build_result(
+        self, class_id: int, confidence: float, probabilities: Optional[np.ndarray] = None
+    ) -> dict:
+        class_name = (
+            self.class_names[class_id]
+            if 0 <= class_id < len(self.class_names)
+            else f"Class_{class_id}"
+        )
+        result = {
+            "class_id": class_id,
+            "class_name": class_name,
+            "confidence": round(confidence, 4),
+            "risk_level": self._determine_risk(class_id, confidence),
+            "is_attack": class_id != 0,
         }
+        if probabilities is not None:
+            result["probabilities"] = {
+                (
+                    self.class_names[index]
+                    if index < len(self.class_names)
+                    else f"Class_{index}"
+                ): round(float(value), 6)
+                for index, value in enumerate(probabilities)
+            }
+        return result
 
     @staticmethod
     def _determine_risk(class_id: int, confidence: float) -> str:
-        if class_id == 0:  # Normal
-            return 'low'
-        # Attack classes: use confidence thresholds
-        if confidence >= RISK_THRESHOLDS['critical']:
-            return 'critical'
-        if confidence >= RISK_THRESHOLDS['high']:
-            return 'high'
-        if confidence >= RISK_THRESHOLDS['medium']:
-            return 'medium'
-        return 'low'
+        if class_id == 0:
+            return "low"
+        if confidence >= RISK_THRESHOLDS["critical"]:
+            return "critical"
+        if confidence >= RISK_THRESHOLDS["high"]:
+            return "high"
+        if confidence >= RISK_THRESHOLDS["medium"]:
+            return "medium"
+        return "low"
 
     @staticmethod
     def _softmax(logits: np.ndarray) -> np.ndarray:
-        exp = np.exp(logits - np.max(logits, axis=1, keepdims=True))
-        return exp / np.sum(exp, axis=1, keepdims=True)
+        exponent = np.exp(logits - np.max(logits, axis=1, keepdims=True))
+        denominator = np.sum(exponent, axis=1, keepdims=True)
+        return exponent / np.maximum(denominator, 1e-12)
 
-    def _dummy_result(self, features: np.ndarray) -> dict:
-        """Fallback when model isn't loaded — returns simulated results."""
-        import hashlib
-        x = np.asarray(features).flatten()
-        # Deterministic "random" from feature hash for demo
-        h = int(hashlib.md5(x.tobytes()).hexdigest()[:8], 16) % 100
-        if h < 30:
-            return self._build_result(0, 0.4 + (h / 100))
-        elif h < 55:
-            return self._build_result(1, 0.85 + (h % 15) / 100)
-        elif h < 75:
-            return self._build_result(2, 0.80 + (h % 20) / 100)
-        elif h < 88:
-            return self._build_result(3, 0.70 + (h % 15) / 100)
-        else:
-            return self._build_result(4, 0.60 + (h % 25) / 100)
+    def _dummy_result(self) -> dict:
+        return {
+            "class_id": 0,
+            "class_name": self.class_names[0] if self.class_names else "Normal",
+            "confidence": 0.0,
+            "risk_level": "low",
+            "is_attack": False,
+            "error": self.last_error or "模型未加载",
+        }
 
 
-# ---- Global singleton ----
 _engine: Optional[InferenceEngine] = None
-
-_DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data'))
-_USER_MODEL_DIR = os.path.join(_DATA_DIR, 'models')
-_DEFAULT_MODEL_PATH = os.path.join(_DATA_DIR, 'best_model.onnx')
-_MODEL_CONFIG_PATH = os.path.join(_DATA_DIR, 'model_config.json')
 
 
 def _read_model_config() -> dict:
-    if not os.path.exists(_MODEL_CONFIG_PATH):
-        return {}
     try:
-        with open(_MODEL_CONFIG_PATH, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        return json.loads(_MODEL_CONFIG_PATH.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
 
 def _write_model_config(model_path: str) -> None:
-    os.makedirs(_DATA_DIR, exist_ok=True)
-    with open(_MODEL_CONFIG_PATH, 'w', encoding='utf-8') as f:
-        json.dump({'active_model_path': os.path.abspath(model_path)}, f, ensure_ascii=False, indent=2)
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _MODEL_CONFIG_PATH.write_text(
+        json.dumps(
+            {"active_model_path": os.path.abspath(model_path)},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
 
 def get_active_model_path() -> Optional[str]:
-    config_path = _read_model_config().get('active_model_path')
-    if config_path and os.path.exists(config_path):
-        return os.path.abspath(config_path)
-    if os.path.exists(_DEFAULT_MODEL_PATH):
-        return os.path.abspath(_DEFAULT_MODEL_PATH)
+    configured = _read_model_config().get("active_model_path")
+    if configured and os.path.exists(configured):
+        return os.path.abspath(configured)
+    for default_path in (_DEFAULT_TS_PATH, _DEFAULT_PT_PATH, _DEFAULT_ONNX_PATH):
+        if default_path.exists():
+            return str(default_path.resolve())
     return None
 
 
 def _model_info(model_path: str) -> Dict[str, object]:
-    model_path = os.path.abspath(model_path)
-    stat = os.stat(model_path)
-    active_path = get_active_model_path()
+    path = Path(model_path).resolve()
+    stat = path.stat()
     return {
-        'id': os.path.basename(model_path),
-        'name': os.path.splitext(os.path.basename(model_path))[0],
-        'filename': os.path.basename(model_path),
-        'path': model_path,
-        'size_bytes': stat.st_size,
-        'updated_at': stat.st_mtime,
-        'active': active_path == model_path,
+        "id": path.name,
+        "name": path.stem,
+        "filename": path.name,
+        "path": str(path),
+        "format": path.suffix.lstrip(".").lower(),
+        "size_bytes": stat.st_size,
+        "updated_at": stat.st_mtime,
+        "active": get_active_model_path() == str(path),
     }
 
 
 def list_models() -> List[Dict[str, object]]:
-    """List built-in and user-uploaded ONNX models."""
-    model_paths = []
-    if os.path.exists(_DEFAULT_MODEL_PATH):
-        model_paths.append(os.path.abspath(_DEFAULT_MODEL_PATH))
-    if os.path.isdir(_USER_MODEL_DIR):
-        for filename in sorted(os.listdir(_USER_MODEL_DIR)):
-            if filename.lower().endswith('.onnx'):
-                model_paths.append(os.path.abspath(os.path.join(_USER_MODEL_DIR, filename)))
+    paths: List[Path] = []
+    # Show one built-in model to avoid three entries with the same name.
+    for default_path in (_DEFAULT_TS_PATH, _DEFAULT_PT_PATH, _DEFAULT_ONNX_PATH):
+        if default_path.exists():
+            paths.append(default_path)
+            break
+    if _USER_MODEL_DIR.is_dir():
+        for path in sorted(_USER_MODEL_DIR.iterdir()):
+            if path.suffix.lower() in _SUPPORTED_EXTENSIONS:
+                paths.append(path)
 
     seen = set()
-    models = []
-    for path in model_paths:
-        if path in seen:
-            continue
-        seen.add(path)
-        models.append(_model_info(path))
-    return models
+    output = []
+    for path in paths:
+        resolved = str(path.resolve())
+        if resolved not in seen:
+            seen.add(resolved)
+            output.append(_model_info(resolved))
+    return output
 
 
 def resolve_model_path(model_id: str) -> Optional[str]:
-    """Resolve a model filename/id to a known ONNX model path."""
-    if not model_id:
-        return None
-    model_id = os.path.basename(model_id)
+    base = os.path.basename(model_id or "")
     for model in list_models():
-        if model['id'] == model_id or model['filename'] == model_id:
-            return str(model['path'])
+        if model["id"] == base or model["filename"] == base:
+            return str(model["path"])
     return None
 
 
 def switch_model(model_path: str) -> bool:
-    """Load and persist a new active model. Keeps current model if loading fails."""
-    global _engine
     engine = get_engine()
     if not engine.load(model_path):
         return False
@@ -241,22 +432,20 @@ def switch_model(model_path: str) -> bool:
 
 
 def is_active_model_loaded() -> bool:
-    """Return whether the active model is already loaded without initializing ONNX Runtime."""
-    active_path = get_active_model_path()
+    active = get_active_model_path()
     return bool(
         _engine
         and _engine.model_loaded
-        and active_path
-        and _engine.model_path == os.path.abspath(active_path)
+        and active
+        and _engine.model_path == os.path.abspath(active)
     )
 
 
 def get_engine(model_path: Optional[str] = None) -> InferenceEngine:
-    """Get or create the global inference engine."""
     global _engine
-    target_path = model_path or get_active_model_path()
+    target = model_path or get_active_model_path()
     if _engine is None:
-        _engine = InferenceEngine(target_path)
-    elif target_path and os.path.abspath(target_path) != _engine.model_path:
-        _engine.load(target_path)
+        _engine = InferenceEngine(target)
+    elif target and os.path.abspath(target) != _engine.model_path:
+        _engine.load(target)
     return _engine

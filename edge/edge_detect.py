@@ -1,7 +1,7 @@
 """
 Raspberry Pi Edge Detection Program
 
-Runs ONNX inference locally with optional Scapy packet capture.
+Runs the trained TorchScript CNN+LSTM model locally with optional Scapy packet capture.
 Designed for Raspberry Pi 4B (4GB) with Raspberry Pi OS Bullseye 64-bit.
 
 Usage:
@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 from models.inference import InferenceEngine
 from services.feature_extract import FeatureExtractor
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'backend', 'data', 'best_model.onnx')
+MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'backend', 'data', 'best_model.ts')
 SCALER_PATH = os.path.join(os.path.dirname(__file__), '..', 'backend', 'data', 'scaler.pkl')
 
 

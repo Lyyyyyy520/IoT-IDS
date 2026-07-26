@@ -1,0 +1,175 @@
+{
+  "dataset": "N-BaIoT",
+  "original_feature_count": 115,
+  "selected_feature_count": 21,
+  "selected_features": [
+    "MI_dir_L1_variance",
+    "MI_dir_L0.01_weight",
+    "MI_dir_L0.1_mean",
+    "MI_dir_L0.1_weight",
+    "HH_L0.01_std",
+    "MI_dir_L5_variance",
+    "MI_dir_L5_mean",
+    "HH_L0.1_std",
+    "HpHp_L0.1_std",
+    "HH_L0.01_radius",
+    "MI_dir_L5_weight",
+    "HH_L5_mean",
+    "MI_dir_L1_weight",
+    "HH_L5_std",
+    "HH_L0.1_radius",
+    "HpHp_L5_std",
+    "HpHp_L0.01_radius",
+    "HH_L1_radius",
+    "HH_L5_radius",
+    "HpHp_L0.1_radius",
+    "HpHp_L1_radius"
+  ],
+  "sequence_length": 16,
+  "input_shape": [
+    null,
+    16,
+    21
+  ],
+  "classes": {
+    "0": "Normal",
+    "1": "Mirai",
+    "2": "Gafgyt"
+  },
+  "test_devices": [
+    8,
+    9
+  ],
+  "model": "Lightweight temporal CNN + LSTM + attention",
+  "parameter_count": 36008,
+  "best_validation_accuracy": 0.9963333333333333,
+  "test_accuracy": 0.9822222222222222,
+  "test_loss": 0.016178910574979253,
+  "classification_report": {
+    "Normal": {
+      "precision": 0.9960159362549801,
+      "recall": 1.0,
+      "f1-score": 0.998003992015968,
+      "support": 1500.0
+    },
+    "Mirai": {
+      "precision": 0.9930795847750865,
+      "recall": 0.9566666666666667,
+      "f1-score": 0.9745331069609507,
+      "support": 1500.0
+    },
+    "Gafgyt": {
+      "precision": 0.9586830213040671,
+      "recall": 0.99,
+      "f1-score": 0.9740898655296819,
+      "support": 1500.0
+    },
+    "accuracy": 0.9822222222222222,
+    "macro avg": {
+      "precision": 0.9825928474447112,
+      "recall": 0.9822222222222221,
+      "f1-score": 0.9822089881688668,
+      "support": 4500.0
+    },
+    "weighted avg": {
+      "precision": 0.9825928474447113,
+      "recall": 0.9822222222222222,
+      "f1-score": 0.9822089881688668,
+      "support": 4500.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      1500,
+      0,
+      0
+    ],
+    [
+      1,
+      1435,
+      64
+    ],
+    [
+      5,
+      10,
+      1485
+    ]
+  ],
+  "data_stats": {
+    "available_windows": {
+      "('train', 2)": 9275,
+      "('val', 2)": 1645,
+      "('train', 1)": 6625,
+      "('val', 1)": 1175,
+      "('train', 0)": 19771,
+      "('val', 0)": 3492,
+      "('test', 1)": 3120,
+      "('test', 2)": 3120,
+      "('test', 0)": 4879
+    },
+    "final_counts": {
+      "train": {
+        "Normal": 6000,
+        "Mirai": 6000,
+        "Gafgyt": 6000
+      },
+      "val": {
+        "Normal": 1000,
+        "Mirai": 1000,
+        "Gafgyt": 1000
+      },
+      "test": {
+        "Normal": 1500,
+        "Mirai": 1500,
+        "Gafgyt": 1500
+      }
+    }
+  },
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.2558717223736975,
+      "train_accuracy": 0.7616666666666667,
+      "val_loss": 0.08935625084241232,
+      "val_accuracy": 0.9423333333333334
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.03990591079658932,
+      "train_accuracy": 0.9585,
+      "val_loss": 0.015863204928735893,
+      "val_accuracy": 0.9853333333333333
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.014915391981601715,
+      "train_accuracy": 0.9875,
+      "val_loss": 0.007632536913268268,
+      "val_accuracy": 0.9956666666666667
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.010106948024903735,
+      "train_accuracy": 0.9938888888888889,
+      "val_loss": 0.007612686419238647,
+      "val_accuracy": 0.9956666666666667
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.00856350117839045,
+      "train_accuracy": 0.995,
+      "val_loss": 0.006436090120114386,
+      "val_accuracy": 0.9963333333333333
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.008588620319755541,
+      "train_accuracy": 0.9952222222222222,
+      "val_loss": 0.006855429387340943,
+      "val_accuracy": 0.996
+    }
+  ],
+  "training_seconds": 72.12,
+  "seed": 42,
+  "note": "Test data are held-out devices 8 and 9; this is a sampled CPU training run."
+}

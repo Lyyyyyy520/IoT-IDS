@@ -44,6 +44,8 @@ def health():
         'model_loaded': engine.model_loaded,
         'model_path': active_model_path,
         'model_name': os.path.basename(active_model_path) if active_model_path else None,
+        'model_backend': engine.backend,
+        'model_error': engine.last_error or None,
         'uptime': 0,
         'timestamp': datetime.now().isoformat(),
     })
@@ -67,7 +69,8 @@ def models_select():
     if not model_path:
         return jsonify({'success': False, 'message': '模型不存在'}), 404
     if not switch_model(model_path):
-        return jsonify({'success': False, 'message': '模型加载失败，请确认文件为有效 ONNX 模型'}), 400
+        error = get_engine().last_error or '未知错误'
+        return jsonify({'success': False, 'message': f'模型加载失败：{error}'}), 400
     log_action('switch_model', f'model={os.path.basename(model_path)}')
     return jsonify({
         'success': True,
@@ -81,17 +84,21 @@ def models_select():
 def models_upload():
     upload = request.files.get('file')
     if not upload:
-        return jsonify({'success': False, 'message': '请选择要上传的 ONNX 模型文件'}), 400
+        return jsonify({
+            'success': False,
+            'message': '请选择 .ts、.pt/.pth 或 .onnx 模型文件',
+        }), 400
 
     original_name = upload.filename or ''
-    if not original_name.lower().endswith('.onnx'):
-        return jsonify({'success': False, 'message': '仅支持上传 .onnx 模型文件'}), 400
+    supported = ('.onnx', '.ts', '.torchscript', '.ptl', '.pt', '.pth')
+    if not original_name.lower().endswith(supported):
+        return jsonify({
+            'success': False,
+            'message': '仅支持 .ts、.torchscript、.ptl、.pt、.pth 或 .onnx 模型文件',
+        }), 400
 
     os.makedirs(_USER_MODEL_DIR, exist_ok=True)
-    filename = secure_filename(original_name) or f'user_model_{os.urandom(4).hex()}.onnx'
-    if not filename.lower().endswith('.onnx'):
-        filename = f'{filename}.onnx'
-
+    filename = secure_filename(original_name) or f'user_model_{os.urandom(4).hex()}.ts'
     base, ext = os.path.splitext(filename)
     target_path = os.path.join(_USER_MODEL_DIR, filename)
     counter = 1
@@ -100,21 +107,45 @@ def models_upload():
         counter += 1
 
     upload.save(target_path)
+    data_target_path = None
     data_upload = request.files.get('data_file')
     if data_upload:
-        data_filename = secure_filename(data_upload.filename or '') or f'{os.path.basename(target_path)}.data'
-        if not data_filename.endswith('.data'):
+        if ext.lower() != '.onnx':
+            try:
+                os.remove(target_path)
+            except OSError:
+                pass
+            return jsonify({
+                'success': False,
+                'message': '.data 外部权重文件只能与 ONNX 模型一起上传',
+            }), 400
+        data_filename = secure_filename(data_upload.filename or '')
+        if not data_filename.lower().endswith('.data'):
+            try:
+                os.remove(target_path)
+            except OSError:
+                pass
             return jsonify({'success': False, 'message': '外部权重文件必须以 .data 结尾'}), 400
         data_target_path = os.path.join(_USER_MODEL_DIR, data_filename)
         data_upload.save(data_target_path)
 
     if not switch_model(target_path):
-        return jsonify({'success': False, 'message': '文件已上传，但模型加载失败，请检查 ONNX 格式'}), 400
+        error = get_engine().last_error or '未知错误'
+        for invalid_path in (target_path, data_target_path):
+            if invalid_path:
+                try:
+                    os.remove(invalid_path)
+                except OSError:
+                    pass
+        return jsonify({
+            'success': False,
+            'message': f'模型校验失败，已撤销导入：{error}',
+        }), 400
 
     log_action('upload_model', f'model={os.path.basename(target_path)}')
     return jsonify({
         'success': True,
-        'message': '模型上传并切换成功',
+        'message': '模型校验通过，已导入并切换成功',
         'active_model_id': os.path.basename(target_path),
         'model': next((m for m in list_models() if m['path'] == os.path.abspath(target_path)), None),
         'items': list_models(),
@@ -513,8 +544,22 @@ def detect_upload():
     from models.inference import get_engine
 
     extractor = FeatureExtractor()
-    features_list = extractor.extract_from_pcap(filepath)
     engine = get_engine()
+    try:
+        extractor.validate_bundle()
+        if not engine.model_loaded:
+            raise RuntimeError(engine.last_error or '模型未加载')
+        features_list = extractor.extract_from_pcap(filepath)
+    except Exception as exc:
+        try:
+            os.remove(filepath)
+            os.rmdir(tmp_dir)
+        except Exception:
+            pass
+        return jsonify({
+            'error': '检测文件处理失败',
+            'message': str(exc),
+        }), 400
 
     results = []
     for feat in features_list:
@@ -542,6 +587,7 @@ def detect_upload():
         'attack_count': attack_count,
         'normal_count': len(results) - attack_count,
         'results': results,
+        'input_mode': 'real_n_baiot_csv' if filename.lower().endswith('.csv') else 'pcap_demo',
     })
 
 

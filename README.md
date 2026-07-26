@@ -51,7 +51,7 @@ API 服务运行在 http://localhost:5000
 | 目录 | 说明 |
 |------|------|
 | [frontend/](frontend/) | React + Vite + TypeScript Web 前端 |
-| [backend/](backend/) | Flask RESTful API + ONNX 推理服务 |
+| [backend/](backend/) | Flask RESTful API + TorchScript/PyTorch/ONNX 推理服务 |
 | [edge/](edge/) | 树莓派边缘部署脚本 |
 | [training/](training/) | 模型训练脚本（数据预处理 + 训练 + 量化） |
 | [docs/](docs/) | 项目标准文档（需求/技术/设计/API） |
@@ -75,3 +75,26 @@ API 服务运行在 http://localhost:5000
 - [ ] 阶段四：检测引擎
 - [ ] 阶段五：配置与收尾
 - [ ] 阶段六：演示准备
+
+
+## 导入已训练 CNN + LSTM 模型
+
+模型已经内置在项目中。首次使用或模型加载报错时，按以下顺序操作：
+
+```text
+1. 双击 导入CNN_LSTM模型.bat（英文备用：import_model.bat）
+2. 双击 重新初始化环境.bat
+3. 双击 一键启动.bat
+```
+
+导入脚本会同时安装 `best_model.ts`、`best_model.pt`、`feature_schema.json`、`scaler.json` 和 `scaler.pkl`，并删除可能指向旧目录的 `model_config.json`。详细说明见 `MODEL_IMPORT_GUIDE.txt`。
+
+## 真实 CNN + LSTM 模型
+
+项目已使用九组 N-BaIoT 数据完成首次真实训练，默认模型为：
+
+```text
+backend/data/best_model.ts
+```
+
+模型输入为连续 16 条记录、每条 21 个筛选特征，输出 Normal、Mirai、Gafgyt 三类。首次留出设备测试准确率为 98.22%。重新训练方法见 `training/训练说明.md`，可直接双击 `训练CNN_LSTM.bat`。

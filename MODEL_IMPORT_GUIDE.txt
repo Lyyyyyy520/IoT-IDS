@@ -1,0 +1,43 @@
+CNN + LSTM 模型导入与错误修复说明
+====================================
+
+推荐方法：
+1. 解压完整修正版项目。
+2. 双击“导入CNN_LSTM模型.bat”或“import_model.bat”。
+3. 第一次使用项目时，双击“重新初始化环境.bat”。
+4. 启动系统后进入“系统配置 -> 模型管理”，应显示 best_model.ts 且状态为“已加载”。
+
+模型文件说明：
+- best_model.ts：推荐直接运行的 TorchScript 模型。
+- best_model.pt：训练 checkpoint，修正版后端也支持导入。
+- feature_schema.json：21 个特征名称、序列长度和类别映射。
+- scaler.json：推荐使用的跨版本标准化参数。
+- scaler.pkl：兼容旧代码的标准化器。
+
+手动导入：
+将 model_bundle 文件夹中的五个文件复制到 backend\data，删除
+backend\data\model_config.json，然后运行：
+
+.\.venv\Scripts\python.exe training\verify_model.py
+
+常见错误：
+1. “仅支持 ONNX”或“.pt 无法导入”
+   原因：仍在使用旧版 backend/app.py 或 inference.py。
+   处理：使用本修正版完整项目，或覆盖修复补丁中的同名文件。
+
+2. “模型加载失败 / 输入维度错误”
+   原因：旧模型是 (batch,21)，新模型是 (batch,16,21)，代码和模型没有成套替换。
+   处理：模型、feature_schema.json、scaler.json 和后端代码必须一并覆盖。
+
+3. “No module named torch / flask / sklearn”
+   处理：双击“重新初始化环境.bat”，不要直接复制其他电脑的 .venv。
+
+4. “scaler.pkl 版本不兼容”
+   修正版默认优先读取 scaler.json，不再依赖 scikit-learn pickle 版本一致。
+
+5. 模型仍指向旧文件夹
+   原因：model_config.json 保存了旧的绝对路径。
+   处理：运行导入脚本；它会自动删除旧配置并重新选择 best_model.ts。
+
+注意：真实模型正式支持 N-BaIoT 原始 115 列 CSV，经筛选后输入 21 维特征。
+原始 PCAP 路径目前仍是演示流程，不能当作正式实验结果。
