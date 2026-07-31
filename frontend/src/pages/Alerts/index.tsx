@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { api, type AlertItem } from '../../api';
+import { useAuth } from '../../contexts/AuthContext';
 
 const riskColorMap: Record<string, string> = {
   critical: '#FF4444',
@@ -25,6 +26,7 @@ const riskLabelMap: Record<string, string> = {
 };
 
 export default function AlertsPage() {
+  const { isAdmin } = useAuth();
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -137,6 +139,7 @@ export default function AlertsPage() {
 
   // ---- Alert Actions ----
   const handleBlock = (record: AlertItem) => {
+    if (!isAdmin) return;
     api.blockIp(record.id)
       .then((res) => {
         message.success(res.message || `已拉黑 IP: ${record.src_ip}`);
@@ -147,6 +150,7 @@ export default function AlertsPage() {
   };
 
   const handleUnblock = (record: AlertItem) => {
+    if (!isAdmin) return;
     api.unblockIp(record.id)
       .then((res) => {
         message.success(res.message || `已解除对 ${record.src_ip} 的拉黑`);
@@ -157,6 +161,7 @@ export default function AlertsPage() {
   };
 
   const handleTrace = (record: AlertItem) => {
+    if (!isAdmin) return;
     api.traceAlert(record.id)
       .then((res) => {
         Modal.info({
@@ -170,6 +175,7 @@ export default function AlertsPage() {
   };
 
   const handleFalsePositive = (record: AlertItem) => {
+    if (!isAdmin) return;
     api.markFalsePositive(record.id)
       .then((res) => {
         message.success(res.message || '已标记为误报');
@@ -180,6 +186,7 @@ export default function AlertsPage() {
   };
 
   const handleUnmarkFalsePositive = (record: AlertItem) => {
+    if (!isAdmin) return;
     api.unmarkFalsePositive(record.id)
       .then((res) => {
         message.success(res.message || '已撤销误报标记');
@@ -247,31 +254,35 @@ export default function AlertsPage() {
             <Button size="small" icon={<EyeOutlined />} type="text"
               onClick={() => { setSelectedAlert(record); setDetailOpen(true); }} />
           </Tooltip>
-          {record.status === 'blocked' ? (
-            <Tooltip title="解除拉黑">
-              <Button size="small" icon={<UndoOutlined />} type="text" style={{ color: '#52c41a' }}
-                onClick={() => handleUnblock(record)} />
-            </Tooltip>
-          ) : (
-            <Tooltip title="拉黑 IP">
-              <Button size="small" icon={<StopOutlined />} type="text" danger
-                onClick={() => handleBlock(record)} />
-            </Tooltip>
-          )}
-          <Tooltip title="溯源分析">
-            <Button size="small" icon={<SearchOutlined />} type="text"
-              onClick={() => handleTrace(record)} />
-          </Tooltip>
-          {record.status === 'false_positive' ? (
-            <Tooltip title="撤销误报">
-              <Button size="small" icon={<UndoOutlined />} type="text" style={{ color: '#52c41a' }}
-                onClick={() => handleUnmarkFalsePositive(record)} />
-            </Tooltip>
-          ) : (
-            <Tooltip title="标记误报">
-              <Button size="small" icon={<CloseCircleOutlined />} type="text"
-                onClick={() => handleFalsePositive(record)} />
-            </Tooltip>
+          {isAdmin && (
+            <>
+              {record.status === 'blocked' ? (
+                <Tooltip title="解除拉黑">
+                  <Button size="small" icon={<UndoOutlined />} type="text" style={{ color: '#52c41a' }}
+                    onClick={() => handleUnblock(record)} />
+                </Tooltip>
+              ) : (
+                <Tooltip title="拉黑 IP">
+                  <Button size="small" icon={<StopOutlined />} type="text" danger
+                    onClick={() => handleBlock(record)} />
+                </Tooltip>
+              )}
+              <Tooltip title="溯源分析">
+                <Button size="small" icon={<SearchOutlined />} type="text"
+                  onClick={() => handleTrace(record)} />
+              </Tooltip>
+              {record.status === 'false_positive' ? (
+                <Tooltip title="撤销误报">
+                  <Button size="small" icon={<UndoOutlined />} type="text" style={{ color: '#52c41a' }}
+                    onClick={() => handleUnmarkFalsePositive(record)} />
+                </Tooltip>
+              ) : (
+                <Tooltip title="标记误报">
+                  <Button size="small" icon={<CloseCircleOutlined />} type="text"
+                    onClick={() => handleFalsePositive(record)} />
+                </Tooltip>
+              )}
+            </>
           )}
         </Space>
       ),
@@ -352,7 +363,7 @@ export default function AlertsPage() {
         title="告警详情"
         open={detailOpen}
         onCancel={() => setDetailOpen(false)}
-        footer={[
+        footer={isAdmin ? [
           selectedAlert?.status === 'blocked' ? (
             <Button key="unblock" icon={<UndoOutlined />} style={{ color: '#52c41a' }}
               onClick={() => { if (selectedAlert) handleUnblock(selectedAlert); }}>解除拉黑</Button>
@@ -369,6 +380,8 @@ export default function AlertsPage() {
             <Button key="fp" icon={<CloseCircleOutlined />}
               onClick={() => { if (selectedAlert) handleFalsePositive(selectedAlert); }}>标记误报</Button>
           ),
+          <Button key="close" type="primary" onClick={() => setDetailOpen(false)}>关闭</Button>,
+        ] : [
           <Button key="close" type="primary" onClick={() => setDetailOpen(false)}>关闭</Button>,
         ]}
         width={640}

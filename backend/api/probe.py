@@ -4,6 +4,7 @@ Probe Integration API — receives data from Raspberry Pi probe nodes
 from flask import Blueprint, request, jsonify
 from database import query_all, query_one, execute
 from datetime import datetime
+from services.auth import require_auth, require_admin
 
 probe_bp = Blueprint('probe', __name__)
 
@@ -142,6 +143,7 @@ def push_data():
 
 
 @probe_bp.route('/api/probe/list')
+@require_auth
 def list_probes():
     """List all registered probes."""
     probes = query_all("SELECT * FROM assets WHERE device_type = 'probe' ORDER BY last_seen DESC")
@@ -149,6 +151,7 @@ def list_probes():
 
 
 @probe_bp.route('/api/probe/status')
+@require_auth
 def probe_status():
     """Get aggregate probe status."""
     total = query_one("SELECT COUNT(*) as c FROM assets WHERE device_type='probe'")['c']
@@ -165,6 +168,7 @@ def probe_status():
 
 
 @probe_bp.route('/api/probe/control', methods=['POST'])
+@require_admin
 def probe_control():
     data = request.get_json() or {}
     action = data.get('action', '')

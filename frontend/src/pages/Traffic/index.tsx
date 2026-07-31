@@ -3,10 +3,12 @@ import { Card, Row, Col, Table, Tag, Button, Space, Statistic, Slider, Upload, m
 import { ReloadOutlined, PlayCircleOutlined, PauseCircleOutlined, UploadOutlined, InboxOutlined } from '@ant-design/icons';
 import TrafficChart from '../../components/TrafficChart';
 import { api } from '../../api';
+import { useAuth } from '../../contexts/AuthContext';
 
 const { Dragger } = Upload;
 
 export default function TrafficPage() {
+  const { isAdmin } = useAuth();
   const [detectMode, setDetectMode] = useState<'offline' | 'realtime'>(() => {
     const saved = localStorage.getItem('detectMode');
     return (saved === 'offline' || saved === 'realtime') ? saved : 'realtime';
@@ -16,6 +18,14 @@ export default function TrafficPage() {
     setDetectMode(mode);
     localStorage.setItem('detectMode', mode);
   };
+
+  // Normal users are restricted to the read-only realtime view.
+  useEffect(() => {
+    if (!isAdmin && detectMode !== 'realtime') {
+      setDetectMode('realtime');
+      localStorage.setItem('detectMode', 'realtime');
+    }
+  }, [isAdmin, detectMode]);
   const [captureStatus, setCaptureStatus] = useState<any>(null);     // 仿真状态
   const [realProbeStatus, setRealProbeStatus] = useState<any>(null);  // 真实探头状态
   const [trafficLogs, setTrafficLogs] = useState<any[]>([]);
@@ -53,10 +63,11 @@ export default function TrafficPage() {
   };
 
   const handleStartCapture = () => {
+    if (!isAdmin) { message.warning('仅管理员可控制抓包'); return; }
     if (useRealCapture) {
       pendingRef.current = true;
       setRealProbeStatus((prev: any) => ({ ...(prev || {}), capturing: true }));
-      fetch('/api/probe/control', { method: 'POST', headers: {'Content-Type':'application/json'},
+      fetch('/api/probe/control', { method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ action: 'start', probe_name: 'Pi-001' }) })
         .then(() => { message.success('已向树莓派发送启动指令'); })
         .catch(() => { message.error('指令发送失败'); setRealProbeStatus((prev:any)=>({...(prev||{}),capturing:false})); })
@@ -67,10 +78,11 @@ export default function TrafficPage() {
   };
 
   const handleStopCapture = () => {
+    if (!isAdmin) { message.warning('仅管理员可控制抓包'); return; }
     if (useRealCapture) {
       pendingRef.current = true;
       setRealProbeStatus((prev: any) => ({ ...(prev || {}), capturing: false }));
-      fetch('/api/probe/control', { method: 'POST', headers: {'Content-Type':'application/json'},
+      fetch('/api/probe/control', { method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ action: 'stop', probe_name: 'Pi-001' }) })
         .then(() => { message.info('已向树莓派发送停止指令'); })
         .catch(() => { message.error('指令发送失败'); setRealProbeStatus((prev:any)=>({...(prev||{}),capturing:true})); })
@@ -89,7 +101,7 @@ export default function TrafficPage() {
       api.getTrafficLogs({ source: 'real' }).then(logs => {
         console.log('REAL logs:', logs?.items?.length, '条');
         setTrafficLogs(logs?.items || []);
-        fetch('/api/probe/control-status?name=Pi-001').then(r => r.json()).catch(() => ({ capturing: false }))
+        fetch('/api/probe/control-status?name=Pi-001', { credentials: 'include' }).then(r => r.json()).catch(() => ({ capturing: false }))
           .then(ctrl => {
             setRealProbeStatus((prev: any) => ({ ...(prev || {}), capturing: ctrl?.capturing || false }));
           });
@@ -115,6 +127,7 @@ export default function TrafficPage() {
 
   // PCAP 上传检测
   const handlePcapUpload = (file: File) => {
+    if (!isAdmin) { message.warning('仅管理员可上传 PCAP 进行检测'); return false; }
     setUploading(true);
     api.uploadPcap(file)
       .then((res) => saveResult(res))
@@ -168,12 +181,14 @@ export default function TrafficPage() {
         <Button type={detectMode === 'realtime' ? 'primary' : 'default'} onClick={() => switchMode('realtime')}>
           📡 实时网卡检测
         </Button>
-        <Button type={detectMode === 'offline' ? 'primary' : 'default'} onClick={() => switchMode('offline')}>
-          📁 离线文件检测
-        </Button>
+        {isAdmin && (
+          <Button type={detectMode === 'offline' ? 'primary' : 'default'} onClick={() => switchMode('offline')}>
+            📁 离线文件检测
+          </Button>
+        )}
       </div>
 
-      {detectMode === 'offline' ? (
+      {isAdmin && detectMode === 'offline' ? (
         /* ===== 离线模式：PCAP 上传检测 ===== */
         <>
           <Card title="PCAP 文件离线检测" style={{ marginBottom: 16 }}>
@@ -263,7 +278,7 @@ export default function TrafficPage() {
               ) : (
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12, minWidth: 200 }}>
                   <span style={{ color: 'var(--text-secondary)', fontSize: 13, whiteSpace: 'nowrap' }}>攻击比例</span>
-                  <Slider min={0} max={100} value={attackRatio} onChange={handleRatioChange} style={{ flex: 1 }}
+                  <Slider min={0} max={100} value={attackRatio} onChange={handleRatioChange} disabled={!isAdmin} style={{ flex: 1 }}
                     tooltip={{ formatter: (v) => `${v}%` }} />
                   <span style={{ color: attackRatio > 50 ? 'var(--risk-critical)' : 'var(--text-secondary)', fontWeight: 600, minWidth: 40, textAlign: 'right' }}>{attackRatio}%</span>
                 </div>
@@ -280,9 +295,9 @@ export default function TrafficPage() {
                     <Statistic title="探针采集"
                       value={realProbeStatus?.capturing ? '采集中' : '已停止'}
                       valueStyle={{ color: realProbeStatus?.capturing ? 'var(--risk-low)' : 'var(--text-muted)', fontSize: 22 }}
-                      suffix={realProbeStatus?.capturing
+                      suffix={isAdmin ? (realProbeStatus?.capturing
                         ? <PauseCircleOutlined onClick={handleStopCapture} style={{ cursor: 'pointer', color: 'var(--risk-critical)' }} />
-                        : <PlayCircleOutlined onClick={handleStartCapture} style={{ cursor: 'pointer', color: 'var(--risk-low)' }} />} />
+                        : <PlayCircleOutlined onClick={handleStartCapture} style={{ cursor: 'pointer', color: 'var(--risk-low)' }} />) : null} />
                   </Card>
                 </Col>
                 <Col xs={24} sm={12} md={6}>
@@ -305,9 +320,9 @@ export default function TrafficPage() {
                   <Card size="small">
                     <Statistic title="抓包状态" value={captureStatus?.running ? '运行中' : '已停止'}
                       valueStyle={{ color: captureStatus?.running ? 'var(--risk-low)' : 'var(--text-muted)', fontSize: 22 }}
-                      suffix={captureStatus?.running
+                      suffix={isAdmin ? (captureStatus?.running
                         ? <PauseCircleOutlined onClick={handleStopCapture} style={{ cursor: 'pointer', color: 'var(--risk-critical)' }} />
-                        : <PlayCircleOutlined onClick={handleStartCapture} style={{ cursor: 'pointer', color: 'var(--risk-low)' }} />} />
+                        : <PlayCircleOutlined onClick={handleStartCapture} style={{ cursor: 'pointer', color: 'var(--risk-low)' }} />) : null} />
                   </Card>
                 </Col>
                 <Col xs={24} sm={12} md={6}>

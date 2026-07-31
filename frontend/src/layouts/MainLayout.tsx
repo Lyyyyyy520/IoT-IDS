@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Button, Select, DatePicker, Space, Tag, Dropdown } from 'antd';
+import { Layout, Menu, Button, Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   DashboardOutlined,
@@ -8,10 +8,7 @@ import {
   SettingOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  ReloadOutlined,
-  UserOutlined,
   LogoutOutlined,
-  ClusterOutlined,
   SafetyOutlined,
   FileTextOutlined,
   SwapOutlined,
@@ -23,7 +20,14 @@ const { Sider, Content } = Layout;
 
 type MenuItem = Required<MenuProps>['items'][number];
 
-const navItems: MenuItem[] = [
+const userNavItems: MenuItem[] = [
+  { key: '/dashboard', icon: <DashboardOutlined />, label: '态势大屏' },
+  { key: '/alerts', icon: <AlertOutlined />, label: '告警中心' },
+  { key: '/traffic', icon: <SwapOutlined />, label: '流量分析' },
+  { key: '/assets', icon: <MonitorOutlined />, label: '资产监控' },
+];
+
+const adminNavItems: MenuItem[] = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '态势大屏' },
   { key: '/alerts', icon: <AlertOutlined />, label: '告警中心' },
   { key: '/traffic', icon: <SwapOutlined />, label: '流量分析' },
@@ -37,9 +41,10 @@ export default function MainLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuth();
+  const { user, isAdmin, logout } = useAuth();
 
   const currentKey = '/' + location.pathname.split('/')[1];
+  const navItems = isAdmin ? adminNavItems : userNavItems;
 
   const handleLogout = async () => {
     await logout();
@@ -51,7 +56,7 @@ export default function MainLayout() {
       key: 'role',
       label: (
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-          {user?.role === 'admin' ? '超级管理员' : '只读访客'}
+          {isAdmin ? '管理员' : '普通用户'}
         </span>
       ),
       disabled: true,
@@ -68,7 +73,6 @@ export default function MainLayout() {
 
   return (
     <Layout style={{ height: '100vh' }}>
-      {/* ---- Sidebar ---- */}
       <Sider
         collapsible
         collapsed={collapsed}
@@ -77,7 +81,6 @@ export default function MainLayout() {
         width={240}
         style={{ borderRight: '1px solid var(--border-color)', overflow: 'auto' }}
       >
-        {/* Logo */}
         <div
           style={{
             height: 64,
@@ -107,9 +110,7 @@ export default function MainLayout() {
           style={{ borderInlineEnd: 'none', marginTop: 8 }}
         />
 
-        {/* Bottom zone */}
         <div style={{ position: 'absolute', bottom: 16, width: '100%' }}>
-          {/* User info + logout */}
           {!collapsed && user && (
             <div
               style={{
@@ -150,7 +151,7 @@ export default function MainLayout() {
                       {user.username}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      {user.role === 'admin' ? '管理员' : '访客'}
+                      {isAdmin ? '管理员' : '用户'}
                     </div>
                   </div>
                 </div>
@@ -158,7 +159,6 @@ export default function MainLayout() {
             </div>
           )}
 
-          {/* Collapse button */}
           <div style={{ textAlign: 'center' }}>
             <Button
               type="text"
@@ -170,10 +170,7 @@ export default function MainLayout() {
         </div>
       </Sider>
 
-      {/* ---- Main Area ---- */}
       <Layout>
-
-        {/* Page Content */}
         <Content className="page-container">
           <Outlet />
         </Content>
