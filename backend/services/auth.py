@@ -1,11 +1,20 @@
 """
-Authentication Service — Flask Session-based login/logout with role control
+Authentication Service — Flask Session-based login/logout with role control.
+
+Permission rule:
+- username == "admin": administrator
+- every other authenticated account: normal user
 """
 from functools import wraps
 from flask import session, jsonify, request
 from werkzeug.security import check_password_hash
 
 from database import query_one, execute
+
+
+def effective_role(username: str) -> str:
+    """Return the effective role derived from the account name."""
+    return 'admin' if username == 'admin' else 'user'
 
 
 def login_user(username: str, password: str) -> dict:
@@ -15,20 +24,18 @@ def login_user(username: str, password: str) -> dict:
         return {'success': False, 'message': '账号不存在'}
 
     if not check_password_hash(user['password_hash'], password):
-        # Log failed attempt
         execute(
             "INSERT INTO audit_logs (user_id, username, action, detail) VALUES (?, ?, ?, ?)",
             (user['id'], username, 'login_failed', '密码错误'),
         )
         return {'success': False, 'message': '密码错误'}
 
-    # Create session
+    role = effective_role(user['username'])
     session['user_id'] = user['id']
     session['username'] = user['username']
-    session['role'] = user['role']
+    session['role'] = role
     session.permanent = True
 
-    # Log successful login
     ip = request.remote_addr or 'unknown'
     execute(
         "INSERT INTO audit_logs (user_id, username, action, detail, ip_address) VALUES (?, ?, ?, ?, ?)",
@@ -37,10 +44,11 @@ def login_user(username: str, password: str) -> dict:
 
     return {
         'success': True,
+        'message': '登录成功',
         'user': {
             'id': user['id'],
             'username': user['username'],
-            'role': user['role'],
+            'role': role,
         },
     }
 
@@ -59,13 +67,17 @@ def logout_user():
 
 
 def get_current_user() -> dict | None:
-    """Get current logged-in user from session."""
+    """Get current logged-in user and normalize its effective role."""
     if 'user_id' not in session:
         return None
+
+    username = session.get('username', '')
+    role = effective_role(username)
+    session['role'] = role
     return {
         'id': session['user_id'],
-        'username': session['username'],
-        'role': session['role'],
+        'username': username,
+        'role': role,
     }
 
 
@@ -80,13 +92,14 @@ def require_auth(f):
 
 
 def require_admin(f):
-    """Decorator: require admin role."""
+    """Decorator: require the account named 'admin'."""
     @wraps(f)
     def decorated(*args, **kwargs):
         if 'user_id' not in session:
-            return jsonify({'error': '未登录'}), 401
-        if session.get('role') != 'admin':
+            return jsonify({'error': '未登录，请先登录'}), 401
+        if session.get('username') != 'admin':
             return jsonify({'error': '权限不足，仅管理员可操作'}), 403
+        session['role'] = 'admin'
         return f(*args, **kwargs)
     return decorated
 

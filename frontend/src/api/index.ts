@@ -8,6 +8,7 @@ const BASE = '/api';
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     ...options,
   });
   if (!res.ok) throw new Error(`API Error: ${res.status} ${res.statusText}`);
@@ -147,6 +148,9 @@ export const api = {
   uploadPcap: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    return fetch(`${BASE}/detect/upload`, { method: 'POST', body: formData }).then((r) => r.json());
+    return fetch(`${BASE}/detect/upload`, { method: 'POST', body: formData, credentials: 'include' }).then(async (r) => {
+      if (!r.ok) throw new Error(`API Error: ${r.status} ${r.statusText}`);
+      return r.json();
+    });
   },
 };

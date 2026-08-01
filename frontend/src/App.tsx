@@ -11,22 +11,38 @@ import Logs from './pages/Logs';
 import Settings from './pages/Settings';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
-/** Protect routes: redirect to /login if not authenticated */
+function LoadingScreen() {
+  return (
+    <div
+      style={{
+        height: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--bg-base)',
+      }}
+    >
+      <Spin size="large" />
+    </div>
+  );
+}
+
+/** Redirect unauthenticated visitors to the login page. */
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { authenticated, loading } = useAuth();
 
-  if (loading) {
-    return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)' }}>
-        <Spin size="large" />
-      </div>
-    );
-  }
+  if (loading) return <LoadingScreen />;
+  if (!authenticated) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
 
-  if (!authenticated) {
-    return <Navigate to="/login" replace />;
-  }
+/** Only the account named "admin" may enter administrator pages. */
+function RequireAdmin({ children }: { children: React.ReactNode }) {
+  const { authenticated, loading, isAdmin } = useAuth();
 
+  if (loading) return <LoadingScreen />;
+  if (!authenticated) return <Navigate to="/login" replace />;
+  if (!isAdmin) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -34,10 +50,8 @@ export default function App() {
   return (
     <AuthProvider>
       <Routes>
-        {/* Public */}
         <Route path="/login" element={<LoginPage />} />
 
-        {/* Protected — all pages behind login */}
         <Route
           path="/"
           element={
@@ -47,16 +61,19 @@ export default function App() {
           }
         >
           <Route index element={<Navigate to="/dashboard" replace />} />
+
+          {/* Visible to all authenticated users. */}
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="alerts" element={<Alerts />} />
           <Route path="traffic" element={<Traffic />} />
-          <Route path="policy" element={<Policy />} />
           <Route path="assets" element={<Assets />} />
-          <Route path="logs" element={<Logs />} />
           <Route path="settings" element={<Settings />} />
+
+          {/* Administrator-only pages. */}
+          <Route path="policy" element={<RequireAdmin><Policy /></RequireAdmin>} />
+          <Route path="logs" element={<RequireAdmin><Logs /></RequireAdmin>} />
         </Route>
 
-        {/* Catch-all */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </AuthProvider>

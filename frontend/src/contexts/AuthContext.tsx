@@ -1,5 +1,7 @@
 /**
- * Authentication Context — manages login state across the app
+ * Authentication Context — manages login state across the app.
+ * The account named "admin" is the only administrator account.
+ * Every other authenticated account is treated as a normal user.
  */
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 
@@ -13,6 +15,7 @@ interface AuthState {
   authenticated: boolean;
   user: User | null;
   loading: boolean;
+  isAdmin: boolean;
   login: (username: string, password: string) => Promise<{ success: boolean; message: string }>;
   logout: () => Promise<void>;
 }
@@ -23,10 +26,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Check existing session on mount
+  // Check existing session on mount.
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include' })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) return { authenticated: false };
+        return r.json();
+      })
       .then((d) => {
         if (d.authenticated) setUser(d.user);
       })
@@ -51,8 +57,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  // Do not trust a client-side role field for privilege decisions.
+  // This mirrors the backend rule: only username "admin" is privileged.
+  const isAdmin = user?.username === 'admin';
+
   return (
-    <AuthContext.Provider value={{ authenticated: !!user, user, loading, login, logout }}>
+    <AuthContext.Provider value={{ authenticated: !!user, user, loading, isAdmin, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
