@@ -56,3 +56,4 @@ temp/
 .env
 .env.local
 training/data/
+.iot-ids-initialized.json
