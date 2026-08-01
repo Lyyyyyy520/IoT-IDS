@@ -25,6 +25,7 @@ const userNavItems: MenuItem[] = [
   { key: '/alerts', icon: <AlertOutlined />, label: '告警中心' },
   { key: '/traffic', icon: <SwapOutlined />, label: '流量分析' },
   { key: '/assets', icon: <MonitorOutlined />, label: '资产监控' },
+  { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
 
 const adminNavItems: MenuItem[] = [

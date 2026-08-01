@@ -541,7 +541,7 @@ def export_excel():
 
 
 @app.route('/api/data/cleanup', methods=['POST'])
-@require_admin
+@require_auth
 def data_cleanup():
     """清空全部历史数据"""
     from database import get_config
@@ -969,7 +969,7 @@ def logs_traffic():
 
 # ---- Configuration ----
 @app.route('/api/config', methods=['GET'])
-@require_admin
+@require_auth
 def get_config():
     from database import get_config as gc
     return jsonify({
@@ -986,7 +986,7 @@ def get_config():
 
 
 @app.route('/api/config', methods=['PUT'])
-@require_admin
+@require_auth
 def update_config():
     from database import set_config as sc
     data = request.get_json() or {}

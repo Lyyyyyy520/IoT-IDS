@@ -67,11 +67,11 @@ export default function App() {
           <Route path="alerts" element={<Alerts />} />
           <Route path="traffic" element={<Traffic />} />
           <Route path="assets" element={<Assets />} />
+          <Route path="settings" element={<Settings />} />
 
           {/* Administrator-only pages. */}
           <Route path="policy" element={<RequireAdmin><Policy /></RequireAdmin>} />
           <Route path="logs" element={<RequireAdmin><Logs /></RequireAdmin>} />
-          <Route path="settings" element={<RequireAdmin><Settings /></RequireAdmin>} />
         </Route>
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
