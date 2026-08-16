@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+.npm-cache/
+
+# Expo
+.expo/
+dist/
+web-build/
+
+# Native build output
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
