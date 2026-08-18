@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "IoT IDS",
+    "slug": "iot-ids-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0D1117",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "softwareKeyboardLayoutMode": "pan"
+    },
+    "extra": {
+      "apiBaseUrl": ""
+    }
+  }
+}
