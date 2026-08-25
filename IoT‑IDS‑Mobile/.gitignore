@@ -29,3 +29,6 @@ yarn-error.*
 # IDE
 .idea/
 .vscode/
+
+# Expo export test output
+.expo-export-test/
