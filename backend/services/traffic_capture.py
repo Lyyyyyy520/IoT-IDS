@@ -29,6 +29,23 @@ try:
 except Exception:
     ONNX_AVAILABLE = False
 
+# Try GAT flow-based detection (binary)
+try:
+    from services.gat_detector import RealTimeGATDetector
+    from services.cicids_feature_extract import FlowFeatureExtractor
+    GAT_AVAILABLE = True
+except Exception:
+    GAT_AVAILABLE = False
+
+# Try device graph detection (4-level device risk)
+try:
+    from services.device_detector import DeviceGraphDetector, FlowAggregator
+    DEVICE_GNN_AVAILABLE = True
+except Exception:
+    DEVICE_GNN_AVAILABLE = False
+
+FLOW_PACKET_THRESHOLD = 4   # packets per flow before extraction
+
 
 class TrafficCapture:
     """Background traffic capture with dual-engine detection."""
@@ -40,6 +57,24 @@ class TrafficCapture:
         self.alert_count = 0
         self.attack_ratio = 0.25
         self.on_alert: Optional[Callable] = None  # callback(alert_dict)
+        # GAT flow-based detection state
+        self.gat_detector = None
+        self.flow_buffers = {}   # flow key -> FlowFeatureExtractor
+        if GAT_AVAILABLE:
+            try:
+                self.gat_detector = RealTimeGATDetector(batch_size=8)
+            except Exception:
+                self.gat_detector = None
+        # Device graph detection state (4-level device risk)
+        self.device_detector = None
+        self.device_aggregator = FlowAggregator() if DEVICE_GNN_AVAILABLE else None
+        self.device_risk_cache = {}
+        if DEVICE_GNN_AVAILABLE:
+            try:
+                self.device_detector = DeviceGraphDetector(
+                    window_seconds=60, community_subnet='192.168.4.')
+            except Exception:
+                self.device_detector = None
 
     def start(self, interface: Optional[str] = None, use_scapy: bool = False, attack_ratio: float = 0.25):
         """Start capture in background thread."""
@@ -60,6 +95,14 @@ class TrafficCapture:
     def stop(self):
         """Stop capture."""
         self.running = False
+        # Flush any remaining buffered GAT flows
+        if self.gat_detector:
+            try:
+                leftover = self.gat_detector.flush()
+                if leftover:
+                    self._emit_gat_alerts(leftover)
+            except Exception:
+                pass
         return {'success': True, 'packet_count': self.packet_count, 'alert_count': self.alert_count}
 
     def status(self):
@@ -70,6 +113,10 @@ class TrafficCapture:
             'alert_count': self.alert_count,
             'scapy_available': SCAPY_AVAILABLE,
             'onnx_available': ONNX_AVAILABLE,
+            'gat_available': GAT_AVAILABLE and self.gat_detector is not None,
+            'gat_loaded': self.gat_detector.model_loaded if self.gat_detector else False,
+            'device_gnn_available': DEVICE_GNN_AVAILABLE and self.device_detector is not None,
+            'device_gnn_loaded': self.device_detector.model_loaded if self.device_detector else False,
         }
 
     def _process_packet(self, src_ip: str, dst_ip: str, src_port: int, dst_port: int,
@@ -77,6 +124,12 @@ class TrafficCapture:
                          known_normal: bool = False):
         """Process a single packet through the detection pipeline."""
         self.packet_count += 1
+
+        # 0. GAT flow-based detection (binary Normal/Attack)
+        self._feed_gat_flow(src_ip, dst_ip, src_port, dst_port, protocol, length, flags)
+
+        # 0.5. Device graph detection (accumulate packets into flows)
+        self._feed_device_flow(src_ip, dst_ip, src_port, dst_port, protocol, length, flags)
 
         # 1. Rule Engine
         flow = FlowRecord(
@@ -260,7 +313,7 @@ class TrafficCapture:
                     self._process_packet(random.choice(sensors), hub, random.randint(40000,50000),
                                          1883, 'TCP', random.randint(60,200), 'PA')
                 elif nt < 0.7:
-                    self._process_packet(hub, random.choice(plugs), 80, random.randint(40000,50000),
+                    self._process_packet(hub, random.choice(plugs), random.randint(40000,50000),
                                          1883, 'TCP', random.randint(80,300), 'PA')
                 elif nt < 0.85:
                     self._process_packet(random.choice(doors), cloud, random.randint(40000,50000),
@@ -269,6 +322,104 @@ class TrafficCapture:
                     self._process_packet(dev, hub, random.randint(40000,50000),
                                          random.choice([53,80]), random.choice(['TCP','UDP']),
                                          random.randint(60,500), known_normal=True)
+
+
+    # ---- GAT flow-based detection --------------------------------------- #
+    def _feed_gat_flow(self, src_ip, dst_ip, src_port, dst_port, protocol, length, flags):
+        """Buffer packets into flows and run GAT detection when a flow completes."""
+        if not self.gat_detector:
+            return
+        proto_num = 1 if protocol == 'TCP' else 2 if protocol == 'UDP' else 3
+        # Broad flow key (src, dst, proto): ports vary per packet in real traffic
+        # and are not part of the 72 GAT features, so grouping by host-pair+proto
+        # lets scan/flood bursts accumulate into a single flow.
+        key = (src_ip, dst_ip, protocol)
+        if key not in self.flow_buffers:
+            self.flow_buffers[key] = FlowFeatureExtractor(proto_num)
+        self.flow_buffers[key].add_packet(time.time(), True, length, flags)
+
+        if len(self.flow_buffers[key].ts) >= FLOW_PACKET_THRESHOLD:
+            feats = self.flow_buffers[key].extract()
+            del self.flow_buffers[key]
+            if feats is not None:
+                results = self.gat_detector.detect_flow(feats, key)
+                if results:
+                    self._emit_gat_alerts(results)
+
+    def _emit_gat_alerts(self, results):
+        """Generate alerts from GAT batch results (attack flows only)."""
+        for r in results:
+            if not r.get('is_attack'):
+                continue
+            flow_id = r.get('flow_id')
+            if not flow_id:
+                continue
+            src_ip, dst_ip, protocol = flow_id
+            conf = r.get('confidence', 0.0)
+            risk_level = 'high' if conf >= 0.95 else 'medium'
+            self.alert_count += 1
+            from database import query_one as _q, get_config
+            window = int(get_config('merge_window_minutes', '5'))
+            dup = _q(
+                "SELECT COUNT(*) as c FROM alerts WHERE attack_type = 'GAT' AND src_ip = ? "
+                "AND created_at > datetime('now', ? || ' minutes', 'localtime')",
+                (src_ip, f'-{window}'),
+            )
+            if dup and dup['c'] > 0:
+                continue  # dedup within merge window
+            execute(
+                "INSERT INTO alerts (risk_level, attack_type, src_ip, dst_ip, src_port, dst_port, protocol, confidence, description, status) "
+                "VALUES (?,?,?,?,?,?,?,?,?,'new')",
+                (risk_level, 'GAT', src_ip, dst_ip, 0, 0, protocol,
+                 round(conf, 2), f'[GAT]{protocol} {src_ip} -> {dst_ip} (置信度 {conf:.1%})'),
+            )
+
+    # ---- Device graph detection (4-level device risk) -------------------- #
+    def _feed_device_flow(self, src_ip, dst_ip, src_port, dst_port, protocol, length, flags):
+        """将数据包累积到设备图聚合器。"""
+        if not self.device_aggregator:
+            return
+        self.device_aggregator.add_packet(
+            src_ip, dst_ip, src_port, dst_port, protocol, length, flags)
+
+    def device_detect(self):
+        """冲刷聚合的流，运行设备图检测，返回 {设备IP: {level, name, probs}}。"""
+        if not self.device_detector or not self.device_aggregator:
+            return {}
+        flows = self.device_aggregator.flush()
+        for f in flows:
+            self.device_detector.add_flow(f)
+        result = self.device_detector.detect_window()
+        if result:
+            self.device_risk_cache = result
+            self._emit_device_alerts(result)
+        return result
+
+    def _emit_device_alerts(self, result):
+        """对高危设备（红/橙）生成告警。"""
+        for ip, r in result.items():
+            level = r['level']
+            if level < 2:  # 绿/黄 不告警
+                continue
+            conf = float(r['probs'].max())
+            risk = 'critical' if level == 3 else 'high'
+            attack_type = 'Botnet' if level == 3 else 'DoS'
+            from database import query_one as _q, get_config
+            window = int(get_config('merge_window_minutes', '5'))
+            dup = _q(
+                "SELECT COUNT(*) as c FROM alerts WHERE attack_type = ? AND src_ip = ? "
+                "AND created_at > datetime('now', ? || ' minutes', 'localtime')",
+                (attack_type, ip, f'-{window}'),
+            )
+            if dup and dup['c'] > 0:
+                continue  # 合并窗口内去重
+            self.alert_count += 1
+            execute(
+                "INSERT INTO alerts (risk_level, attack_type, src_ip, dst_ip, src_port, dst_port, protocol, confidence, description, status) "
+                "VALUES (?,?,?,?,?,?,?,?,?,'new')",
+                (risk, attack_type, ip, '', 0, 0, '', round(conf, 2),
+                 f'[设备图]设备 {ip} 风险等级: {r["name"]} (置信度 {conf:.1%})'),
+            )
 
 
 # ---- Global singleton ----

@@ -56,3 +56,6 @@ temp/
 .env
 .env.local
 training/data/
+
+# Expo generated QR
+expo-qr.png

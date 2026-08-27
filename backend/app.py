@@ -588,6 +588,48 @@ def capture_status():
     return jsonify(get_capture().status())
 
 
+# ---- GAT Detection Status ----
+@app.route('/api/gat/status')
+@require_auth
+def gat_status():
+    cap = get_capture()
+    status = cap.status()
+    return jsonify({
+        'model_loaded': status.get('gat_loaded', False),
+        'available': status.get('gat_available', False),
+        'model': 'GAT (Graph Attention Network)',
+        'classification': 'binary (Normal/Attack)',
+        'feature_dim': 72,
+        'dataset': 'CICIDS2017',
+    })
+
+
+# ---- Device Graph Detection (4-level device risk) ----
+@app.route('/api/device/status')
+@require_auth
+def device_status():
+    cap = get_capture()
+    status = cap.status()
+    return jsonify({
+        'model_loaded': status.get('device_gnn_loaded', False),
+        'available': status.get('device_gnn_available', False),
+        'model': 'Device Graph GNN (GAT)',
+        'classification': '4-level device risk (正常/侦察/拒绝服务/僵尸网络)',
+        'feature_dim': 13,
+        'dataset': 'CICIoT2023',
+        'risk_cache': cap.device_risk_cache,
+    })
+
+
+@app.route('/api/device/detect', methods=['POST'])
+@require_auth
+def device_detect():
+    cap = get_capture()
+    result = cap.device_detect()
+    log_action('device_detect', f'devices={len(result)}')
+    return jsonify({'success': True, 'devices': result, 'count': len(result)})
+
+
 # ---- Traffic Logs ----
 @app.route('/api/traffic/logs')
 @require_auth
