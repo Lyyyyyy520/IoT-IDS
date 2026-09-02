@@ -110,7 +110,7 @@ void doAttack() {
   lastAttack = now;
   for (int i = 0; i < 3; i++) {
     udp.beginPacket(ATTACK_TARGET, ATTACK_PORT);
-    udp.write((uint8_t)"\x00\x00\x00\x00", 4);
+    udp.write((const uint8_t*)"\x00\x00\x00\x00", 4);
     udp.endPacket();
   }
 }

@@ -33,18 +33,19 @@
 #define DEVICE_SENSOR   4   // 温湿度传感器（DHT11）
 #define DEVICE_SPEAKER  5   // 智能音箱（蜂鸣器发声）
 
-#define DEVICE_TYPE DEVICE_SENSOR   // ← 改成你要烧录的设备
+#define DEVICE_TYPE DEVICE_LIGHT   // ← 改成你要烧录的设备
 
 // WiFi（树莓派热点）
 const char* WIFI_SSID = "iot-community";
-const char* WIFI_PASS = "12345678";
+const char* WIFI_PASS = "12345678";   // 按实际密码填，注意空格
+
 
 // MQTT（树莓派 Broker）
 const char* MQTT_BROKER = "192.168.4.1";
 const int   MQTT_PORT   = 1883;
 
 // 设备唯一 ID（用于 MQTT topic，建议每台不同）
-const char* DEVICE_ID   = "sensor-01";
+const char* DEVICE_ID   = "light-01";
 
 // 引脚（按设备类型使用对应引脚）
 #define PIN_SERVO   0   // 门禁舵机
@@ -181,7 +182,7 @@ void doAttack() {
 
   for (int i = 0; i < 3; i++) {
     udp.beginPacket(ATTACK_TARGET, ATTACK_PORT);
-    udp.write((uint8_t)"\x00\x00\x00\x00", 4);
+    udp.write((const uint8_t*)"\x00\x00\x00\x00", 4);
     udp.endPacket();
   }
   actuatorAttack();  // 触发设备专属"被入侵反应"
@@ -192,18 +193,33 @@ void doAttack() {
 void connectWiFi() {
   Serial.printf("连接 WiFi: %s\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  int tries = 0;
-  while (WiFi.status() != WL_CONNECTED && tries < 30) {
-    delay(500);
-    Serial.print(".");
-    tries++;
+  WiFi.disconnect();
+  delay(200);
+
+  // 关键修复：ESP32-C3 克隆板默认发射功率过高会导致天线失真、能扫描但连不上，
+  // 必须降低发射功率。逐档尝试，直到连上为止。
+  wifi_power_t powers[] = {WIFI_POWER_8_5dBm, WIFI_POWER_15dBm, WIFI_POWER_11dBm, WIFI_POWER_5dBm};
+  const char* names[]   = {"8.5dBm", "15dBm", "11dBm", "5dBm"};
+  int n = sizeof(powers) / sizeof(powers[0]);
+
+  for (int i = 0; i < n; i++) {
+    WiFi.setTxPower(powers[i]);
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    int tries = 0;
+    while (WiFi.status() != WL_CONNECTED && tries < 20) {  // 每档等 10 秒
+      delay(500);
+      Serial.print(".");
+      tries++;
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.printf("\n已连接 (功率 %s), IP: %s\n", names[i], WiFi.localIP().toString().c_str());
+      return;
+    }
+    Serial.printf("\n功率 %s 失败，换下一档...\n", names[i]);
+    WiFi.disconnect();
+    delay(300);
   }
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("\n已连接, IP: %s\n", WiFi.localIP().toString().c_str());
-  } else {
-    Serial.println("\nWiFi 连接失败");
-  }
+  Serial.println("\nWiFi 连接失败（所有功率档都试过）");
 }
 
 void connectMQTT() {
