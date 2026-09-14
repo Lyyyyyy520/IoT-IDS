@@ -56,6 +56,9 @@ class TrafficCapture:
         self.packet_count = 0
         self.alert_count = 0
         self.attack_ratio = 0.25
+        self.capture_mode = 'sim'
+        self.capture_interface = None
+        self.scapy_error = ''
         self.on_alert: Optional[Callable] = None  # callback(alert_dict)
         # GAT flow-based detection state
         self.gat_detector = None
@@ -83,6 +86,8 @@ class TrafficCapture:
 
         self.attack_ratio = max(0, min(1, attack_ratio))
         self.capture_mode = 'real' if (use_scapy and SCAPY_AVAILABLE) else 'sim'
+        self.capture_interface = interface
+        self.scapy_error = ''
 
         self.running = True
         if use_scapy and SCAPY_AVAILABLE:
@@ -117,12 +122,20 @@ class TrafficCapture:
             'gat_loaded': self.gat_detector.model_loaded if self.gat_detector else False,
             'device_gnn_available': DEVICE_GNN_AVAILABLE and self.device_detector is not None,
             'device_gnn_loaded': self.device_detector.model_loaded if self.device_detector else False,
+            'mode': self.capture_mode,
+            'interface': self.capture_interface,
+            'scapy_error': self.scapy_error,
         }
 
     def _process_packet(self, src_ip: str, dst_ip: str, src_port: int, dst_port: int,
                          protocol: str, length: int, flags: str = '', payload: str = '',
-                         known_normal: bool = False):
-        """Process a single packet through the detection pipeline."""
+                         known_normal: bool = False, source: Optional[str] = None):
+        """Process a single packet through the detection pipeline.
+
+        ``source`` lets remote probes use the same rule, model, logging and
+        alert pipeline as packets captured locally.
+        """
+        source_label = source or self.capture_mode
         self.packet_count += 1
 
         # 0. GAT flow-based detection (binary Normal/Attack)
@@ -169,7 +182,7 @@ class TrafficCapture:
         # 3. Save traffic log with ONNX label
         execute(
             "INSERT INTO traffic_logs (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, onnx_label, source) VALUES (?,?,?,?,?,?,?,?,?)",
-            (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, onnx_label, self.capture_mode),
+            (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, onnx_label, source_label),
         )
 
         # 4. ONNX 检测到攻击 → 生成告警（已知正常流量跳过）
@@ -233,20 +246,47 @@ class TrafficCapture:
                     "VALUES (?,?,?,?,?,?,?,?,?,'new')",
                     (risk_level, onnx_label.title(), src_ip, dst_ip,
                      src_port, dst_port, protocol, round(result['confidence'], 2),
-                     f'[{self.capture_mode}]{dev_name} {result["class_name"]} (置信度 {result["confidence"]:.1%})'),
+                     f'[{source_label}]{dev_name} {result["class_name"]} (置信度 {result["confidence"]:.1%})'),
                 )
 
-        # 5. Rule engine: log matches only (no alerts, ONNX is primary)
-        for match in matches:
-            self.alert_count += 1  # count for stats
-            # Rule matches logged but NOT inserted as alerts
+        # 5. Create deduplicated alerts for rule matches. This provides a
+        # deterministic alert path for remote traffic even when a single
+        # packet does not produce a confident ML classification.
+        if matches and not known_normal:
+            from database import query_one as _q, get_config
+            merge_window = int(get_config('merge_window_minutes', '5'))
+            for match in matches:
+                attack_type = match.get('rule_name') or match.get('category', 'Rule')
+                severity = match.get('severity', 'medium')
+                dup = _q(
+                    "SELECT COUNT(*) as c FROM alerts WHERE attack_type = ? AND src_ip = ? "
+                    "AND created_at > datetime('now', ? || ' minutes', 'localtime')",
+                    (attack_type, src_ip, f'-{merge_window}'),
+                )
+                if dup and dup['c'] > 0:
+                    continue
+                self.alert_count += 1
+                confidence = 0.99 if severity == 'critical' else 0.90 if severity == 'high' else 0.80
+                execute(
+                    "INSERT INTO alerts (risk_level, attack_type, src_ip, dst_ip, src_port, dst_port, protocol, confidence, description, status) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,'new')",
+                    (severity, attack_type, src_ip, dst_ip, src_port, dst_port, protocol,
+                     confidence, f'[{source_label}][Rule:{match.get("rule_id", "")}] {match.get("description", "")}'),
+                )
+
+    def process_external_packet(self, src_ip: str, dst_ip: str, src_port: int, dst_port: int,
+                                protocol: str, length: int, flags: str = '',
+                                payload: str = '', source: str = 'real'):
+        """Feed a packet received from a remote or VM probe into the IDS pipeline."""
+        self._process_packet(
+            src_ip, dst_ip, src_port, dst_port, protocol, length, flags, payload,
+            known_normal=False, source=source,
+        )
 
     def _capture_scapy(self, interface=None):
-        """Real packet capture using Scapy."""
+        """Real packet capture using Scapy until stop() is requested."""
         def packet_handler(pkt):
-            if not self.running:
-                return False
-            if IP not in pkt:
+            if not self.running or IP not in pkt:
                 return
             ip = pkt[IP]
             proto = ''
@@ -261,10 +301,18 @@ class TrafficCapture:
                 sport, dport = pkt[UDP].sport, pkt[UDP].dport
             elif ICMP in pkt:
                 proto = 'ICMP'
+            else:
+                return
 
-            self._process_packet(ip.src, ip.dst, sport, dport, proto, len(pkt), flags)
+            self._process_packet(ip.src, ip.dst, sport, dport, proto, len(pkt), flags, source='real')
 
-        sniff(prn=packet_handler, store=False, timeout=1)
+        while self.running:
+            try:
+                sniff(iface=interface, prn=packet_handler, store=False, timeout=1)
+            except Exception as e:
+                self.scapy_error = str(e)
+                self.running = False
+                break
 
     def _capture_simulate(self):
         """模拟真实社区IoT场景：多设备+正常通信+攻击混合"""

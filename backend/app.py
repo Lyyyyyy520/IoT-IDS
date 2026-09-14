@@ -569,7 +569,8 @@ def capture_start():
     data = request.get_json() or {}
     use_scapy = data.get('use_scapy', False)
     attack_ratio = data.get('attack_ratio', 0.25)
-    result = get_capture().start(use_scapy=use_scapy, attack_ratio=attack_ratio)
+    interface = data.get('interface')
+    result = get_capture().start(interface=interface, use_scapy=use_scapy, attack_ratio=attack_ratio)
     log_action('capture_start', f'mode={result["mode"]}')
     return jsonify(result)
 

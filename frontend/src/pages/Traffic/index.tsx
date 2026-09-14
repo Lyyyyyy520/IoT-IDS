@@ -268,12 +268,12 @@ export default function TrafficPage() {
                 <Switch checked={useRealCapture} onChange={switchCaptureMode}
                   checkedChildren="真实" unCheckedChildren="仿真" />
                 <Tag color={useRealCapture ? 'green' : 'blue'}>
-                  {useRealCapture ? '树莓派探针' : '社区IoT仿真'}
+                  {useRealCapture ? '远程实时探针' : '社区IoT仿真'}
                 </Tag>
               </Space>
               {useRealCapture ? (
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  等待树莓派推送数据 — 确保已部署探针
+                  等待 Ubuntu/树莓派探针推送数据 — VMware 实验请运行 edge/vm_probe_client.py
                 </span>
               ) : (
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 12, minWidth: 200 }}>

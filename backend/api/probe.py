@@ -117,22 +117,26 @@ def push_data():
         )
         alerts_received += 1
 
-    # Process flows
+    # Process flows through the same IDS pipeline as local capture so remote
+    # probe traffic is evaluated by rules and models before it is stored.
+    from services.traffic_capture import get_capture
+    capture = get_capture()
     for flow in data.get('flows', []):
-        execute(
-            "INSERT INTO traffic_logs (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, source) VALUES (?,?,?,?,?,?,?,?)",
-            (
-                flow.get('src_ip', ''),
-                flow.get('dst_ip', ''),
-                flow.get('src_port', 0),
-                flow.get('dst_port', 0),
-                flow.get('protocol', ''),
-                flow.get('length', 0),
-                flow.get('flags', ''),
-                flow.get('source', 'real'),
-            ),
-        )
-        flows_received += 1
+        try:
+            capture.process_external_packet(
+                src_ip=flow.get('src_ip', ''),
+                dst_ip=flow.get('dst_ip', ''),
+                src_port=int(flow.get('src_port', 0) or 0),
+                dst_port=int(flow.get('dst_port', 0) or 0),
+                protocol=flow.get('protocol', ''),
+                length=int(flow.get('length', 0) or 0),
+                flags=flow.get('flags', ''),
+                payload=flow.get('payload', ''),
+                source=flow.get('source', 'real'),
+            )
+            flows_received += 1
+        except Exception as e:
+            print(f'[Probe] flow processing failed: {e}')
 
     return jsonify({
         'success': True,
