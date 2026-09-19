@@ -23,6 +23,9 @@ npm --prefix IoT‑IDS‑Mobile run typecheck
 测试必须使用临时 SQLite 文件或内存数据库：
 
 - v3 建表和迁移重复执行不破坏数据；旧表不被删除。
+- `plan` 严格只读；不存在路径、非 SQLite 文件和活动 WAL 边车会被拒绝。
+- `apply` 先用 SQLite backup API 生成并验证备份，迁移失败时完整回滚。
+- 迁移版本/checksum 不重复登记；旧 `assets` 身份冲突只报告、不自动导入。
 - device_id、MAC 唯一性和 IP 变化不创建重复设备。
 - online → stale → offline、重连、维护、停用和预热转换。
 - admin/operator/user 权限矩阵及 user 对设备 ID 的越权访问。

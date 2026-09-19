@@ -16,7 +16,11 @@ MQTT、SSE、虚拟设备、Web、APP 或 GNN。`backend/v3_database.py` 的初�
 | `v3_system_component_health` | 系统组件健康 | 保存 `warming_up/ready/degraded`、重启时间、就绪时间、原因和版本 |
 
 四张表均使用 `v3_` 前缀和 `CREATE TABLE/INDEX IF NOT EXISTS`，不修改、重命名
-或删除任何旧表。初始化可重复执行。
+或删除任何旧表。`v3_schema_migrations` 记录迁移版本、名称、checksum 和应用时间；
+初始化可重复执行，已经登记且 checksum 一致的迁移会跳过。
+
+显式预览、SQLite backup API 备份、事务升级和恢复流程见
+`docs/rebuild/v3-database-upgrade.md`。
 
 ## 设备身份与 IP
 
@@ -49,3 +53,5 @@ MQTT、SSE、虚拟设备、Web、APP 或 GNN。`backend/v3_database.py` 的初�
 `backend/tests/test_device_state_foundation.py` 的每个服务实例都使用 pytest
 `tmp_path` 下的 SQLite 文件和可推进的假时钟。测试不等待真实时间，也不创建、
 打开或迁移 `backend/data/ids.db`。
+
+升级命令测试同样只使用 `tmp_path`，包括测试生成的旧库、WAL 数据库和故障迁移。

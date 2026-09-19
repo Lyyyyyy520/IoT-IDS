@@ -7,7 +7,7 @@ from services.device_state import (
     DeviceIdentityConflictError,
     DeviceStateService,
 )
-from v3_database import V3_DEVICE_STATE_TABLES, initialize_v3_database
+from v3_database import MIGRATION_TABLE, V3_DEVICE_STATE_TABLES, initialize_v3_database
 
 
 class FakeClock:
@@ -75,8 +75,13 @@ def test_schema_is_additive_and_repeated_initialization_is_idempotent(tmp_path):
             )
         }
         legacy_value = connection.execute("SELECT value FROM legacy_marker").fetchone()[0]
+        migration_count = connection.execute(
+            "SELECT COUNT(*) FROM v3_schema_migrations"
+        ).fetchone()[0]
     assert V3_DEVICE_STATE_TABLES <= tables
+    assert MIGRATION_TABLE in tables
     assert legacy_value == "preserved"
+    assert migration_count == 1
 
 
 def test_stable_device_id_binds_one_immutable_identity(state_service):
