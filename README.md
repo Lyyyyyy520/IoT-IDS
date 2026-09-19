@@ -16,15 +16,28 @@ npm run dev
 浏览器打开 http://localhost:3000
 
 ### 启动后端（Flask API 服务）
-```bash
+
+后端必须指向一个已经存在、已经通过显式 v3 升级流程验证的 SQLite 文件。正常启动
+不会创建数据库、执行 migration 或创建默认账号。PowerShell 示例：
+
+```powershell
+$env:IOT_IDS_DATABASE_PATH = "D:/path/to/verified/iot-ids.sqlite"
 cd backend
 pip install -r requirements.txt
 python app.py
 ```
+
+数据库副本的 `plan`、`apply` 与恢复步骤见
+[`docs/rebuild/v3-database-upgrade.md`](docs/rebuild/v3-database-upgrade.md)。启用 MQTT 前
+还必须配置独立的后台订阅账号；MQTT 默认关闭，只有正式入口显式启动运行时服务。
+
 API 服务运行在 http://localhost:5000
 
 ### 验证联通
 浏览器访问 http://localhost:5000/api/health
+
+若数据库路径缺失、文件不存在或 v3 schema 未就绪，health 仍返回进程状态，但整体
+状态为 `degraded`，数据库详情显示 unavailable；其他数据库接口不会创建空库。
 
 返回 `{"status": "ok", ...}` 即成功。
 

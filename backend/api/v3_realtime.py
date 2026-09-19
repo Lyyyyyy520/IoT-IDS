@@ -71,7 +71,7 @@ def _event_cursor_from_request() -> int:
 
 
 def create_v3_realtime_blueprint(
-    database_path: str | Path,
+    database_path: str | Path | None,
     *,
     clock: Callable | None = None,
     waiter: Callable[[float], None] | None = None,

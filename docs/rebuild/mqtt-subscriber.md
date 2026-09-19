@@ -4,8 +4,9 @@
 
 `ManagedMqttHeartbeatSubscriber` 是显式启停的网络适配层。模块导入不会加载
 Paho、创建客户端、启动线程或连接 Broker；`IOT_IDS_MQTT_ENABLED` 默认是
-`false`。Flask 当前没有自动启动 MQTT 的导入钩子，部署入口必须在完成 v3 数据库
-初始化后显式调用 `start()`，并在进程退出时调用 `stop()`。
+`false`。`create_app()` 只把服务工厂放入 app extension；正式入口在验证数据库已存在
+且 migration 1～3 checksum 正确后，显式调用 `start_runtime_services(app)`，并在退出
+时调用 `stop_runtime_services(app)`。
 
 客户端只订阅 `community/+/status`，QoS 固定为 1。它不会发布设备 control。
 Mosquitto 用户名、密码和 ACL 认证发布者；应用层仍然只能校验 topic、payload、
@@ -48,6 +49,11 @@ Paho；部署启用前执行项目既有依赖安装流程，不要在运行中�
    配置比例的随机抖动；重新连接并成功 SUBACK 后恢复 `ready`。
 5. `stop()` 先禁止新消息入队，再断开客户端、停止网络循环、丢弃尚未处理的排队
    心跳、发送工作线程停止标记并等待退出。重复 `start()`/`stop()` 是幂等的。
+
+Flask debug reloader 父进程不会启动 subscriber，只有带 `WERKZEUG_RUN_MAIN=true`
+的实际服务子进程可以启动。当前 subscriber 必须保持单实例：多进程 WSGI 不能在每个
+Web worker 调用运行时启动函数，应另设一个专用 subscriber worker，或确保只有一个
+指定进程调用它。
 
 网络回调不执行 heartbeat SQLite ingestion，也不直接写组件健康表。普通消息进入
 有界队列，健康变化进入单独的小型有界事件队列，由工作线程完成数据库写入。

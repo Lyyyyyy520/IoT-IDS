@@ -10,6 +10,7 @@ import time
 import random
 from datetime import datetime
 from typing import Optional, Callable
+from flask import current_app, has_app_context
 
 from database import execute
 from services.rule_engine import get_rule_engine, FlowRecord
@@ -50,7 +51,8 @@ FLOW_PACKET_THRESHOLD = 4   # packets per flow before extraction
 class TrafficCapture:
     """Background traffic capture with dual-engine detection."""
 
-    def __init__(self):
+    def __init__(self, application=None):
+        self.application = application
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.packet_count = 0
@@ -91,11 +93,25 @@ class TrafficCapture:
 
         self.running = True
         if use_scapy and SCAPY_AVAILABLE:
-            self.thread = threading.Thread(target=self._capture_scapy, args=(interface,), daemon=True)
+            target = self._capture_scapy
+            target_args = (interface,)
         else:
-            self.thread = threading.Thread(target=self._capture_simulate, daemon=True)
+            target = self._capture_simulate
+            target_args = ()
+        self.thread = threading.Thread(
+            target=self._run_with_application_context,
+            args=(target, target_args),
+            daemon=True,
+        )
         self.thread.start()
         return {'success': True, 'message': '抓包已启动', 'mode': 'scapy' if (use_scapy and SCAPY_AVAILABLE) else 'simulation'}
+
+    def _run_with_application_context(self, target, target_args):
+        if self.application is None:
+            target(*target_args)
+            return
+        with self.application.app_context():
+            target(*target_args)
 
     def stop(self):
         """Stop capture."""
@@ -469,12 +485,11 @@ class TrafficCapture:
             )
 
 
-# ---- Global singleton ----
-_capture: Optional[TrafficCapture] = None
-
-
 def get_capture() -> TrafficCapture:
-    global _capture
-    if _capture is None:
-        _capture = TrafficCapture()
-    return _capture
+    """Return the capture service owned by the current Flask application."""
+    if not has_app_context():
+        raise RuntimeError("traffic capture requires a Flask application context")
+    from runtime_services import get_service_container
+
+    app = current_app._get_current_object()
+    return get_service_container(app).get_capture_service(app)

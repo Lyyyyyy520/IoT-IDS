@@ -139,11 +139,13 @@ def append_realtime_event(
 class RealtimeEventStore:
     """Open the explicit database per operation so clients hold no long read lock."""
 
-    def __init__(self, database_path: str | Path):
-        self.database_path = Path(database_path)
+    def __init__(self, database_path: str | Path | None):
+        self.database_path = Path(database_path) if database_path else None
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
+        if self.database_path is None:
+            raise V3DatabaseUnavailable("v3 database path is not configured")
         try:
             connection = connect_v3_existing(self.database_path)
         except (FileNotFoundError, sqlite3.Error) as exc:

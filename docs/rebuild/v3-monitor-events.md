@@ -9,9 +9,9 @@
 - graph 和 incident 存储尚未实现，monitor 明确返回 `available: false` 及原因。
 
 模块导入不会创建数据库、连接 MQTT 或启动线程。部署方必须先对显式数据库运行
-v3 升级命令，再在 Flask 应用工厂中调用 `create_v3_realtime_blueprint(database_path)`。
-当前旧 `backend/app.py` 在导入时会初始化旧数据库，因此本里程碑不把 Blueprint
-静态注册到该模块；后续应用工厂改造完成后再统一注册。
+v3 升级命令。正式 `backend/app.py::create_app()` 会用同一个显式数据库路径创建并
+注册该 Blueprint；缺少路径或 schema 时路由仍然存在，但请求返回结构化 503，且不会
+让 SQLite 创建文件。应用工厂和运行时生命周期见 `flask-application-factory.md`。
 
 ## 2. migration version 3
 

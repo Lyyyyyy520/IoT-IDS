@@ -7,10 +7,9 @@ import database
 
 def test_empty_database_does_not_receive_shared_default_accounts(tmp_path, monkeypatch):
     database_path = tmp_path / "ids.db"
-    monkeypatch.setattr(database, "DB_PATH", str(database_path))
     monkeypatch.delenv("IOT_IDS_BOOTSTRAP_ADMIN_PASSWORD", raising=False)
 
-    database.init_db()
+    database.init_db(database_path)
 
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
@@ -18,12 +17,11 @@ def test_empty_database_does_not_receive_shared_default_accounts(tmp_path, monke
 
 def test_explicit_bootstrap_admin_is_hashed_and_idempotent(tmp_path, monkeypatch):
     database_path = tmp_path / "ids.db"
-    monkeypatch.setattr(database, "DB_PATH", str(database_path))
     monkeypatch.setenv("IOT_IDS_BOOTSTRAP_ADMIN_USERNAME", "initial-admin")
     monkeypatch.setenv("IOT_IDS_BOOTSTRAP_ADMIN_PASSWORD", "test-only-unique-password")
 
-    database.init_db()
-    database.init_db()
+    database.init_db(database_path)
+    database.init_db(database_path)
 
     with sqlite3.connect(database_path) as connection:
         rows = connection.execute(
@@ -34,3 +32,16 @@ def test_explicit_bootstrap_admin_is_hashed_and_idempotent(tmp_path, monkeypatch
     assert rows[0][1] != "test-only-unique-password"
     assert check_password_hash(rows[0][1], "test-only-unique-password")
     assert rows[0][2] == "admin"
+
+
+def test_runtime_connection_refuses_missing_file_without_creation(tmp_path):
+    database_path = tmp_path / "missing.sqlite"
+
+    try:
+        database.get_db(database_path)
+    except database.DatabaseUnavailableError:
+        pass
+    else:
+        raise AssertionError("missing runtime database must be rejected")
+
+    assert not database_path.exists()

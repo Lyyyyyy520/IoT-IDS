@@ -15,6 +15,12 @@ def runtime_environment() -> str:
     return os.getenv("IOT_IDS_ENV", "development").strip().lower()
 
 
+def database_path() -> str | None:
+    """Return the explicitly configured shared legacy/v3 database path."""
+    configured = os.getenv("IOT_IDS_DATABASE_PATH", "").strip()
+    return configured or None
+
+
 def session_secret() -> str:
     configured = os.getenv("IOT_IDS_SESSION_SECRET", "").strip()
     if configured:

@@ -601,5 +601,6 @@ def test_import_and_flask_source_have_no_automatic_mqtt_start():
     module = importlib.import_module("services.mqtt_subscriber")
     assert module.ManagedMqttHeartbeatSubscriber is not None
     app_source = (Path(__file__).parents[1] / "app.py").read_text(encoding="utf-8")
-    assert "mqtt_subscriber" not in app_source
+    assert "start_runtime_services(application)" in app_source
+    assert "if __name__ == '__main__':" in app_source
     assert "paho" not in module.__dict__

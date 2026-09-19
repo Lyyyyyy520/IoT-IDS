@@ -29,17 +29,28 @@ def _iso(value: datetime) -> str:
 class MonitorSnapshotService:
     """Refresh timeout state, then read one consistent SQLite snapshot."""
 
-    def __init__(self, database_path: str | Path, *, clock: Clock | None = None):
-        self.database_path = Path(database_path)
+    def __init__(
+        self,
+        database_path: str | Path | None,
+        *,
+        clock: Clock | None = None,
+    ):
+        self.database_path = Path(database_path) if database_path else None
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._events = RealtimeEventStore(self.database_path)
-        self._states = DeviceStateService(
-            self.database_path,
-            clock=self._clock,
-            create_if_missing=False,
+        self._states = (
+            DeviceStateService(
+                self.database_path,
+                clock=self._clock,
+                create_if_missing=False,
+            )
+            if self.database_path is not None
+            else None
         )
 
     def snapshot(self) -> dict:
+        if self._states is None:
+            raise V3DatabaseUnavailable("monitor database path is not configured")
         try:
             with self._events.connection():
                 pass
