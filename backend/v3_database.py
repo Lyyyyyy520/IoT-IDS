@@ -111,12 +111,59 @@ class SchemaMigration:
         return sha256(material.encode("utf-8")).hexdigest()
 
 
+V3_DEVICE_STATE_MIGRATION = SchemaMigration(
+    version=1,
+    name="device_state_foundation",
+    statements=V3_DEVICE_STATE_STATEMENTS,
+)
+
+V3_MQTT_HEARTBEAT_STATEMENTS = (
+    "ALTER TABLE v3_device_state_observations ADD COLUMN boot_id TEXT",
+    "ALTER TABLE v3_device_state_observations ADD COLUMN firmware_version TEXT",
+    "ALTER TABLE v3_device_state_observations ADD COLUMN uptime_ms INTEGER",
+    """
+    CREATE TABLE v3_mqtt_boot_sessions (
+        device_id TEXT NOT NULL,
+        boot_id TEXT NOT NULL,
+        first_received_at TEXT NOT NULL,
+        last_received_at TEXT NOT NULL,
+        last_sequence INTEGER NOT NULL CHECK (last_sequence >= 0),
+        last_uptime_ms INTEGER NOT NULL CHECK (last_uptime_ms >= 0),
+        firmware_version TEXT NOT NULL,
+        PRIMARY KEY (device_id, boot_id),
+        FOREIGN KEY (device_id) REFERENCES v3_device_profiles(device_id)
+    )
+    """.strip(),
+    """
+    CREATE TABLE v3_mqtt_device_cursors (
+        device_id TEXT PRIMARY KEY,
+        current_boot_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (device_id) REFERENCES v3_device_profiles(device_id),
+        FOREIGN KEY (device_id, current_boot_id)
+            REFERENCES v3_mqtt_boot_sessions(device_id, boot_id)
+    )
+    """.strip(),
+    """
+    CREATE UNIQUE INDEX idx_v3_mqtt_observation_sequence
+        ON v3_device_state_observations(device_id, boot_id, sequence)
+        WHERE boot_id IS NOT NULL
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_mqtt_sessions_last_received
+        ON v3_mqtt_boot_sessions(last_received_at DESC)
+    """.strip(),
+)
+
+V3_MQTT_HEARTBEAT_MIGRATION = SchemaMigration(
+    version=2,
+    name="mqtt_heartbeat_sessions",
+    statements=V3_MQTT_HEARTBEAT_STATEMENTS,
+)
+
 V3_MIGRATIONS = (
-    SchemaMigration(
-        version=1,
-        name="device_state_foundation",
-        statements=V3_DEVICE_STATE_STATEMENTS,
-    ),
+    V3_DEVICE_STATE_MIGRATION,
+    V3_MQTT_HEARTBEAT_MIGRATION,
 )
 
 V3_DEVICE_STATE_TABLES = frozenset(
@@ -136,10 +183,26 @@ V3_DEVICE_STATE_INDEXES = frozenset(
     }
 )
 
+V3_MQTT_HEARTBEAT_TABLES = frozenset(
+    {
+        "v3_mqtt_boot_sessions",
+        "v3_mqtt_device_cursors",
+    }
+)
+
+V3_MQTT_HEARTBEAT_INDEXES = frozenset(
+    {
+        "idx_v3_mqtt_observation_sequence",
+        "idx_v3_mqtt_sessions_last_received",
+    }
+)
+
 V3_EXPECTED_OBJECTS = {
     MIGRATION_TABLE: "table",
     **{name: "table" for name in V3_DEVICE_STATE_TABLES},
+    **{name: "table" for name in V3_MQTT_HEARTBEAT_TABLES},
     **{name: "index" for name in V3_DEVICE_STATE_INDEXES},
+    **{name: "index" for name in V3_MQTT_HEARTBEAT_INDEXES},
 }
 
 

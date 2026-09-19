@@ -22,6 +22,8 @@
 #include <PubSubClient.h>
 #include <WiFiUdp.h>
 #include <ESP32Servo.h>
+#include <esp_system.h>
+#include <esp_timer.h>
 #include "device_secrets.h"
 
 // ==================== 配置区 ====================
@@ -33,6 +35,9 @@ const int   MQTT_PORT     = IOT_MQTT_PORT;
 const char* MQTT_USER     = IOT_MQTT_USERNAME;
 const char* MQTT_PASSWORD = IOT_MQTT_PASSWORD;
 const char* DEVICE_ID     = IOT_DEVICE_ID;
+const char* FIRMWARE_VERSION = "0.3.0";
+const int MQTT_HEARTBEAT_SCHEMA_VERSION = 2;
+const uint16_t MQTT_BUFFER_BYTES = 768;
 
 #define PIN_PAN      2      // 云台舵机（ESP32-CAM 空闲 GPIO2）
 #define TELEMETRY_MS 5000   // 心跳间隔
@@ -49,6 +54,8 @@ unsigned long lastTelemetry = 0;
 unsigned long lastAttack   = 0;
 unsigned long attackStarted = 0;
 int  pan_angle = 90;          // 云台当前角度
+char bootId[33] = {0};
+uint64_t telemetrySequence = 0;
 
 const bool  LAB_ATTACK_ENABLED = IOT_LAB_ATTACK_ENABLED;
 const char* ATTACK_TARGET = IOT_LAB_ATTACK_TARGET;
@@ -68,12 +75,36 @@ bool isAllowedAttackTarget() {
          && target[3] >= 2 && target[3] <= 254;
 }
 
-String buildTelemetry() {
+void generateBootId() {
+  snprintf(bootId, sizeof(bootId), "%08lx%08lx%08lx%08lx",
+           (unsigned long)esp_random(), (unsigned long)esp_random(),
+           (unsigned long)esp_random(), (unsigned long)esp_random());
+}
+
+String buildDeviceTelemetry() {
   char buf[128];
   snprintf(buf, sizeof(buf),
-           "{\"device\":\"%s\",\"type\":\"camera\",\"state\":\"recording\",\"angle\":%d}",
-           DEVICE_ID, pan_angle);
+           "{\"device_type\":\"camera\",\"state\":\"recording\",\"angle\":%d}",
+           pan_angle);
   return String(buf);
+}
+
+String buildTelemetry() {
+  telemetrySequence++;
+  uint64_t uptimeMs = (uint64_t)(esp_timer_get_time() / 1000ULL);
+  String ip = WiFi.localIP().toString();
+  String mac = WiFi.macAddress();
+  String deviceTelemetry = buildDeviceTelemetry();
+  char envelope[640];
+  snprintf(envelope, sizeof(envelope),
+           "{\"schema_version\":%d,\"device_id\":\"%s\",\"boot_id\":\"%s\","
+           "\"sequence\":%llu,\"firmware_version\":\"%s\",\"uptime_ms\":%llu,"
+           "\"ip\":\"%s\",\"mac\":\"%s\",\"telemetry\":%s}",
+           MQTT_HEARTBEAT_SCHEMA_VERSION, DEVICE_ID, bootId,
+           (unsigned long long)telemetrySequence, FIRMWARE_VERSION,
+           (unsigned long long)uptimeMs, ip.c_str(), mac.c_str(),
+           deviceTelemetry.c_str());
+  return String(envelope);
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
@@ -173,6 +204,8 @@ void setup() {
   Serial.begin(115200);
   delay(500);
   randomSeed(analogRead(0));
+  generateBootId();
+  mqtt.setBufferSize(MQTT_BUFFER_BYTES);
 
   panServo.attach(PIN_PAN);
   panServo.write(90);
@@ -196,8 +229,10 @@ void loop() {
     if (now - lastTelemetry >= TELEMETRY_MS) {
       lastTelemetry = now;
       String telemetry = buildTelemetry();
-      mqtt.publish(topicStatus().c_str(), telemetry.c_str());
-      Serial.printf("[心跳] %s\n", telemetry.c_str());
+      bool published = mqtt.publish(topicStatus().c_str(), telemetry.c_str());
+      Serial.printf("[心跳] boot=%s sequence=%llu result=%s\n", bootId,
+                    (unsigned long long)telemetrySequence,
+                    published ? "sent" : "failed");
     }
   }
 }

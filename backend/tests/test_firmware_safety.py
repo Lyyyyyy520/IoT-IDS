@@ -25,6 +25,46 @@ def test_firmware_requires_authenticated_mqtt_connect():
         assert "mqtt.connect(DEVICE_ID))" not in source
 
 
+def test_firmware_heartbeat_envelopes_share_v2_contract():
+    envelope_fields = (
+        "schema_version",
+        "device_id",
+        "boot_id",
+        "sequence",
+        "firmware_version",
+        "uptime_ms",
+        "ip",
+        "mac",
+        "telemetry",
+    )
+    for firmware in FIRMWARE_FILES:
+        source = firmware.read_text(encoding="utf-8")
+        assert "MQTT_HEARTBEAT_SCHEMA_VERSION = 2" in source
+        assert "FIRMWARE_VERSION = \"0.3.0\"" in source
+        assert "String buildDeviceTelemetry()" in source
+        assert "String buildTelemetry()" in source
+        for field in envelope_fields:
+            assert f'\\\"{field}\\\"' in source
+        assert "telemetrySequence++;" in source
+        assert "generateBootId();" in source
+        assert source.count("esp_random()") >= 4
+        assert "WiFi.localIP().toString()" in source
+        assert "WiFi.macAddress()" in source
+        assert "esp_timer_get_time()" in source
+        assert "mqtt.setBufferSize(MQTT_BUFFER_BYTES)" in source
+        assert 'Serial.printf("[遥测] %s' not in source
+        assert 'Serial.printf("[心跳] %s' not in source
+
+
+def test_firmware_keeps_device_specific_fields_inside_telemetry():
+    community = FIRMWARE_FILES[0].read_text(encoding="utf-8")
+    camera = FIRMWARE_FILES[1].read_text(encoding="utf-8")
+    for device_type in ("door", "light", "plug", "sensor", "speaker"):
+        assert f'\\\"device_type\\\":\\\"{device_type}\\\"' in community
+    assert '\\\"device_type\\\":\\\"camera\\\"' in camera
+    assert '\\\"angle\\\":%d' in camera
+
+
 def test_first_release_auto_block_path_is_disabled():
     capture_source = (
         ROOT / "backend" / "services" / "traffic_capture.py"

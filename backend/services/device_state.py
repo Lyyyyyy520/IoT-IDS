@@ -190,10 +190,55 @@ class DeviceStateService:
         source: str,
         ip_address: str | None,
         observed_at: datetime | None = None,
+        received_at: datetime | None = None,
         sequence: int | None = None,
         payload: dict | None = None,
+        boot_id: str | None = None,
+        firmware_version: str | None = None,
+        uptime_ms: int | None = None,
     ) -> dict:
         """Append an observation and advance current state without changing identity."""
+        received = _utc(received_at) if received_at is not None else self._now()
+        with self._connection() as connection:
+            self.record_observation_in_transaction(
+                connection,
+                device_id=device_id,
+                identity_kind=identity_kind,
+                identity_value=identity_value,
+                source=source,
+                ip_address=ip_address,
+                observed_at=observed_at,
+                received_at=received,
+                sequence=sequence,
+                payload=payload,
+                boot_id=boot_id,
+                firmware_version=firmware_version,
+                uptime_ms=uptime_ms,
+            )
+        return self.get_device_state(device_id)
+
+    def record_observation_in_transaction(
+        self,
+        connection,
+        *,
+        device_id: str,
+        identity_kind: str,
+        identity_value: str,
+        source: str,
+        ip_address: str | None,
+        received_at: datetime,
+        observed_at: datetime | None = None,
+        sequence: int | None = None,
+        payload: dict | None = None,
+        boot_id: str | None = None,
+        firmware_version: str | None = None,
+        uptime_ms: int | None = None,
+    ) -> dict:
+        """Write an observation on a caller-owned transaction.
+
+        MQTT ingestion uses this entry so its replay cursor and the device
+        observation either commit together or roll back together.
+        """
         normalized_kind, normalized_value = _normalize_identity(
             identity_kind, identity_value
         )
@@ -202,8 +247,10 @@ class DeviceStateService:
             raise DeviceStateError("observation source is required")
         if sequence is not None and sequence < 0:
             raise DeviceStateError("sequence must not be negative")
+        if uptime_ms is not None and uptime_ms < 0:
+            raise DeviceStateError("uptime_ms must not be negative")
 
-        received = self._now()
+        received = _utc(received_at)
         observed = _utc(observed_at) if observed_at is not None else received
         received_text = _iso(received)
         observed_text = _iso(observed)
@@ -213,53 +260,63 @@ class DeviceStateService:
             else None
         )
 
-        with self._connection() as connection:
-            profile = connection.execute(
-                "SELECT identity_kind, identity_value FROM v3_device_profiles "
-                "WHERE device_id = ?",
-                (device_id,),
-            ).fetchone()
-            if not profile:
-                raise DeviceNotFoundError(f"unknown device_id {device_id!r}")
-            if (
-                profile["identity_kind"] != normalized_kind
-                or profile["identity_value"] != normalized_value
-            ):
-                raise DeviceIdentityConflictError(
-                    f"observation identity does not match device_id {device_id!r}"
-                )
-
-            cursor = connection.execute(
-                "INSERT INTO v3_device_state_observations "
-                "(device_id, source, sequence, ip_address, observed_at, "
-                "received_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    device_id,
-                    source.strip(),
-                    sequence,
-                    normalized_ip,
-                    observed_text,
-                    received_text,
-                    payload_json,
-                ),
-            )
-            connection.execute(
-                "UPDATE v3_device_current_state SET "
-                "connection_status = 'online', ip_address = ?, "
-                "last_observed_at = ?, last_received_at = ?, "
-                "last_observation_id = ?, state_version = state_version + 1, "
-                "updated_at = ? WHERE device_id = ?",
-                (
-                    normalized_ip,
-                    observed_text,
-                    received_text,
-                    cursor.lastrowid,
-                    received_text,
-                    device_id,
-                ),
+        profile = connection.execute(
+            "SELECT identity_kind, identity_value FROM v3_device_profiles "
+            "WHERE device_id = ?",
+            (device_id,),
+        ).fetchone()
+        if not profile:
+            raise DeviceNotFoundError(f"unknown device_id {device_id!r}")
+        if (
+            profile["identity_kind"] != normalized_kind
+            or profile["identity_value"] != normalized_value
+        ):
+            raise DeviceIdentityConflictError(
+                f"observation identity does not match device_id {device_id!r}"
             )
 
-        return self.get_device_state(device_id)
+        cursor = connection.execute(
+            "INSERT INTO v3_device_state_observations "
+            "(device_id, source, sequence, ip_address, observed_at, "
+            "received_at, payload_json, boot_id, firmware_version, uptime_ms) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                device_id,
+                source.strip(),
+                sequence,
+                normalized_ip,
+                observed_text,
+                received_text,
+                payload_json,
+                boot_id,
+                firmware_version,
+                uptime_ms,
+            ),
+        )
+        connection.execute(
+            "UPDATE v3_device_current_state SET "
+            "connection_status = 'online', ip_address = ?, "
+            "last_observed_at = ?, last_received_at = ?, "
+            "last_observation_id = ?, state_version = state_version + 1, "
+            "updated_at = ? WHERE device_id = ?",
+            (
+                normalized_ip,
+                observed_text,
+                received_text,
+                cursor.lastrowid,
+                received_text,
+                device_id,
+            ),
+        )
+        current = connection.execute(
+            "SELECT state_version FROM v3_device_current_state WHERE device_id = ?",
+            (device_id,),
+        ).fetchone()
+        return {
+            "observation_id": cursor.lastrowid,
+            "state_version": current["state_version"],
+            "received_at": received_text,
+        }
 
     def _connection_status(self, last_received_at: str | None, now: datetime) -> str:
         if last_received_at is None:

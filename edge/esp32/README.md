@@ -66,6 +66,31 @@
 | `community/{DEVICE_ID}/status` | 设备→Pi | 遥测上报（每 5s） |
 | `community/{DEVICE_ID}/control` | Pi→设备 | 控制指令 |
 
+两套固件现在统一发送 MQTT 心跳 schema v2。每次启动生成新的 32 位十六进制
+`boot_id`，同一启动会话内 `sequence` 从 1 开始递增；MAC 和 IP 均从设备运行状态
+读取，设备类型字段放在 `telemetry` 对象内。示例：
+
+```json
+{
+  "schema_version": 2,
+  "device_id": "sensor-01",
+  "boot_id": "4f8c3d1670f24dc982a4e565e27f7810",
+  "sequence": 1,
+  "firmware_version": "0.3.0",
+  "uptime_ms": 5100,
+  "ip": "192.168.4.14",
+  "mac": "AA:BB:CC:DD:EE:14",
+  "telemetry": {
+    "device_type": "sensor",
+    "temp": 25.1,
+    "humidity": 50.2
+  }
+}
+```
+
+设备 `uptime_ms` 只用于重放和诊断证据，在线状态以服务器实际接收时间为准。
+串口日志只打印 boot、sequence 和发布结果，不打印完整 payload 或任何 MQTT 密码。
+
 **控制指令**（发到 control 主题）：
 
 | 指令 | 效果 |

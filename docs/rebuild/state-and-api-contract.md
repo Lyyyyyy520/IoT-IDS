@@ -135,20 +135,27 @@ data: {"event_id":1842,"occurred_at":"2026-09-19T08:00:00Z","state_version":17,"
 ## 8. 设备与探针上报契约
 
 MQTT 主题固定为 `community/{device_id}/status`。每台设备使用与 device_id 相同的
-独立 MQTT 用户名，ACL 仅允许写自己的 status、读自己的 control。建议消息字段：
+独立 MQTT 用户名，ACL 仅允许写自己的 status、读自己的 control。正式心跳 schema
+版本为 `2`；旧的 `device/type/state` 扁平消息没有 schema 版本，不能当作合规消息：
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "device_id": "door-01",
+  "boot_id": "4f8c3d1670f24dc982a4e565e27f7810",
   "sequence": 42,
-  "firmware_version": "0.2.0",
+  "firmware_version": "0.3.0",
   "uptime_ms": 120000,
   "ip": "192.168.4.11",
   "mac": "AA:BB:CC:DD:EE:FF",
-  "telemetry": {"state": "locked"}
+  "telemetry": {"device_type": "door", "state": "locked"}
 }
 ```
+
+`boot_id` 每次启动重新生成，同一 boot 内 `sequence` 严格递增。新 boot 只允许从
+0 或 1 开始；已离开的旧 boot 永久视为重放来源。设备可选时间和 `uptime_ms` 只作
+证据，`received_at` 后端接收时间是连接状态判断的唯一依据。完整校验与认证边界见
+`docs/rebuild/mqtt-heartbeat-v2.md`。
 
 探针 HTTP 请求使用独立 `X-Probe-Token`，不得使用 Web 会话或 MQTT 凭据。阶段 1
 将强制校验探针 ID、序号、时间戳、请求大小、批大小与速率；当前阶段已先关闭匿名入口。

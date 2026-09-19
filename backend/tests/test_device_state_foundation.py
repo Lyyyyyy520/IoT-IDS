@@ -81,7 +81,7 @@ def test_schema_is_additive_and_repeated_initialization_is_idempotent(tmp_path):
     assert V3_DEVICE_STATE_TABLES <= tables
     assert MIGRATION_TABLE in tables
     assert legacy_value == "preserved"
-    assert migration_count == 1
+    assert migration_count == 2
 
 
 def test_stable_device_id_binds_one_immutable_identity(state_service):

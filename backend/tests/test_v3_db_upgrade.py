@@ -191,7 +191,7 @@ def test_apply_creates_verified_pre_migration_backup_and_additive_schema(tmp_pat
     assert result["backup"]["backup_integrity_check"] == ["ok"]
     assert result["pre_integrity_check"] == ["ok"]
     assert result["post_integrity_check"] == ["ok"]
-    assert result["applied_versions"] == [1]
+    assert result["applied_versions"] == [1, 2]
     assert V3_DEVICE_STATE_TABLES <= _table_names(database_path)
     assert MIGRATION_TABLE in _table_names(database_path)
     assert MIGRATION_TABLE not in _table_names(backup_path)
@@ -200,7 +200,7 @@ def test_apply_creates_verified_pre_migration_backup_and_additive_schema(tmp_pat
         assert connection.execute("SELECT COUNT(*) FROM assets").fetchone()[0] == 4
         assert connection.execute("SELECT COUNT(*) FROM legacy_marker").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM v3_device_profiles").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM v3_schema_migrations").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM v3_schema_migrations").fetchone()[0] == 2
 
 
 def test_repeated_apply_is_idempotent_and_does_not_rerun_recorded_migration(tmp_path):
@@ -225,7 +225,7 @@ def test_repeated_apply_is_idempotent_and_does_not_rerun_recorded_migration(tmp_
     second = apply_upgrade(database_path, backup_directory)
 
     assert second["applied_versions"] == []
-    assert second["skipped_versions"] == [1]
+    assert second["skipped_versions"] == [1, 2]
     with sqlite3.connect(database_path) as connection:
         assert connection.execute(
             "SELECT version, name, checksum, applied_at FROM v3_schema_migrations"
@@ -260,7 +260,7 @@ def test_migration_failure_rolls_back_all_schema_changes(tmp_path):
     backup_directory.mkdir()
     _create_legacy_database(database_path)
     failing = SchemaMigration(
-        version=2,
+        version=99,
         name="forced_test_failure",
         statements=(
             "CREATE TABLE v3_partial_should_rollback (id INTEGER PRIMARY KEY)",
