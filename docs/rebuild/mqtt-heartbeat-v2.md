@@ -2,9 +2,9 @@
 
 ## 1. 本轮范围
 
-本轮只实现版本化消息信封、两套 ESP32 消息生成和可直接注入
-`topic + payload + received_at` 的纯后端 ingestion。没有创建 MQTT 网络客户端，
-没有连接现场 Broker，也没有实现未知设备发现、SSE、HTTP API 或页面。
+该里程碑实现版本化消息信封、两套 ESP32 消息生成和可直接注入
+`topic + payload + received_at` 的纯后端 ingestion。ingestion 继续与网络层分离；
+后续增加的默认关闭订阅适配器见 `docs/rebuild/mqtt-subscriber.md`。
 
 ## 2. Topic 与 JSON 信封
 
@@ -82,7 +82,7 @@ MQTT 回调接收消息时由后端生成带时区的 `received_at`，并把它�
 - 应用层能够验证 topic ID、payload ID、已登记 `device_id` 和绑定 MAC 的一致性，
   但这不能替代 Broker 认证或 ACL。
 - 未登记 `device_id` 返回 `unknown_device`，不会自动创建可信设备或档案。
-- 本轮没有实例化 MQTT 网络客户端，也没有连接任何真实 Broker。
+- ingestion 模块不会实例化 MQTT 网络客户端；订阅适配器默认关闭并要求显式启停。
 
 ## 7. 数据库 migration v2
 

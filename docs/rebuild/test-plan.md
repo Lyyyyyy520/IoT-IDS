@@ -31,6 +31,8 @@ npm --prefix IoT‑IDS‑Mobile run typecheck
 - admin/operator/user 权限矩阵及 user 对设备 ID 的越权访问。
 - 未认证探针、错误令牌、重复序号、乱序时间、超大批次全部拒绝。
 - MQTT v2 topic/信封/MAC 严格校验；boot 重启允许 sequence 重置，旧 boot 重放拒绝。
+- MQTT 订阅默认关闭；显式启停、QoS 1 重复、retained 拒绝、队列背压、退避重连和
+  `warming_up/ready/degraded` 恢复均使用假客户端及临时 SQLite 验证。
 - 退役保留历史；有引用设备不能彻底删除。
 - API 故障响应中不出现演示数据。
 
