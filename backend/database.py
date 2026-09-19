@@ -8,6 +8,8 @@ import os
 from datetime import datetime
 from werkzeug.security import generate_password_hash
 
+from config import bootstrap_admin_password, bootstrap_admin_username
+
 DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'ids.db')
 
 SCHEMA = """
@@ -15,7 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'user',  -- 'admin' or 'user'
+    role TEXT NOT NULL DEFAULT 'user',  -- admin/operator/user
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
@@ -138,22 +140,26 @@ def init_db():
 
     conn.commit()
 
-    # Seed default accounts independently. Only username "admin" is privileged.
-    default_users = [
-        ('admin', 'admin123', 'admin'),
-        ('guest', 'guest123', 'user'),
-    ]
-    for username, password, role in default_users:
-        existing = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
-        if not existing:
-            conn.execute(
-                "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-                (username, generate_password_hash(password), role),
-            )
+    # Never seed a reusable password.  A first administrator is created only
+    # when the operator supplies a one-time bootstrap password explicitly.
+    admin_username = bootstrap_admin_username()
+    admin_password = bootstrap_admin_password()
+    admin_exists = conn.execute(
+        "SELECT id FROM users WHERE username = ?", (admin_username,)
+    ).fetchone()
+    if admin_password and not admin_exists:
+        conn.execute(
+            "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')",
+            (admin_username, generate_password_hash(admin_password)),
+        )
 
-    # Normalize existing rows so database metadata matches the effective permission rule.
+    # Keep operator rows intact.  This is role normalization only; no v3 schema
+    # or real data migration is performed during phase 0.
+    conn.execute("UPDATE users SET role = 'admin' WHERE username = ?", (admin_username,))
     conn.execute(
-        "UPDATE users SET role = CASE WHEN username = 'admin' THEN 'admin' ELSE 'user' END"
+        "UPDATE users SET role = 'user' "
+        "WHERE username != ? AND role NOT IN ('operator', 'user')",
+        (admin_username,),
     )
 
     # Seed demo assets if empty

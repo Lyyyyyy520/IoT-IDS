@@ -1,5 +1,10 @@
 # API 接口规范
 
+> 本文记录现有 `/api` 旧接口，供渐进式重构期间兼容使用。新版状态、权限、
+> ID、REST v3 和 SSE 契约见
+> [`docs/rebuild/state-and-api-contract.md`](rebuild/state-and-api-contract.md)。
+> 未列入 v3 契约的旧接口不得继续扩展；普通 user 不再访问全社区旧接口。
+
 ## 基础信息
 - Base URL: `http://localhost:5000/api`
 - 数据格式: JSON

@@ -6,17 +6,31 @@ from flask_cors import CORS
 from datetime import datetime
 import os
 
+from config import cors_origins, flask_debug_enabled, runtime_environment, session_secret
+
 app = Flask(__name__)
-app.secret_key = os.urandom(24).hex()  # Session encryption key
+app.secret_key = session_secret()
 app.config['SESSION_PERMANENT'] = True
-CORS(app, supports_credentials=True)
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = runtime_environment() == 'production'
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024
+CORS(app, supports_credentials=True, origins=list(cors_origins()))
 
 # Init database on startup
 from database import init_db, query_all, query_one, execute
 init_db()
 
 # Import auth services
-from services.auth import require_auth, require_admin, login_user, logout_user, get_current_user, log_action
+from services.auth import (
+    require_auth,
+    require_admin,
+    require_operator,
+    login_user,
+    logout_user,
+    get_current_user,
+    log_action,
+)
 
 # Register probe blueprint
 from api.probe import probe_bp
@@ -97,7 +111,7 @@ def _get_traffic_history(source: str = ''):
 
 
 @app.route('/api/dashboard/stats')
-@require_auth
+@require_operator
 def dashboard_stats():
     source = request.args.get('source', '')  # '' = all, 'sim' or 'real'
     src_prefix = f'[{source}]' if source else ''
@@ -187,7 +201,7 @@ def dashboard_stats():
 
 # ---- Alerts List ----
 @app.route('/api/alerts')
-@require_auth
+@require_operator
 def alerts_list():
     from flask import request
     page = request.args.get('page', 1, type=int)
@@ -285,7 +299,7 @@ def alerts_list():
 
 
 @app.route('/api/alerts/new')
-@require_auth
+@require_operator
 def alerts_new():
     """查询新告警，用于前端实时轮询"""
     since_id = request.args.get('since_id', 0, type=int)
@@ -306,7 +320,7 @@ def alerts_new():
 
 # ---- Analysis Data ----
 @app.route('/api/analysis/topology')
-@require_auth
+@require_operator
 def topology_data():
     # 从 assets 表查所有设备作为节点
     assets = query_all("SELECT id, name, device_type, status, ip_address FROM assets")
@@ -350,7 +364,7 @@ def topology_data():
 
 
 @app.route('/api/analysis/heatmap')
-@require_auth
+@require_operator
 def heatmap_data():
     # 统计最近 7 天、24 小时的告警分布
     sql = """
@@ -380,7 +394,7 @@ def heatmap_data():
 
 
 @app.route('/api/analysis/mitre')
-@require_auth
+@require_operator
 def mitre_data():
     """根据告警数据动态生成 MITRE ATT&CK 链路"""
     # 攻击类型 → MITRE 阶段映射
@@ -486,7 +500,7 @@ def detect_upload():
 
 # ---- Export ----
 @app.route('/api/export/excel')
-@require_auth
+@require_operator
 def export_excel():
     from flask import Response, request
     from openpyxl import Workbook
@@ -541,7 +555,7 @@ def export_excel():
 
 
 @app.route('/api/data/cleanup', methods=['POST'])
-@require_auth
+@require_admin
 def data_cleanup():
     """清空全部历史数据"""
     from database import get_config
@@ -584,14 +598,14 @@ def capture_stop():
 
 
 @app.route('/api/capture/status')
-@require_auth
+@require_operator
 def capture_status():
     return jsonify(get_capture().status())
 
 
 # ---- GAT Detection Status ----
 @app.route('/api/gat/status')
-@require_auth
+@require_operator
 def gat_status():
     cap = get_capture()
     status = cap.status()
@@ -607,7 +621,7 @@ def gat_status():
 
 # ---- Device Graph Detection (4-level device risk) ----
 @app.route('/api/device/status')
-@require_auth
+@require_operator
 def device_status():
     cap = get_capture()
     status = cap.status()
@@ -623,7 +637,7 @@ def device_status():
 
 
 @app.route('/api/device/detect', methods=['POST'])
-@require_auth
+@require_admin
 def device_detect():
     cap = get_capture()
     result = cap.device_detect()
@@ -633,7 +647,7 @@ def device_detect():
 
 # ---- Traffic Logs ----
 @app.route('/api/traffic/logs')
-@require_auth
+@require_operator
 def traffic_logs():
     source = request.args.get('source', '')
     if source:
@@ -718,7 +732,7 @@ def unblock_ip(alert_id):
 
 
 @app.route('/api/alerts/<int:alert_id>/trace', methods=['POST'])
-@require_admin
+@require_operator
 def trace_alert(alert_id):
     """溯源分析：生成溯源报告 + 更新告警状态"""
     alert = query_one(
@@ -785,7 +799,7 @@ def trace_alert(alert_id):
 
 
 @app.route('/api/alerts/<int:alert_id>/false-positive', methods=['POST'])
-@require_admin
+@require_operator
 def mark_false_positive(alert_id):
     """标记误报：更新告警状态 + 记录审计日志"""
     alert = query_one("SELECT id, src_ip, attack_type FROM alerts WHERE id = ?", (alert_id,))
@@ -803,7 +817,7 @@ def mark_false_positive(alert_id):
 
 
 @app.route('/api/alerts/<int:alert_id>/unmark-false-positive', methods=['POST'])
-@require_admin
+@require_operator
 def unmark_false_positive(alert_id):
     """撤销误报标记：恢复告警状态为 reviewed"""
     alert = query_one("SELECT id, status FROM alerts WHERE id = ?", (alert_id,))
@@ -944,7 +958,7 @@ def policies_delete(policy_id):
 
 # ---- Asset Management ----
 @app.route('/api/assets', methods=['GET'])
-@require_auth
+@require_operator
 def assets_list():
     """获取设备列表"""
     rows = query_all("SELECT * FROM assets ORDER BY created_at DESC")
@@ -1012,14 +1026,15 @@ def logs_traffic():
 
 # ---- Configuration ----
 @app.route('/api/config', methods=['GET'])
-@require_auth
+@require_admin
 def get_config():
     from database import get_config as gc
     return jsonify({
         'detection_mode': gc('detection_mode', 'offline'),
         'confidence_threshold': float(gc('confidence_threshold', '0.85')),
         'merge_window_minutes': int(gc('merge_window_minutes', '5')),
-        'auto_block': gc('auto_block', 'false').lower() == 'true',
+        # Fixed false by the v3 safety contract; first release is advice-only.
+        'auto_block': False,
         'retention_days': int(gc('retention_days', '30')),
         'model_name': 'CNN+LSTM Hybrid',
         'model_version': 'v3.0',
@@ -1029,11 +1044,16 @@ def get_config():
 
 
 @app.route('/api/config', methods=['PUT'])
-@require_auth
+@require_admin
 def update_config():
     from database import set_config as sc
     data = request.get_json() or {}
-    for key in ('detection_mode', 'confidence_threshold', 'merge_window_minutes', 'auto_block', 'retention_days'):
+    if data.get('auto_block') not in (None, False, 'false'):
+        return jsonify({
+            'success': False,
+            'message': '第一版禁止自动封禁或断电，只提供人工处置建议',
+        }), 400
+    for key in ('detection_mode', 'confidence_threshold', 'merge_window_minutes', 'retention_days'):
         if key in data:
             sc(key, str(data[key]).lower())
     return jsonify({'success': True})
@@ -1042,4 +1062,4 @@ def update_config():
 if __name__ == '__main__':
     print('IoT IDS Backend starting...')
     print('    http://localhost:5000/api/health')
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=flask_debug_enabled())

@@ -93,7 +93,7 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>默认账号 admin / admin123 · guest / guest123</Text>
+            <Text style={styles.footerText}>请使用管理员分配的账号登录</Text>
             <TouchableOpacity style={styles.configLink} onPress={() => setShowConfig(true)}>
               <Ionicons name="settings-outline" size={14} color={colors.accentBlue} />
               <Text style={styles.configLinkText}>后端连接设置</Text>

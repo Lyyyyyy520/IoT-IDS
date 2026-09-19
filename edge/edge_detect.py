@@ -78,7 +78,8 @@ def detect_pcap(engine: InferenceEngine, extractor: FeatureExtractor, pcap_path:
     print(f'\nSummary: {attack_count}/{len(features_list)} flows flagged as attack')
 
 
-def detect_live(engine: InferenceEngine, extractor: FeatureExtractor, server_url: str = None):
+def detect_live(engine: InferenceEngine, extractor: FeatureExtractor,
+                server_url: str = None, probe_token: str = None):
     """Real-time packet capture using tcpdump pipe and ONNX detection."""
     import subprocess, re, threading, requests, json
 
@@ -128,7 +129,9 @@ def detect_live(engine: InferenceEngine, extractor: FeatureExtractor, server_url
             # Push ALL traffic to backend as flow logs
             if server_url and packet_count[0] % 5 == 0:  # Only push every 5th packet to avoid flooding
                 try:
-                    r = requests.post(f'{server_url}/api/probe/push', json={
+                    r = requests.post(f'{server_url}/api/probe/push', headers={
+                        'X-Probe-Token': probe_token,
+                    }, json={
                         'probe_name': 'Pi-Probe',
                         'alerts': ([{
                             'risk_level': result['risk_level'],
@@ -167,6 +170,7 @@ def main():
     parser.add_argument('--pcap', help='Path to PCAP file for analysis')
     parser.add_argument('--live', action='store_true', help='Live capture mode')
     parser.add_argument('--server', help='Management server URL (e.g. http://192.168.0.100:5000)')
+    parser.add_argument('--probe-token', default=os.getenv('IOT_IDS_PROBE_TOKEN', ''), help='Probe credential')
     args = parser.parse_args()
 
     engine = InferenceEngine(MODEL_PATH)
@@ -175,7 +179,9 @@ def main():
     if args.pcap:
         detect_pcap(engine, extractor, args.pcap)
     elif args.live:
-        detect_live(engine, extractor, args.server)
+        if args.server and not args.probe_token:
+            raise SystemExit('Missing probe credential: set IOT_IDS_PROBE_TOKEN or pass --probe-token')
+        detect_live(engine, extractor, args.server, args.probe_token)
     else:
         detect_demo(engine, extractor)
 

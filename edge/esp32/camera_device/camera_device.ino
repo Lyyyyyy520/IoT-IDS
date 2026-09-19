@@ -22,15 +22,17 @@
 #include <PubSubClient.h>
 #include <WiFiUdp.h>
 #include <ESP32Servo.h>
+#include "device_secrets.h"
 
 // ==================== 配置区 ====================
 
-const char* WIFI_SSID = "iot-community";
-const char* WIFI_PASS = "12345678";
-
-const char* MQTT_BROKER = "192.168.4.1";
-const int   MQTT_PORT   = 1883;
-const char* DEVICE_ID   = "camera-01";
+const char* WIFI_SSID     = IOT_WIFI_SSID;
+const char* WIFI_PASS     = IOT_WIFI_PASSWORD;
+const char* MQTT_BROKER   = IOT_MQTT_HOST;
+const int   MQTT_PORT     = IOT_MQTT_PORT;
+const char* MQTT_USER     = IOT_MQTT_USERNAME;
+const char* MQTT_PASSWORD = IOT_MQTT_PASSWORD;
+const char* DEVICE_ID     = IOT_DEVICE_ID;
 
 #define PIN_PAN      2      // 云台舵机（ESP32-CAM 空闲 GPIO2）
 #define TELEMETRY_MS 5000   // 心跳间隔
@@ -45,15 +47,26 @@ Servo         panServo;
 bool attack_mode = false;
 unsigned long lastTelemetry = 0;
 unsigned long lastAttack   = 0;
+unsigned long attackStarted = 0;
 int  pan_angle = 90;          // 云台当前角度
 
-const char* ATTACK_TARGET = "8.8.8.8";
-const int   ATTACK_PORT   = 80;
+const bool  LAB_ATTACK_ENABLED = IOT_LAB_ATTACK_ENABLED;
+const char* ATTACK_TARGET = IOT_LAB_ATTACK_TARGET;
+const int   ATTACK_PORT   = IOT_LAB_ATTACK_PORT;
+const unsigned long ATTACK_INTERVAL_MS = 100;
+const unsigned long ATTACK_MAX_MS = 30000;
 
 // ==================== MQTT ====================
 
 String topicStatus()  { return String("community/") + DEVICE_ID + "/status"; }
 String topicControl() { return String("community/") + DEVICE_ID + "/control"; }
+
+bool isAllowedAttackTarget() {
+  IPAddress target;
+  if (!target.fromString(ATTACK_TARGET)) return false;
+  return target[0] == 192 && target[1] == 168 && target[2] == 4
+         && target[3] >= 2 && target[3] <= 254;
+}
 
 String buildTelemetry() {
   char buf[128];
@@ -69,7 +82,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   if (String(topic) == topicControl()) {
     if (msg == "attack") {
+      if (!LAB_ATTACK_ENABLED || !isAllowedAttackTarget()) {
+        Serial.println("[安全] 攻击实验未启用或目标不在隔离网段，已拒绝指令");
+        return;
+      }
       attack_mode = true;
+      attackStarted = millis();
       Serial.println("[控制] 进入攻击模式（云台乱转）");
     } else if (msg == "normal") {
       attack_mode = false;
@@ -99,20 +117,24 @@ void doNormal() {
 
 void doAttack() {
   // 被入侵：云台疯狂乱转 + UDP 洪水
+  unsigned long now = millis();
+  if (now - attackStarted >= ATTACK_MAX_MS) {
+    attack_mode = false;
+    panServo.write(90);
+    Serial.println("[安全] 攻击实验达到最长时限，已自动停止");
+    return;
+  }
   static unsigned long lastPan = 0;
   if (millis() - lastPan > 200) {
     lastPan = millis();
     pan_angle = random(0, 180);
     panServo.write(pan_angle);
   }
-  unsigned long now = millis();
-  if (now - lastAttack < 50) return;
+  if (now - lastAttack < ATTACK_INTERVAL_MS) return;
   lastAttack = now;
-  for (int i = 0; i < 3; i++) {
-    udp.beginPacket(ATTACK_TARGET, ATTACK_PORT);
-    udp.write((const uint8_t*)"\x00\x00\x00\x00", 4);
-    udp.endPacket();
-  }
+  udp.beginPacket(ATTACK_TARGET, ATTACK_PORT);
+  udp.write((const uint8_t*)"\x00\x00\x00\x00", 4);
+  udp.endPacket();
 }
 
 // ==================== WiFi / MQTT 连接 ====================
@@ -135,7 +157,7 @@ void connectMQTT() {
   mqtt.setServer(MQTT_BROKER, MQTT_PORT);
   mqtt.setCallback(mqttCallback);
   while (!mqtt.connected()) {
-    if (mqtt.connect(DEVICE_ID)) {
+    if (mqtt.connect(DEVICE_ID, MQTT_USER, MQTT_PASSWORD)) {
       mqtt.subscribe(topicControl().c_str());
       Serial.printf("MQTT 已连接, 订阅 %s\n", topicControl().c_str());
     } else {

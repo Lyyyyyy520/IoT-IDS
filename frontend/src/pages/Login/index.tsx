@@ -133,8 +133,8 @@ export default function LoginPage() {
             marginTop: 16,
           }}
         >
-          <div>演示账号：admin / admin123</div>
-          <div style={{ marginTop: 4 }}>只读账号：guest / guest123</div>
+          <div>账号由系统管理员配置</div>
+          <div style={{ marginTop: 4 }}>请勿使用共享或演示密码</div>
         </div>
       </Card>
 

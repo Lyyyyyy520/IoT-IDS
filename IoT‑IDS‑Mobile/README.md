@@ -105,12 +105,9 @@ npx expo start
 
 ### 第四步：登录
 
-使用后端默认账号登录：
-
-| 账号 | 密码 | 权限 |
-|------|------|------|
-| `admin` | `admin123` | 管理员（可拉黑/溯源/误报/抓包控制/审计日志） |
-| `guest` | `guest123` | 普通用户（只读） |
+后端不再创建共享默认账号。首次启动空数据库前，应在本地运行环境中设置
+`IOT_IDS_BOOTSTRAP_ADMIN_USERNAME` 和一次性的
+`IOT_IDS_BOOTSTRAP_ADMIN_PASSWORD`。不要将实际密码写入本文件或提交到 Git。
 
 ---
 

@@ -221,11 +221,10 @@ class TrafficCapture:
                 elif total >= 60: risk_level = 'high'
                 else: risk_level = 'medium'
 
-                # 自动拉黑：开关开启 + 高危 || (中危且持续攻击≥5次)
-                should_block = get_config('auto_block', 'false') == 'true' and (
-                    risk_level == 'critical' or
-                    (risk_level == 'high' and freq >= 5)
-                )
+                # Phase 0 contract: the first release never blocks or powers
+                # off a device automatically.  Keep the legacy branch visible
+                # for later removal, but make it unreachable.
+                should_block = False
                 if should_block:
                     existing = _q("SELECT id FROM policies WHERE policy_type='blacklist' AND target=? AND enabled=1", (src_ip,))
                     if not existing or existing['c'] == 0:

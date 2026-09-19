@@ -56,6 +56,7 @@ sudo ~/iot-probe-venv/bin/python ~/vm_probe_client.py \
   --server http://192.168.41.1:5000 \
   --name Pi-001 \
   --interface ens33 \
+  --token '<与后端 IOT_IDS_PROBE_TOKEN 一致的凭据>' \
   --bpf "host 192.168.41.136 and not tcp port 5000"
 ```
 

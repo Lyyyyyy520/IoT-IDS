@@ -55,6 +55,8 @@ temp/
 # Environment
 .env
 .env.local
+edge/esp32/**/device_secrets.h
+edge/mosquitto/passwd*
 training/data/
 
 # Expo generated QR

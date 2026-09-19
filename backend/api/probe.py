@@ -1,15 +1,64 @@
 """
 Probe Integration API — receives data from Raspberry Pi probe nodes
 """
-from flask import Blueprint, request, jsonify
+from functools import wraps
+import hmac
+
+from flask import Blueprint, request, jsonify, session
 from database import query_all, query_one, execute
 from datetime import datetime
-from services.auth import require_auth, require_admin
+from config import probe_token
+from contracts import Role
+from services.auth import effective_role, require_admin, require_operator
 
 probe_bp = Blueprint('probe', __name__)
 
 
+def _request_probe_token() -> str:
+    explicit = request.headers.get('X-Probe-Token', '').strip()
+    if explicit:
+        return explicit
+    authorization = request.headers.get('Authorization', '')
+    if authorization.lower().startswith('bearer '):
+        return authorization[7:].strip()
+    return ''
+
+
+def require_probe_auth(f):
+    """Require the independent probe credential on every probe-side route."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        expected = probe_token()
+        if not expected:
+            return jsonify({'error': '探针凭据未配置'}), 503
+        supplied = _request_probe_token()
+        if not supplied:
+            return jsonify({'error': '缺少探针凭据'}), 401
+        if not hmac.compare_digest(supplied, expected):
+            return jsonify({'error': '探针凭据无效'}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+def require_probe_or_admin(f):
+    """Allow a probe credential or an authenticated admin browser session."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        expected = probe_token()
+        supplied = _request_probe_token()
+        if expected and supplied and hmac.compare_digest(supplied, expected):
+            return f(*args, **kwargs)
+        role = effective_role(session.get('username', ''), session.get('role'))
+        if session.get('user_id') and role == Role.ADMIN.value:
+            return f(*args, **kwargs)
+        if not expected:
+            return jsonify({'error': '探针凭据未配置'}), 503
+        return jsonify({'error': '缺少或无效的探针凭据'}), 401
+    return decorated
+
+
 @probe_bp.route('/api/probe/register', methods=['POST'])
+@require_probe_auth
 def register():
     """Register a new probe node."""
     data = request.get_json() or {}
@@ -29,6 +78,7 @@ def register():
 
 
 @probe_bp.route('/api/probe/heartbeat', methods=['POST'])
+@require_probe_auth
 def heartbeat():
     """Probe heartbeat — updates last_seen timestamp."""
     data = request.get_json() or {}
@@ -44,6 +94,7 @@ def heartbeat():
 
 
 @probe_bp.route('/api/probe/push', methods=['POST'])
+@require_probe_auth
 def push_data():
     """
     Receive alert/flow data from a probe.
@@ -147,7 +198,7 @@ def push_data():
 
 
 @probe_bp.route('/api/probe/list')
-@require_auth
+@require_operator
 def list_probes():
     """List all registered probes."""
     probes = query_all("SELECT * FROM assets WHERE device_type = 'probe' ORDER BY last_seen DESC")
@@ -155,7 +206,7 @@ def list_probes():
 
 
 @probe_bp.route('/api/probe/status')
-@require_auth
+@require_operator
 def probe_status():
     """Get aggregate probe status."""
     total = query_one("SELECT COUNT(*) as c FROM assets WHERE device_type='probe'")['c']
@@ -186,6 +237,7 @@ def probe_control():
 
 
 @probe_bp.route('/api/probe/control-status', methods=['GET'])
+@require_probe_or_admin
 def probe_control_status():
     from database import query_one, execute
     name = request.args.get('name', 'Pi-001')
@@ -198,6 +250,7 @@ def probe_control_status():
 
 
 @probe_bp.route('/api/probe/status-report', methods=['POST'])
+@require_probe_auth
 def probe_status_report():
     """探头主动上报运行状态"""
     from database import execute

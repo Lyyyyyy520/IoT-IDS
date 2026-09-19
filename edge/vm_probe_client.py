@@ -12,6 +12,7 @@ Example:
       --bpf "host 192.168.41.136 and not tcp port 5000"
 """
 import argparse
+import os
 import time
 from typing import Dict, List, Optional
 
@@ -78,10 +79,15 @@ def main():
     parser.add_argument('--poll', type=float, default=1.0, help='Control poll/capture slice duration in seconds')
     parser.add_argument('--batch-size', type=int, default=100, help='Maximum packets per push batch')
     parser.add_argument('--autostart', action='store_true', help='Capture immediately without waiting for web Start')
+    parser.add_argument('--token', default=os.getenv('IOT_IDS_PROBE_TOKEN', ''), help='Probe credential')
     args = parser.parse_args()
+
+    if not args.token:
+        raise SystemExit('[VM Probe] missing credential: set IOT_IDS_PROBE_TOKEN or pass --token')
 
     base = args.server.rstrip('/')
     session = requests.Session()
+    session.headers.update({'X-Probe-Token': args.token})
 
     print(f'[VM Probe] name      : {args.name}')
     print(f'[VM Probe] backend   : {base}')
