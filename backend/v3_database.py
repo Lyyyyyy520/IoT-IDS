@@ -161,9 +161,39 @@ V3_MQTT_HEARTBEAT_MIGRATION = SchemaMigration(
     statements=V3_MQTT_HEARTBEAT_STATEMENTS,
 )
 
+V3_REALTIME_EVENT_STATEMENTS = (
+    """
+    CREATE TABLE v3_realtime_events (
+        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        device_id TEXT,
+        state_version INTEGER
+            CHECK (state_version IS NULL OR state_version >= 0),
+        payload_json TEXT NOT NULL,
+        FOREIGN KEY (device_id) REFERENCES v3_device_profiles(device_id)
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_realtime_events_type
+        ON v3_realtime_events(event_type, event_id)
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_realtime_events_device
+        ON v3_realtime_events(device_id, event_id)
+    """.strip(),
+)
+
+V3_REALTIME_EVENT_MIGRATION = SchemaMigration(
+    version=3,
+    name="realtime_event_log",
+    statements=V3_REALTIME_EVENT_STATEMENTS,
+)
+
 V3_MIGRATIONS = (
     V3_DEVICE_STATE_MIGRATION,
     V3_MQTT_HEARTBEAT_MIGRATION,
+    V3_REALTIME_EVENT_MIGRATION,
 )
 
 V3_DEVICE_STATE_TABLES = frozenset(
@@ -197,12 +227,33 @@ V3_MQTT_HEARTBEAT_INDEXES = frozenset(
     }
 )
 
+V3_REALTIME_EVENT_TABLES = frozenset({"v3_realtime_events"})
+
+V3_REALTIME_EVENT_INDEXES = frozenset(
+    {
+        "idx_v3_realtime_events_type",
+        "idx_v3_realtime_events_device",
+    }
+)
+
 V3_EXPECTED_OBJECTS = {
     MIGRATION_TABLE: "table",
     **{name: "table" for name in V3_DEVICE_STATE_TABLES},
     **{name: "table" for name in V3_MQTT_HEARTBEAT_TABLES},
     **{name: "index" for name in V3_DEVICE_STATE_INDEXES},
     **{name: "index" for name in V3_MQTT_HEARTBEAT_INDEXES},
+    **{name: "table" for name in V3_REALTIME_EVENT_TABLES},
+    **{name: "index" for name in V3_REALTIME_EVENT_INDEXES},
+}
+
+V3_EXPECTED_OBJECT_VERSIONS = {
+    MIGRATION_TABLE: 1,
+    **{name: 1 for name in V3_DEVICE_STATE_TABLES},
+    **{name: 1 for name in V3_DEVICE_STATE_INDEXES},
+    **{name: 2 for name in V3_MQTT_HEARTBEAT_TABLES},
+    **{name: 2 for name in V3_MQTT_HEARTBEAT_INDEXES},
+    **{name: 3 for name in V3_REALTIME_EVENT_TABLES},
+    **{name: 3 for name in V3_REALTIME_EVENT_INDEXES},
 }
 
 
@@ -325,6 +376,17 @@ def apply_v3_migrations(
 def connect_v3(database_path: str | Path) -> sqlite3.Connection:
     """Open an explicit SQLite database with v3 safety settings enabled."""
     connection = sqlite3.connect(str(database_path))
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys=ON")
+    return connection
+
+
+def connect_v3_existing(database_path: str | Path) -> sqlite3.Connection:
+    """Open an existing SQLite database read/write without implicit creation."""
+    path = Path(database_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"v3 database does not exist: {path}")
+    connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=rw", uri=True)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys=ON")
     return connection

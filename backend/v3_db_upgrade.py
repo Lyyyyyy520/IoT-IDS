@@ -20,6 +20,7 @@ from uuid import uuid4
 from v3_database import (
     SchemaMigration,
     V3_EXPECTED_OBJECTS,
+    V3_EXPECTED_OBJECT_VERSIONS,
     V3_MIGRATIONS,
     apply_v3_migrations,
     current_v3_schema_version,
@@ -332,7 +333,8 @@ def _migration_plan(connection: sqlite3.Connection, objects: list[dict]) -> dict
         schema_drift = [
             item
             for item in object_actions
-            if item["action"] != "already_present"
+            if V3_EXPECTED_OBJECT_VERSIONS[item["name"]] <= schema_version
+            and item["action"] != "already_present"
         ]
     return {
         "current_schema_version": schema_version,

@@ -334,7 +334,7 @@ def test_rejected_replay_does_not_refresh_offline_device(mqtt_state):
     assert _observation_count(service) == 1
 
 
-def test_migration_v1_checksum_is_frozen_and_v2_is_idempotent(tmp_path):
+def test_migration_v1_checksum_is_frozen_and_v2_remains_registered(tmp_path):
     database_path = tmp_path / "migrations.sqlite"
     assert V3_MIGRATIONS[0].checksum == MIGRATION_V1_CHECKSUM
     assert V3_MIGRATIONS[1].version == 2
@@ -358,6 +358,6 @@ def test_migration_v1_checksum_is_frozen_and_v2_is_idempotent(tmp_path):
                 "PRAGMA table_info(v3_device_state_observations)"
             )
         }
-    assert versions == [(1,), (2,)]
+    assert versions == [(1,), (2,), (3,)]
     assert V3_MQTT_HEARTBEAT_TABLES <= tables
     assert {"boot_id", "firmware_version", "uptime_ms"} <= observation_columns

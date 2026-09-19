@@ -122,6 +122,11 @@ data: {"event_id":1842,"occurred_at":"2026-09-19T08:00:00Z","state_version":17,"
 `Last-Event-ID`；服务端无法补齐时发送 `snapshot.required` 控制信息并关闭流，客户端
 重新拉取完整快照。APP 从后台回前台时不等待补发，直接先拉完整快照。
 
+首次建立 Web 事件流时，先读取 `/api/v3/monitor` 返回的 `event_cursor`，再连接
+`/api/v3/events?after=<event_cursor>`，避免快照响应与 SSE 建连之间遗漏变化。后续浏览器
+自动重连以 `Last-Event-ID` 为准。游标不连续、早于可补发范围或单次积压超过上限时，
+服务端只发送无 `id` 的 `snapshot.required`，随后关闭连接。
+
 ## 7. 图与模型契约
 
 - 第一版窗口固定为 60 秒；训练、验证、推理必须使用同一特征顺序和图语义。

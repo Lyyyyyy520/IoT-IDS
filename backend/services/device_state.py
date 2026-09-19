@@ -16,7 +16,8 @@ from contracts import (
     enum_values,
     is_valid_device_id,
 )
-from v3_database import connect_v3, initialize_v3_database
+from services.realtime_events import append_realtime_event
+from v3_database import connect_v3, connect_v3_existing, initialize_v3_database
 
 
 Clock = Callable[[], datetime]
@@ -76,9 +77,16 @@ def _normalize_ip(value: str | None) -> str | None:
 class DeviceStateService:
     """SQLite-backed v3 state service with a deterministic injectable clock."""
 
-    def __init__(self, database_path: str | Path, clock: Clock | None = None):
+    def __init__(
+        self,
+        database_path: str | Path,
+        clock: Clock | None = None,
+        *,
+        create_if_missing: bool = True,
+    ):
         self.database_path = Path(database_path)
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._create_if_missing = create_if_missing
 
     def initialize(self) -> None:
         initialize_v3_database(self.database_path)
@@ -88,7 +96,8 @@ class DeviceStateService:
 
     @contextmanager
     def _connection(self) -> Iterator:
-        connection = connect_v3(self.database_path)
+        connector = connect_v3 if self._create_if_missing else connect_v3_existing
+        connection = connector(self.database_path)
         try:
             yield connection
             connection.commit()
@@ -275,6 +284,16 @@ class DeviceStateService:
                 f"observation identity does not match device_id {device_id!r}"
             )
 
+        current = connection.execute(
+            "SELECT connection_status, state_version "
+            "FROM v3_device_current_state WHERE device_id = ?",
+            (device_id,),
+        ).fetchone()
+        if not current:
+            raise DeviceNotFoundError(f"device state missing for {device_id!r}")
+        previous_status = current["connection_status"]
+        next_state_version = int(current["state_version"]) + 1
+
         cursor = connection.execute(
             "INSERT INTO v3_device_state_observations "
             "(device_id, source, sequence, ip_address, observed_at, "
@@ -308,14 +327,33 @@ class DeviceStateService:
                 device_id,
             ),
         )
-        current = connection.execute(
-            "SELECT state_version FROM v3_device_current_state WHERE device_id = ?",
-            (device_id,),
-        ).fetchone()
+        if previous_status == ConnectionStatus.ONLINE.value:
+            event_type = "device.telemetry_updated"
+            event_payload = {
+                "connection_status": ConnectionStatus.ONLINE.value,
+                "observation_id": int(cursor.lastrowid),
+                "source": source.strip(),
+            }
+        else:
+            event_type = "device.connection_changed"
+            event_payload = {
+                "from": previous_status,
+                "to": ConnectionStatus.ONLINE.value,
+                "source": source.strip(),
+            }
+        event = append_realtime_event(
+            connection,
+            event_type=event_type,
+            occurred_at=received,
+            device_id=device_id,
+            state_version=next_state_version,
+            payload=event_payload,
+        )
         return {
             "observation_id": cursor.lastrowid,
-            "state_version": current["state_version"],
+            "state_version": next_state_version,
             "received_at": received_text,
+            "event_id": event["event_id"],
         }
 
     def _connection_status(self, last_received_at: str | None, now: datetime) -> str:
@@ -328,9 +366,9 @@ class DeviceStateService:
             return ConnectionStatus.STALE.value
         return ConnectionStatus.OFFLINE.value
 
-    def _refresh_device(self, connection, device_id: str, now: datetime) -> None:
+    def _refresh_device(self, connection, device_id: str, now: datetime) -> bool:
         current = connection.execute(
-            "SELECT connection_status, last_received_at "
+            "SELECT connection_status, last_received_at, state_version "
             "FROM v3_device_current_state WHERE device_id = ?",
             (device_id,),
         ).fetchone()
@@ -338,12 +376,27 @@ class DeviceStateService:
             raise DeviceNotFoundError(f"unknown device_id {device_id!r}")
         next_status = self._connection_status(current["last_received_at"], now)
         if next_status != current["connection_status"]:
+            next_state_version = int(current["state_version"]) + 1
             connection.execute(
                 "UPDATE v3_device_current_state SET connection_status = ?, "
                 "state_version = state_version + 1, updated_at = ? "
                 "WHERE device_id = ?",
                 (next_status, _iso(now), device_id),
             )
+            append_realtime_event(
+                connection,
+                event_type="device.connection_changed",
+                occurred_at=now,
+                device_id=device_id,
+                state_version=next_state_version,
+                payload={
+                    "from": current["connection_status"],
+                    "to": next_status,
+                    "source": "timeout",
+                },
+            )
+            return True
+        return False
 
     def refresh_connection_statuses(self) -> int:
         """Apply timeout transitions to all devices and return the changed count."""
@@ -351,17 +404,30 @@ class DeviceStateService:
         changed = 0
         with self._connection() as connection:
             rows = connection.execute(
-                "SELECT device_id, connection_status, last_received_at "
+                "SELECT device_id, connection_status, last_received_at, state_version "
                 "FROM v3_device_current_state"
             ).fetchall()
             for row in rows:
                 next_status = self._connection_status(row["last_received_at"], now)
                 if next_status != row["connection_status"]:
+                    next_state_version = int(row["state_version"]) + 1
                     connection.execute(
                         "UPDATE v3_device_current_state SET connection_status = ?, "
                         "state_version = state_version + 1, updated_at = ? "
                         "WHERE device_id = ?",
                         (next_status, _iso(now), row["device_id"]),
+                    )
+                    append_realtime_event(
+                        connection,
+                        event_type="device.connection_changed",
+                        occurred_at=now,
+                        device_id=row["device_id"],
+                        state_version=next_state_version,
+                        payload={
+                            "from": row["connection_status"],
+                            "to": next_status,
+                            "source": "timeout",
+                        },
                     )
                     changed += 1
         return changed
@@ -440,14 +506,19 @@ class DeviceStateService:
     ) -> dict:
         if not _COMPONENT_ID_PATTERN.fullmatch(component_id or ""):
             raise DeviceStateError("invalid component_id")
-        now = _iso(self._now())
+        current_time = self._now()
+        now = _iso(current_time)
+        normalized_reason = reason.strip() if reason else None
         with self._connection() as connection:
             existing = connection.execute(
-                "SELECT started_at, ready_at FROM v3_system_component_health "
-                "WHERE component_id = ?",
+                "SELECT * FROM v3_system_component_health WHERE component_id = ?",
                 (component_id,),
             ).fetchone()
             if existing:
+                readiness_changed = existing["readiness"] != readiness
+                reason_changed = existing["reason"] != normalized_reason
+                if not restarted and not readiness_changed and not reason_changed:
+                    return dict(existing)
                 started_at = now if restarted else existing["started_at"]
                 if restarted:
                     ready_at = None
@@ -464,11 +535,14 @@ class DeviceStateService:
                         readiness,
                         started_at,
                         ready_at,
-                        reason.strip() if reason else None,
+                        normalized_reason,
                         now,
                         component_id,
                     ),
                 )
+                state_version = int(existing["state_version"]) + 1
+                previous_readiness = existing["readiness"]
+                previous_reason = existing["reason"]
             else:
                 ready_at = now if readiness == DetectionReadiness.READY.value else None
                 connection.execute(
@@ -480,9 +554,29 @@ class DeviceStateService:
                         readiness,
                         now,
                         ready_at,
-                        reason.strip() if reason else None,
+                        normalized_reason,
                         now,
                     ),
+                )
+                state_version = 1
+                readiness_changed = True
+                reason_changed = normalized_reason is not None
+                previous_readiness = None
+                previous_reason = None
+            if readiness_changed or reason_changed:
+                append_realtime_event(
+                    connection,
+                    event_type="system.component_changed",
+                    occurred_at=current_time,
+                    device_id=None,
+                    state_version=state_version,
+                    payload={
+                        "component_id": component_id,
+                        "from": previous_readiness,
+                        "to": readiness,
+                        "previous_reason": previous_reason,
+                        "reason": normalized_reason,
+                    },
                 )
         return self.get_component_health(component_id)
 

@@ -33,6 +33,10 @@ npm --prefix IoT‑IDS‑Mobile run typecheck
 - MQTT v2 topic/信封/MAC 严格校验；boot 重启允许 sequence 重置，旧 boot 重放拒绝。
 - MQTT 订阅默认关闭；显式启停、QoS 1 重复、retained 拒绝、队列背压、退避重连和
   `warming_up/ready/degraded` 恢复均使用假客户端及临时 SQLite 验证。
+- monitor 空库和真实状态快照不注入演示数据；缺库/未迁移返回带 request_id 的 503。
+- 状态变化与追加式事件同事务提交；重复/拒绝心跳不产生事件，超时转换使用注入时钟。
+- SSE 按 `after`/`Last-Event-ID` 严格有序补发；断档、过期或超量时发送
+  `snapshot.required`，空闲 keepalive 不写库且测试可确定结束。
 - 退役保留历史；有引用设备不能彻底删除。
 - API 故障响应中不出现演示数据。
 
