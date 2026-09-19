@@ -2,6 +2,7 @@
 
 > 状态：阶段 0 已冻结；实现必须保持向后兼容，不迁移真实数据库。
 > 代码镜像：`backend/contracts.py`。文档与代码枚举变更必须同时提交。
+> 阶段 1 数据基础：`docs/rebuild/device-state-foundation.md`。
 
 ## 1. 唯一事实来源
 
