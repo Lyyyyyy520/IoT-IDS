@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Spin } from 'antd';
 import MainLayout from './layouts/MainLayout';
@@ -11,6 +12,8 @@ import Logs from './pages/Logs';
 import Settings from './pages/Settings';
 import MonitorPage from './pages/Monitor';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+
+const DevicesPage = lazy(() => import('./pages/Devices'));
 
 function LoadingScreen() {
   return (
@@ -47,7 +50,16 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function RequireMonitorRole({ children }: { children: React.ReactNode }) {
+export function RequireMonitorRole({ children }: { children: React.ReactNode }) {
+  const { authenticated, loading, canAccessMonitor } = useAuth();
+
+  if (loading) return <LoadingScreen />;
+  if (!authenticated) return <Navigate to="/login" replace />;
+  if (!canAccessMonitor) return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
+export function RequireDeviceRole({ children }: { children: React.ReactNode }) {
   const { authenticated, loading, canAccessMonitor } = useAuth();
 
   if (loading) return <LoadingScreen />;
@@ -91,6 +103,16 @@ export default function App() {
           <Route path="traffic" element={<Traffic />} />
           <Route path="assets" element={<Assets />} />
           <Route path="settings" element={<Settings />} />
+          <Route
+            path="devices"
+            element={
+              <RequireDeviceRole>
+                <Suspense fallback={<LoadingScreen />}>
+                  <DevicesPage />
+                </Suspense>
+              </RequireDeviceRole>
+            }
+          />
 
           {/* Administrator-only pages. */}
           <Route path="policy" element={<RequireAdmin><Policy /></RequireAdmin>} />

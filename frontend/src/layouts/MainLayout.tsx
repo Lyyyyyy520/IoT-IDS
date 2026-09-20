@@ -24,7 +24,6 @@ const userNavItems: MenuItem[] = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '态势大屏' },
   { key: '/alerts', icon: <AlertOutlined />, label: '告警中心' },
   { key: '/traffic', icon: <SwapOutlined />, label: '流量分析' },
-  { key: '/assets', icon: <MonitorOutlined />, label: '资产监控' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
 
@@ -34,12 +33,17 @@ const monitorNavItem: MenuItem = {
   label: '实时监视',
 };
 
+const devicesNavItem: MenuItem = {
+  key: '/devices',
+  icon: <MonitorOutlined />,
+  label: '设备管理',
+};
+
 const adminNavItems: MenuItem[] = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '态势大屏' },
   { key: '/alerts', icon: <AlertOutlined />, label: '告警中心' },
   { key: '/traffic', icon: <SwapOutlined />, label: '流量分析' },
   { key: '/policy', icon: <SafetyOutlined />, label: '策略管理' },
-  { key: '/assets', icon: <MonitorOutlined />, label: '资产监控' },
   { key: '/logs', icon: <FileTextOutlined />, label: '审计日志' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
@@ -52,7 +56,9 @@ export default function MainLayout() {
 
   const currentKey = '/' + location.pathname.split('/')[1];
   const baseNavItems = isAdmin ? adminNavItems : userNavItems;
-  const navItems = canAccessMonitor ? [monitorNavItem, ...baseNavItems] : baseNavItems;
+  const navItems = canAccessMonitor
+    ? [monitorNavItem, devicesNavItem, ...baseNavItems]
+    : baseNavItems;
 
   const handleLogout = async () => {
     await logout();

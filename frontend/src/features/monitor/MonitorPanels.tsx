@@ -56,6 +56,7 @@ export function DeviceListPanel({
   onSearch,
   filter,
   onFilter,
+  onManageDevice,
 }: {
   devices: MonitorDevice[];
   selectedId: string | null;
@@ -64,6 +65,7 @@ export function DeviceListPanel({
   onSearch: (value: string) => void;
   filter: DeviceFilter;
   onFilter: (value: DeviceFilter) => void;
+  onManageDevice: (deviceId: string) => void;
 }) {
   const filters: DeviceFilter[] = ['all', 'online', 'stale', 'offline', 'unknown'];
   return (
@@ -105,28 +107,36 @@ export function DeviceListPanel({
           </div>
         ) : (
           devices.map((device) => (
-            <button
-              type="button"
-              role="listitem"
-              key={device.device_id}
-              className={`device-row ${selectedId === device.device_id ? 'is-selected' : ''}`}
-              onClick={() => onSelect(device.device_id)}
-            >
-              <span className={`status-dot status-${device.connection_status}`} aria-hidden="true" />
-              <span className="device-row-main">
-                <span className="device-name">{device.display_name}</span>
-                <span className="device-meta">
-                  {device.device_type} · {device.area_id ?? '未分区'}
+            <div role="listitem" className="device-row-wrap" key={device.device_id}>
+              <button
+                type="button"
+                className={`device-row ${selectedId === device.device_id ? 'is-selected' : ''}`}
+                onClick={() => onSelect(device.device_id)}
+              >
+                <span className={`status-dot status-${device.connection_status}`} aria-hidden="true" />
+                <span className="device-row-main">
+                  <span className="device-name">{device.display_name}</span>
+                  <span className="device-meta">
+                    {device.device_type} · {device.area_id ?? '未分区'}
+                  </span>
+                  <span className="device-ip">{device.ip_address ?? '尚无 IP'}</span>
                 </span>
-                <span className="device-ip">{device.ip_address ?? '尚无 IP'}</span>
-              </span>
-              <span className="device-row-side">
-                <span className={`status-text status-${device.connection_status}`}>
-                  {STATUS_LABELS[device.connection_status]}
+                <span className="device-row-side">
+                  <span className={`status-text status-${device.connection_status}`}>
+                    {STATUS_LABELS[device.connection_status]}
+                  </span>
+                  <span>{MODE_LABELS[device.operation_mode]}</span>
                 </span>
-                <span>{MODE_LABELS[device.operation_mode]}</span>
-              </span>
-            </button>
+              </button>
+              <button
+                type="button"
+                className="device-manage-link"
+                onClick={() => onManageDevice(device.device_id)}
+                aria-label={`查看或管理 ${device.display_name}`}
+              >
+                查看/管理设备
+              </button>
+            </div>
           ))
         )}
       </div>

@@ -147,6 +147,7 @@ export default function MonitorPage() {
             onSearch={setSearch}
             filter={filter}
             onFilter={setFilter}
+            onManageDevice={(deviceId) => navigate(`/devices?device_id=${encodeURIComponent(deviceId)}`)}
           />
           <div className="monitor-center-column">
             <CapabilityPanel capability={monitor.snapshot.capabilities.graph} />

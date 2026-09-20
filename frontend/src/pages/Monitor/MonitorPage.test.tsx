@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { validSnapshot } from '../../test/monitorFixtures';
 import MonitorPage from './index';
@@ -17,10 +17,21 @@ vi.mock('../../features/monitor/monitorStore', () => ({
   useMonitorStore: () => monitorState,
 }));
 
+function DeviceDestination() {
+  const location = useLocation();
+  return <div data-testid="device-destination">{location.pathname}{location.search}</div>;
+}
+
 function renderPage() {
   return render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <MonitorPage />
+    <MemoryRouter
+      initialEntries={['/monitor']}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <Routes>
+        <Route path="/monitor" element={<MonitorPage />} />
+        <Route path="/devices" element={<DeviceDestination />} />
+      </Routes>
     </MemoryRouter>,
   );
 }
@@ -62,6 +73,14 @@ describe('MonitorPage real states', () => {
     renderPage();
     expect(screen.getByRole('status')).toHaveTextContent('数据可能过期');
     expect(screen.getAllByText('东门摄像头').length).toBeGreaterThan(0);
+  });
+
+  it('deep-links a real monitor device into the device management workspace', () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '查看或管理 东门摄像头' }));
+    expect(screen.getByTestId('device-destination')).toHaveTextContent(
+      '/devices?device_id=camera-01',
+    );
   });
 
   it.each([
