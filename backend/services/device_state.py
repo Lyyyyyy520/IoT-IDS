@@ -74,6 +74,17 @@ def _normalize_ip(value: str | None) -> str | None:
         raise DeviceStateError("invalid IP address") from exc
 
 
+def _device_sources(connection, device_id: str) -> list[str]:
+    return [
+        row["source"]
+        for row in connection.execute(
+            "SELECT DISTINCT source FROM v3_device_state_observations "
+            "WHERE device_id = ? ORDER BY source",
+            (device_id,),
+        ).fetchall()
+    ]
+
+
 class DeviceStateService:
     """SQLite-backed v3 state service with a deterministic injectable clock."""
 
@@ -333,6 +344,10 @@ class DeviceStateService:
                 "connection_status": ConnectionStatus.ONLINE.value,
                 "observation_id": int(cursor.lastrowid),
                 "source": source.strip(),
+                "ip_address": normalized_ip,
+                "observed_at": observed_text,
+                "received_at": received_text,
+                "sources": _device_sources(connection, device_id),
             }
         else:
             event_type = "device.connection_changed"
@@ -340,6 +355,11 @@ class DeviceStateService:
                 "from": previous_status,
                 "to": ConnectionStatus.ONLINE.value,
                 "source": source.strip(),
+                "connection_status": ConnectionStatus.ONLINE.value,
+                "ip_address": normalized_ip,
+                "observed_at": observed_text,
+                "received_at": received_text,
+                "sources": _device_sources(connection, device_id),
             }
         event = append_realtime_event(
             connection,
@@ -368,7 +388,8 @@ class DeviceStateService:
 
     def _refresh_device(self, connection, device_id: str, now: datetime) -> bool:
         current = connection.execute(
-            "SELECT connection_status, last_received_at, state_version "
+            "SELECT connection_status, ip_address, last_observed_at, "
+            "last_received_at, state_version "
             "FROM v3_device_current_state WHERE device_id = ?",
             (device_id,),
         ).fetchone()
@@ -393,6 +414,11 @@ class DeviceStateService:
                     "from": current["connection_status"],
                     "to": next_status,
                     "source": "timeout",
+                    "connection_status": next_status,
+                    "ip_address": current["ip_address"],
+                    "observed_at": current["last_observed_at"],
+                    "received_at": current["last_received_at"],
+                    "sources": _device_sources(connection, device_id),
                 },
             )
             return True
@@ -404,7 +430,8 @@ class DeviceStateService:
         changed = 0
         with self._connection() as connection:
             rows = connection.execute(
-                "SELECT device_id, connection_status, last_received_at, state_version "
+                "SELECT device_id, connection_status, ip_address, last_observed_at, "
+                "last_received_at, state_version "
                 "FROM v3_device_current_state"
             ).fetchall()
             for row in rows:
@@ -427,6 +454,11 @@ class DeviceStateService:
                             "from": row["connection_status"],
                             "to": next_status,
                             "source": "timeout",
+                            "connection_status": next_status,
+                            "ip_address": row["ip_address"],
+                            "observed_at": row["last_observed_at"],
+                            "received_at": row["last_received_at"],
+                            "sources": _device_sources(connection, row["device_id"]),
                         },
                     )
                     changed += 1
@@ -575,7 +607,11 @@ class DeviceStateService:
                         "from": previous_readiness,
                         "to": readiness,
                         "previous_reason": previous_reason,
+                        "readiness": readiness,
+                        "started_at": started_at if existing else now,
+                        "ready_at": ready_at,
                         "reason": normalized_reason,
+                        "updated_at": now,
                     },
                 )
         return self.get_component_health(component_id)

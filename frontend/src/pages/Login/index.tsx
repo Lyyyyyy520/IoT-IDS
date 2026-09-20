@@ -17,7 +17,7 @@ export default function LoginPage() {
     setLoading(false);
     if (result.success) {
       message.success('登录成功');
-      navigate('/dashboard', { replace: true });
+      navigate(result.role === 'admin' || result.role === 'operator' ? '/monitor' : '/dashboard', { replace: true });
     } else {
       message.error(result.message || '登录失败');
     }

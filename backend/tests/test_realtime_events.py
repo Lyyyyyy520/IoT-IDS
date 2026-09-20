@@ -138,6 +138,13 @@ def test_accepted_mqtt_writes_events_and_rejected_replay_writes_none(tmp_path):
     assert [event["state_version"] for event in events] == [1, 2]
     assert events[0]["payload"]["from"] == "unknown"
     assert events[0]["payload"]["to"] == "online"
+    assert events[0]["payload"]["connection_status"] == "online"
+    assert events[0]["payload"]["ip_address"] == "192.168.4.21"
+    assert events[0]["payload"]["observed_at"] == "2026-09-19T08:00:00Z"
+    assert events[0]["payload"]["received_at"] == "2026-09-19T08:00:00Z"
+    assert events[0]["payload"]["sources"] == [f"mqtt:{BOOT_ID}"]
+    assert events[1]["payload"]["connection_status"] == "online"
+    assert events[1]["payload"]["received_at"] == "2026-09-19T08:00:02Z"
 
 
 def test_timeout_events_are_ordered_and_noop_refresh_is_silent(tmp_path):
@@ -169,6 +176,16 @@ def test_timeout_events_are_ordered_and_noop_refresh_is_silent(tmp_path):
     ]
     assert [event["state_version"] for event in events] == [1, 2, 3]
     assert [event["event_id"] for event in events] == [1, 2, 3]
+    assert events[-1]["payload"] == {
+        "connection_status": "offline",
+        "from": "stale",
+        "ip_address": "192.168.4.21",
+        "observed_at": "2026-09-19T08:00:00Z",
+        "received_at": "2026-09-19T08:00:00Z",
+        "source": "timeout",
+        "sources": ["probe-a"],
+        "to": "offline",
+    }
 
 
 def test_component_event_requires_actual_readiness_or_reason_change(tmp_path):
@@ -191,6 +208,10 @@ def test_component_event_requires_actual_readiness_or_reason_change(tmp_path):
         "system.component_changed",
     ]
     assert events[-1]["payload"]["reason"] == "broker disconnected"
+    assert events[-1]["payload"]["readiness"] == "degraded"
+    assert events[-1]["payload"]["started_at"] == "2026-09-19T08:00:00Z"
+    assert events[-1]["payload"]["ready_at"] == "2026-09-19T08:00:00Z"
+    assert events[-1]["payload"]["updated_at"] == "2026-09-19T08:00:01Z"
 
 
 def test_event_store_replays_after_restart_and_detects_a_gap(tmp_path):

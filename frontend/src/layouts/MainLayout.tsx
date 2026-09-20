@@ -28,6 +28,12 @@ const userNavItems: MenuItem[] = [
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
 
+const monitorNavItem: MenuItem = {
+  key: '/monitor',
+  icon: <MonitorOutlined />,
+  label: '实时监视',
+};
+
 const adminNavItems: MenuItem[] = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '态势大屏' },
   { key: '/alerts', icon: <AlertOutlined />, label: '告警中心' },
@@ -42,10 +48,11 @@ export default function MainLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isAdmin, logout } = useAuth();
+  const { user, isAdmin, canAccessMonitor, logout } = useAuth();
 
   const currentKey = '/' + location.pathname.split('/')[1];
-  const navItems = isAdmin ? adminNavItems : userNavItems;
+  const baseNavItems = isAdmin ? adminNavItems : userNavItems;
+  const navItems = canAccessMonitor ? [monitorNavItem, ...baseNavItems] : baseNavItems;
 
   const handleLogout = async () => {
     await logout();
@@ -57,7 +64,7 @@ export default function MainLayout() {
       key: 'role',
       label: (
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-          {isAdmin ? '管理员' : '普通用户'}
+          {isAdmin ? '管理员' : user?.role === 'operator' ? '值守人员' : '普通用户'}
         </span>
       ),
       disabled: true,
@@ -91,7 +98,7 @@ export default function MainLayout() {
             borderBottom: '1px solid var(--border-color)',
             cursor: 'pointer',
           }}
-          onClick={() => navigate('/dashboard')}
+          onClick={() => navigate(canAccessMonitor ? '/monitor' : '/dashboard')}
         >
           {collapsed ? (
             <span style={{ color: 'var(--accent-cyan)', fontSize: 20, fontWeight: 700 }}>ID</span>
@@ -152,7 +159,7 @@ export default function MainLayout() {
                       {user.username}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      {isAdmin ? '管理员' : '用户'}
+                      {isAdmin ? '管理员' : user.role === 'operator' ? '值守人员' : '用户'}
                     </div>
                   </div>
                 </div>

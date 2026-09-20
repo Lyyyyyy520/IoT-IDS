@@ -9,6 +9,7 @@ import Policy from './pages/Policy';
 import Assets from './pages/Assets';
 import Logs from './pages/Logs';
 import Settings from './pages/Settings';
+import MonitorPage from './pages/Monitor';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 function LoadingScreen() {
@@ -36,7 +37,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/** Only the account named "admin" may enter administrator pages. */
+/** Administrator-only legacy pages; the backend remains the authority. */
 function RequireAdmin({ children }: { children: React.ReactNode }) {
   const { authenticated, loading, isAdmin } = useAuth();
 
@@ -46,11 +47,33 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function RequireMonitorRole({ children }: { children: React.ReactNode }) {
+  const { authenticated, loading, canAccessMonitor } = useAuth();
+
+  if (loading) return <LoadingScreen />;
+  if (!authenticated) return <Navigate to="/login" replace />;
+  if (!canAccessMonitor) return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
+function AuthenticatedLanding() {
+  const { canAccessMonitor } = useAuth();
+  return <Navigate to={canAccessMonitor ? '/monitor' : '/dashboard'} replace />;
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/monitor"
+          element={
+            <RequireMonitorRole>
+              <MonitorPage />
+            </RequireMonitorRole>
+          }
+        />
 
         <Route
           path="/"
@@ -60,7 +83,7 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route index element={<AuthenticatedLanding />} />
 
           {/* Visible to all authenticated users. */}
           <Route path="dashboard" element={<Dashboard />} />

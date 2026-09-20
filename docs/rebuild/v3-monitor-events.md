@@ -34,6 +34,12 @@ v3 升级命令。正式 `backend/app.py::create_app()` 会用同一个显式数
 连接状态不变的合法遥测产生 `device.telemetry_updated`；重复、乱序、重放或校验拒绝的
 MQTT 消息在进入状态事务前返回，因此不会产生事件。
 
+设备增量事件的 payload 同时携带可直接投影到 monitor 设备行的
+`connection_status`、`ip_address`、`observed_at`、`received_at` 和 `sources`；组件增量
+携带 `readiness`、`started_at`、`ready_at`、`reason` 和 `updated_at`。这些字段与
+`state_version` 所指向的状态在同一事务中写入，供 Web 在不重新拉取整份快照的情况下
+安全更新。事件不包含 MAC、身份凭据或完整遥测正文。
+
 ## 3. monitor 用法
 
 请求需要已登录的 `admin` 或 `operator`：
