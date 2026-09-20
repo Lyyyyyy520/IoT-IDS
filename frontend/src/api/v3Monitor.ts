@@ -7,6 +7,7 @@ export type ComponentReadiness = 'warming_up' | 'ready' | 'degraded';
 export type RealtimeEventType =
   | 'device.connection_changed'
   | 'device.telemetry_updated'
+  | 'device.inventory_changed'
   | 'system.component_changed';
 
 export interface MonitorDevice {
@@ -40,7 +41,7 @@ export interface MonitorCapability {
 
 export interface MonitorSnapshot {
   api_version: 'v3';
-  schema_version: 3;
+  schema_version: 4;
   generated_at: string;
   event_cursor: number;
   devices: MonitorDevice[];
@@ -111,9 +112,31 @@ export interface SystemComponentChangedEvent {
   };
 }
 
+export type DeviceInventoryAction =
+  | 'created'
+  | 'updated'
+  | 'operation_mode_changed'
+  | 'retired'
+  | 'restored'
+  | 'deleted';
+
+export interface DeviceInventoryChangedEvent {
+  event_id: number;
+  event_type: 'device.inventory_changed';
+  occurred_at: string;
+  device_id: null;
+  state_version: number;
+  payload: {
+    action: DeviceInventoryAction;
+    device_id: string;
+    profile_version: number;
+  };
+}
+
 export type MonitorRealtimeEvent =
   | DeviceConnectionChangedEvent
   | DeviceTelemetryUpdatedEvent
+  | DeviceInventoryChangedEvent
   | SystemComponentChangedEvent;
 
 export interface SnapshotRequiredEvent {
@@ -248,7 +271,7 @@ function parseCapability(value: unknown, label: string): MonitorCapability {
 
 export function parseMonitorSnapshot(value: unknown): MonitorSnapshot {
   const snapshot = object(value, 'monitor');
-  if (snapshot.api_version !== 'v3' || snapshot.schema_version !== 3) {
+  if (snapshot.api_version !== 'v3' || snapshot.schema_version !== 4) {
     throw new MonitorApiError('invalid_response', 'monitor API 或 schema 版本不受支持');
   }
   if (!Array.isArray(snapshot.devices) || !Array.isArray(snapshot.system_components)) {
@@ -257,7 +280,7 @@ export function parseMonitorSnapshot(value: unknown): MonitorSnapshot {
   const capabilities = object(snapshot.capabilities, 'capabilities');
   return {
     api_version: 'v3',
-    schema_version: 3,
+    schema_version: 4,
     generated_at: timestamp(snapshot.generated_at, 'generated_at') as string,
     event_cursor: integer(snapshot.event_cursor, 'event_cursor'),
     devices: snapshot.devices.map(parseDevice),
@@ -358,6 +381,26 @@ export function parseMonitorEvent(eventType: RealtimeEventType, data: string): M
     state_version: integer(envelope.state_version, 'event.state_version', 1),
   };
   const payload = object(envelope.payload, 'event.payload');
+
+  if (eventType === 'device.inventory_changed') {
+    if (envelope.device_id !== null) {
+      throw new MonitorApiError('invalid_response', '设备清单事件不得使用外键 device_id');
+    }
+    return {
+      ...common,
+      event_type: eventType,
+      device_id: null,
+      payload: {
+        action: oneOf(
+          payload.action,
+          ['created', 'updated', 'operation_mode_changed', 'retired', 'restored', 'deleted'] as const,
+          'payload.action',
+        ),
+        device_id: text(payload.device_id, 'payload.device_id'),
+        profile_version: integer(payload.profile_version, 'payload.profile_version', 1),
+      },
+    };
+  }
 
   if (eventType === 'system.component_changed') {
     if (envelope.device_id !== null) {

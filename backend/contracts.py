@@ -10,7 +10,7 @@ from typing import Iterable
 
 
 API_VERSION = "v3"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MQTT_HEARTBEAT_SCHEMA_VERSION = 2
 MQTT_HEARTBEAT_MAX_BYTES = 4096
 MQTT_TELEMETRY_MAX_BYTES = 2048
@@ -44,6 +44,7 @@ REALTIME_EVENT_TYPES = (
     "device.discovered",
     "device.connection_changed",
     "device.telemetry_updated",
+    "device.inventory_changed",
     "device.security_changed",
     "graph.snapshot_created",
     "graph.node_state_changed",
@@ -115,6 +116,20 @@ class IncidentStage(StringEnum):
 class DeviceLifecycle(StringEnum):
     ACTIVE = "active"
     RETIRED = "retired"
+
+
+class DeviceImportance(StringEnum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class DeviceProfileSource(StringEnum):
+    UNCLASSIFIED = "unclassified"
+    PHYSICAL = "physical"
+    VIRTUAL = "virtual"
+    GATEWAY = "gateway"
 
 
 class ModelEdgeCapability(StringEnum):

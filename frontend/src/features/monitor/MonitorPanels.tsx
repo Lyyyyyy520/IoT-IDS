@@ -172,6 +172,9 @@ function eventTitle(event: MonitorRealtimeEvent): string {
   if (event.event_type === 'device.telemetry_updated') {
     return `${event.device_id}：收到新遥测`;
   }
+  if (event.event_type === 'device.inventory_changed') {
+    return `${event.payload.device_id}：设备清单 ${event.payload.action}`;
+  }
   return `${event.payload.component_id}：${READINESS_LABELS[event.payload.readiness]}`;
 }
 

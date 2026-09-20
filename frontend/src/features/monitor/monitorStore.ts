@@ -51,6 +51,8 @@ interface MonitorStoreOptions {
   clearTimer?: (timer: ReturnType<typeof setTimeout>) => void;
   visibilitySource?: VisibilitySource | null;
   retryDelaysMs?: readonly number[];
+  inventoryResyncDelayMs?: number;
+  inventoryResyncMinimumIntervalMs?: number;
 }
 
 const INITIAL_STATE: MonitorViewState = {
@@ -68,6 +70,7 @@ const INITIAL_STATE: MonitorViewState = {
 const EVENT_NAMES: RealtimeEventType[] = [
   'device.connection_changed',
   'device.telemetry_updated',
+  'device.inventory_changed',
   'system.component_changed',
 ];
 
@@ -90,12 +93,16 @@ export class MonitorStore {
   private readonly clearTimer: NonNullable<MonitorStoreOptions['clearTimer']>;
   private readonly visibilitySource: VisibilitySource | null;
   private readonly retryDelaysMs: readonly number[];
+  private readonly inventoryResyncDelayMs: number;
+  private readonly inventoryResyncMinimumIntervalMs: number;
   private source: EventSourceLike | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private inventoryTimer: ReturnType<typeof setTimeout> | null = null;
   private abortController: AbortController | null = null;
   private started = false;
   private generation = 0;
   private retryAttempt = 0;
+  private lastInventoryResyncAt = Number.NEGATIVE_INFINITY;
 
   constructor(options: MonitorStoreOptions = {}) {
     this.fetchSnapshot = options.fetchSnapshot ?? fetchMonitorSnapshot;
@@ -107,6 +114,8 @@ export class MonitorStore {
       ? (typeof document === 'undefined' ? null : document)
       : options.visibilitySource;
     this.retryDelaysMs = options.retryDelaysMs ?? [1000, 2000, 4000, 8000, 15000];
+    this.inventoryResyncDelayMs = options.inventoryResyncDelayMs ?? 200;
+    this.inventoryResyncMinimumIntervalMs = options.inventoryResyncMinimumIntervalMs ?? 1000;
   }
 
   getSnapshot = (): MonitorViewState => this.state;
@@ -132,6 +141,7 @@ export class MonitorStore {
     this.abortController = null;
     this.closeSource();
     this.cancelRetry();
+    this.cancelInventoryResync();
     this.patch({ realtime: 'idle' });
   };
 
@@ -157,6 +167,7 @@ export class MonitorStore {
     this.abortController = new AbortController();
     this.closeSource();
     this.cancelRetry();
+    this.cancelInventoryResync();
     this.patch({
       phase: this.state.snapshot ? 'resyncing' : 'loading',
       realtime: 'idle',
@@ -252,6 +263,11 @@ export class MonitorStore {
       return;
     }
 
+    if (event.event_type === 'device.inventory_changed') {
+      this.scheduleInventoryResync(event);
+      return;
+    }
+
     if (event.event_type === 'system.component_changed') {
       const current = snapshot.system_components.find(
         (component) => component.component_id === event.payload.component_id,
@@ -311,6 +327,30 @@ export class MonitorStore {
     });
   }
 
+  private scheduleInventoryResync(event: MonitorRealtimeEvent): void {
+    const snapshot = this.state.snapshot;
+    if (!snapshot || event.event_type !== 'device.inventory_changed') return;
+    this.closeSource();
+    this.cancelRetry();
+    this.patch({
+      snapshot: { ...snapshot, event_cursor: event.event_id },
+      lastEventId: event.event_id,
+      realtime: 'idle',
+      stale: true,
+      phase: 'resyncing',
+      resyncReason: `inventory_changed:${event.payload.action}`,
+    });
+    if (this.inventoryTimer !== null) return;
+    const elapsed = this.now().getTime() - this.lastInventoryResyncAt;
+    const rateLimitDelay = Math.max(0, this.inventoryResyncMinimumIntervalMs - elapsed);
+    const delay = Math.max(this.inventoryResyncDelayMs, rateLimitDelay);
+    this.inventoryTimer = this.setTimer(() => {
+      this.inventoryTimer = null;
+      this.lastInventoryResyncAt = this.now().getTime();
+      if (this.started) void this.synchronize('inventory_changed');
+    }, delay);
+  }
+
   private acceptEvent(event: MonitorRealtimeEvent, snapshot: MonitorSnapshot): void {
     this.patch({
       snapshot: { ...snapshot, event_cursor: event.event_id },
@@ -363,6 +403,12 @@ export class MonitorStore {
     if (this.retryTimer === null) return;
     this.clearTimer(this.retryTimer);
     this.retryTimer = null;
+  }
+
+  private cancelInventoryResync(): void {
+    if (this.inventoryTimer === null) return;
+    this.clearTimer(this.inventoryTimer);
+    this.inventoryTimer = null;
   }
 }
 

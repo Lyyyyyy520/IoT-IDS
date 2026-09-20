@@ -76,7 +76,7 @@ def test_empty_monitor_is_real_no_store_snapshot(tmp_path, role):
     assert response.headers["Cache-Control"] == "no-store"
     payload = response.get_json()
     assert payload["api_version"] == "v3"
-    assert payload["schema_version"] == 3
+    assert payload["schema_version"] == 4
     assert payload["generated_at"].endswith("Z")
     assert payload["event_cursor"] == 0
     assert payload["devices"] == []

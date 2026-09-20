@@ -190,10 +190,54 @@ V3_REALTIME_EVENT_MIGRATION = SchemaMigration(
     statements=V3_REALTIME_EVENT_STATEMENTS,
 )
 
+V3_DEVICE_LIFECYCLE_STATEMENTS = (
+    "ALTER TABLE v3_device_profiles ADD COLUMN importance TEXT NOT NULL "
+    "DEFAULT 'normal' CHECK (importance IN ('low', 'normal', 'high', 'critical'))",
+    "ALTER TABLE v3_device_profiles ADD COLUMN profile_source TEXT NOT NULL "
+    "DEFAULT 'unclassified' CHECK (profile_source IN "
+    "('unclassified', 'physical', 'virtual', 'gateway'))",
+    "ALTER TABLE v3_device_profiles ADD COLUMN profile_version INTEGER NOT NULL "
+    "DEFAULT 1 CHECK (profile_version > 0)",
+    "ALTER TABLE v3_device_profiles ADD COLUMN retired_at TEXT",
+    "ALTER TABLE v3_device_profiles ADD COLUMN retirement_reason TEXT",
+    """
+    CREATE TABLE v3_device_management_audit (
+        audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN (
+            'created', 'updated', 'operation_mode_changed',
+            'retired', 'restored', 'deleted'
+        )),
+        actor_user_id INTEGER NOT NULL,
+        actor_username TEXT NOT NULL,
+        actor_role TEXT NOT NULL CHECK (actor_role IN ('admin', 'operator', 'user')),
+        occurred_at TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        before_json TEXT,
+        after_json TEXT
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_device_management_audit_device
+        ON v3_device_management_audit(device_id, audit_id)
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_profiles_lifecycle
+        ON v3_device_profiles(retired_at, operation_mode, device_id)
+    """.strip(),
+)
+
+V3_DEVICE_LIFECYCLE_MIGRATION = SchemaMigration(
+    version=4,
+    name="device_lifecycle_management",
+    statements=V3_DEVICE_LIFECYCLE_STATEMENTS,
+)
+
 V3_MIGRATIONS = (
     V3_DEVICE_STATE_MIGRATION,
     V3_MQTT_HEARTBEAT_MIGRATION,
     V3_REALTIME_EVENT_MIGRATION,
+    V3_DEVICE_LIFECYCLE_MIGRATION,
 )
 
 V3_DEVICE_STATE_TABLES = frozenset(
@@ -236,6 +280,15 @@ V3_REALTIME_EVENT_INDEXES = frozenset(
     }
 )
 
+V3_DEVICE_LIFECYCLE_TABLES = frozenset({"v3_device_management_audit"})
+
+V3_DEVICE_LIFECYCLE_INDEXES = frozenset(
+    {
+        "idx_v3_device_management_audit_device",
+        "idx_v3_profiles_lifecycle",
+    }
+)
+
 V3_EXPECTED_OBJECTS = {
     MIGRATION_TABLE: "table",
     **{name: "table" for name in V3_DEVICE_STATE_TABLES},
@@ -244,6 +297,8 @@ V3_EXPECTED_OBJECTS = {
     **{name: "index" for name in V3_MQTT_HEARTBEAT_INDEXES},
     **{name: "table" for name in V3_REALTIME_EVENT_TABLES},
     **{name: "index" for name in V3_REALTIME_EVENT_INDEXES},
+    **{name: "table" for name in V3_DEVICE_LIFECYCLE_TABLES},
+    **{name: "index" for name in V3_DEVICE_LIFECYCLE_INDEXES},
 }
 
 V3_EXPECTED_OBJECT_VERSIONS = {
@@ -254,6 +309,8 @@ V3_EXPECTED_OBJECT_VERSIONS = {
     **{name: 2 for name in V3_MQTT_HEARTBEAT_INDEXES},
     **{name: 3 for name in V3_REALTIME_EVENT_TABLES},
     **{name: 3 for name in V3_REALTIME_EVENT_INDEXES},
+    **{name: 4 for name in V3_DEVICE_LIFECYCLE_TABLES},
+    **{name: 4 for name in V3_DEVICE_LIFECYCLE_INDEXES},
 }
 
 

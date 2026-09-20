@@ -6,6 +6,7 @@ from services.device_state import DeviceStateService
 from services.mqtt_ingestion import MqttHeartbeatIngestor
 from services.realtime_events import RealtimeEventStore
 from v3_database import (
+    V3_DEVICE_LIFECYCLE_MIGRATION,
     V3_MIGRATIONS,
     V3_REALTIME_EVENT_MIGRATION,
     apply_v3_migrations,
@@ -22,6 +23,9 @@ MIGRATION_V2_CHECKSUM = (
 )
 MIGRATION_V3_CHECKSUM = (
     "bfe9842f09d391284b408dd0df36e205e4ad9f92361ee304dd52955c9f6aa329"
+)
+MIGRATION_V4_CHECKSUM = (
+    "685caf41c5d21471c14ef7b6608cce6d43a4cd69fff3961c1888c3166a4bebcd"
 )
 START = datetime(2026, 9, 19, 8, 0, tzinfo=timezone.utc)
 BOOT_ID = "a" * 32
@@ -80,11 +84,12 @@ def _heartbeat(sequence: int, uptime_ms: int) -> bytes:
     ).encode("utf-8")
 
 
-def test_migration_v1_v2_checksums_are_frozen_and_v3_is_repeatable(tmp_path):
+def test_migration_v1_v2_v3_checksums_are_frozen_and_v4_is_repeatable(tmp_path):
     database_path = tmp_path / "upgrade-v2.sqlite"
     assert V3_MIGRATIONS[0].checksum == MIGRATION_V1_CHECKSUM
     assert V3_MIGRATIONS[1].checksum == MIGRATION_V2_CHECKSUM
     assert V3_REALTIME_EVENT_MIGRATION.checksum == MIGRATION_V3_CHECKSUM
+    assert V3_DEVICE_LIFECYCLE_MIGRATION.checksum == MIGRATION_V4_CHECKSUM
 
     connection = connect_v3(database_path)
     try:
@@ -98,11 +103,11 @@ def test_migration_v1_v2_checksums_are_frozen_and_v3_is_repeatable(tmp_path):
         connection.close()
 
     assert first["applied_versions"] == [1, 2]
-    assert upgraded["applied_versions"] == [3]
+    assert upgraded["applied_versions"] == [3, 4]
     assert upgraded["skipped_versions"] == [1, 2]
     assert repeated["applied_versions"] == []
-    assert repeated["skipped_versions"] == [1, 2, 3]
-    assert [row[0] for row in versions] == [1, 2, 3]
+    assert repeated["skipped_versions"] == [1, 2, 3, 4]
+    assert [row[0] for row in versions] == [1, 2, 3, 4]
 
 
 def test_accepted_mqtt_writes_events_and_rejected_replay_writes_none(tmp_path):

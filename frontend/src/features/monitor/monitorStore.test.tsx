@@ -58,6 +58,21 @@ function telemetry(eventId = 6, stateVersion = 6) {
   };
 }
 
+function inventory(eventId: number, action: 'created' | 'updated' = 'updated') {
+  return {
+    event_id: eventId,
+    event_type: 'device.inventory_changed',
+    occurred_at: '2026-09-20T02:00:01Z',
+    device_id: null,
+    state_version: 2,
+    payload: {
+      action,
+      device_id: 'camera-01',
+      profile_version: 2,
+    },
+  };
+}
+
 function harness(options: {
   snapshots?: MonitorSnapshot[];
   failure?: MonitorApiError;
@@ -153,6 +168,26 @@ describe('MonitorStore', () => {
     expect(first.close).toHaveBeenCalledTimes(1);
     expect(test.sources[1].url).toBe('/api/v3/events?after=10');
     expect(test.fetchSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('debounces inventory changes into one full snapshot resynchronization', async () => {
+    const next = { ...validSnapshot, event_cursor: 7 };
+    const test = harness({ snapshots: [validSnapshot, next] });
+    test.store.start();
+    await waitFor(() => expect(test.sources).toHaveLength(1));
+    const first = test.sources[0].source;
+    first.emit('device.inventory_changed', inventory(6), '6');
+    first.emit('device.inventory_changed', inventory(7, 'created'), '7');
+
+    expect(first.close).toHaveBeenCalledTimes(1);
+    expect(test.store.getSnapshot()).toMatchObject({
+      phase: 'resyncing', stale: true, lastEventId: 7,
+    });
+    expect(test.pendingTimers).toHaveLength(1);
+    test.pendingTimers[0]();
+    await waitFor(() => expect(test.fetchSnapshot).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(test.sources).toHaveLength(2));
+    expect(test.sources[1].url).toBe('/api/v3/events?after=7');
   });
 
   it('keeps the last real snapshot stale on disconnect and schedules only one reconnect', async () => {

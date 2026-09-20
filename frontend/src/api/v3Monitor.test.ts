@@ -52,6 +52,26 @@ describe('v3 monitor runtime contracts', () => {
     expect(event.payload.sources).toEqual(['mqtt', 'probe-a']);
   });
 
+  it('parses a retained-safe device inventory event', () => {
+    const event = parseMonitorEvent('device.inventory_changed', JSON.stringify({
+      event_id: 7,
+      event_type: 'device.inventory_changed',
+      occurred_at: '2026-09-20T02:00:01Z',
+      device_id: null,
+      state_version: 3,
+      payload: {
+        action: 'retired',
+        device_id: 'camera-01',
+        profile_version: 3,
+      },
+    }));
+    expect(event).toMatchObject({
+      event_type: 'device.inventory_changed',
+      device_id: null,
+      payload: { action: 'retired', device_id: 'camera-01', profile_version: 3 },
+    });
+  });
+
   it.each([
     [401, 'unauthorized'],
     [403, 'forbidden'],

@@ -21,6 +21,7 @@ from v3_database import V3_MIGRATIONS, apply_v3_migrations, connect_v3, initiali
 V1_CHECKSUM = "3fe72003fd5eb35063bd5aea3f677bc66ef0aaaa36cded58a83f46738bd26952"
 V2_CHECKSUM = "77ce4e371366c7d3e53640debb212c9a736fd5e9f8849b06e6d3700508d48078"
 V3_CHECKSUM = "bfe9842f09d391284b408dd0df36e205e4ad9f92361ee304dd52955c9f6aa329"
+V4_CHECKSUM = "685caf41c5d21471c14ef7b6608cce6d43a4cd69fff3961c1888c3166a4bebcd"
 
 
 def _settings(enabled=True):
@@ -133,7 +134,12 @@ def test_multiple_apps_have_independent_services_and_identical_routes(tmp_path):
     assert {rule.rule for rule in first.url_map.iter_rules()} == {
         rule.rule for rule in second.url_map.iter_rules()
     }
-    assert set(first.blueprints) == {"legacy_api", "probe", "v3_realtime"}
+    assert set(first.blueprints) == {
+        "legacy_api",
+        "probe",
+        "v3_devices",
+        "v3_realtime",
+    }
 
 
 def test_missing_database_health_and_all_database_routes_fail_closed(tmp_path):
@@ -148,6 +154,7 @@ def test_missing_database_health_and_all_database_routes_fail_closed(tmp_path):
     _login(client, "admin")
     assert client.get("/api/v3/monitor").status_code == 503
     assert client.get("/api/v3/events?after=0").status_code == 503
+    assert client.get("/api/v3/devices").status_code == 503
     legacy = client.get("/api/assets")
     assert legacy.status_code == 503
     assert legacy.get_json()["code"] == "database_unavailable"
@@ -175,6 +182,7 @@ def test_migrated_database_exposes_registered_v3_routes(tmp_path, role):
     health = client.get("/api/health")
     monitor = client.get("/api/v3/monitor")
     events = client.get("/api/v3/events?after=0", buffered=True)
+    devices = client.get("/api/v3/devices")
 
     assert health.get_json()["status"] == "ok"
     assert health.get_json()["database"]["v3_schema_ready"] is True
@@ -182,6 +190,8 @@ def test_migrated_database_exposes_registered_v3_routes(tmp_path, role):
     assert monitor.get_json()["devices"] == []
     assert events.status_code == 200
     assert events.mimetype == "text/event-stream"
+    assert devices.status_code == 200
+    assert devices.get_json()["items"] == []
 
 
 @pytest.mark.parametrize(
@@ -196,6 +206,7 @@ def test_registered_v3_routes_preserve_restricted_roles(tmp_path, role, expected
 
     assert client.get("/api/v3/monitor").status_code == expected
     assert client.get("/api/v3/events?after=0").status_code == expected
+    assert client.get("/api/v3/devices").status_code == expected
 
 
 def test_legacy_and_probe_routes_remain_registered(tmp_path):
@@ -210,6 +221,8 @@ def test_legacy_and_probe_routes_remain_registered(tmp_path):
     assert "/api/probe/heartbeat" in rules
     assert "/api/v3/monitor" in rules
     assert "/api/v3/events" in rules
+    assert "/api/v3/devices" in rules
+    assert "/api/v3/devices/<device_id>" in rules
 
 
 def test_create_app_does_not_create_default_account(tmp_path, monkeypatch):
@@ -362,4 +375,5 @@ def test_migration_checksums_are_unchanged():
         V1_CHECKSUM,
         V2_CHECKSUM,
         V3_CHECKSUM,
+        V4_CHECKSUM,
     ]

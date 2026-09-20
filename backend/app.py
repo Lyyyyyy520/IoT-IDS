@@ -29,6 +29,7 @@ from services.auth import (
 
 # Register probe blueprint
 from api.probe import probe_bp
+from api.v3_devices import create_v3_devices_blueprint
 from api.v3_realtime import create_v3_realtime_blueprint
 from runtime_services import (
     BackendServiceContainer,
@@ -1130,6 +1131,12 @@ def create_app(
     )
     application.register_blueprint(legacy_bp)
     application.register_blueprint(probe_bp)
+    application.register_blueprint(
+        create_v3_devices_blueprint(
+            normalized_path,
+            clock=application.config.get("V3_CLOCK"),
+        )
+    )
     application.register_blueprint(
         create_v3_realtime_blueprint(
             normalized_path,

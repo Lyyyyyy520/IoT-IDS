@@ -40,6 +40,11 @@ MQTT 消息在进入状态事务前返回，因此不会产生事件。
 `state_version` 所指向的状态在同一事务中写入，供 Web 在不重新拉取整份快照的情况下
 安全更新。事件不包含 MAC、身份凭据或完整遥测正文。
 
+设备档案或生命周期成功修改时追加 `device.inventory_changed`。其 payload 仅包含
+`action`、稳定 `device_id` 和 `profile_version`；事件表中的 `device_id` 刻意为 NULL，
+避免误添加设备被合法彻底删除后破坏追加式事件日志的外键。Web 收到该低频事件后进行
+去抖且限频的 monitor 快照重取；五秒级遥测仍按设备增量更新，不触发整份快照。
+
 ## 3. monitor 用法
 
 请求需要已登录的 `admin` 或 `operator`：
