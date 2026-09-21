@@ -233,11 +233,187 @@ V3_DEVICE_LIFECYCLE_MIGRATION = SchemaMigration(
     statements=V3_DEVICE_LIFECYCLE_STATEMENTS,
 )
 
+V3_DEVICE_TRAFFIC_STATEMENTS = (
+    """
+    CREATE TABLE v3_device_ip_bindings (
+        binding_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id TEXT NOT NULL,
+        ip_address TEXT NOT NULL,
+        valid_from TEXT NOT NULL,
+        valid_to TEXT,
+        source TEXT NOT NULL,
+        source_observation_id INTEGER,
+        created_at TEXT NOT NULL,
+        CHECK (valid_to IS NULL OR valid_to > valid_from),
+        UNIQUE (device_id, ip_address, valid_from),
+        FOREIGN KEY (device_id) REFERENCES v3_device_profiles(device_id),
+        FOREIGN KEY (source_observation_id)
+            REFERENCES v3_device_state_observations(observation_id)
+    )
+    """.strip(),
+    """
+    CREATE UNIQUE INDEX idx_v3_device_ip_bindings_open_device
+        ON v3_device_ip_bindings(device_id)
+        WHERE valid_to IS NULL
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_device_ip_bindings_ip_time
+        ON v3_device_ip_bindings(ip_address, valid_from, valid_to)
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_device_ip_bindings_device_time
+        ON v3_device_ip_bindings(device_id, valid_from, valid_to)
+    """.strip(),
+    """
+    CREATE TABLE v3_device_traffic_minutes (
+        device_id TEXT NOT NULL,
+        bucket_start TEXT NOT NULL,
+        tx_bytes INTEGER NOT NULL DEFAULT 0 CHECK (tx_bytes >= 0),
+        rx_bytes INTEGER NOT NULL DEFAULT 0 CHECK (rx_bytes >= 0),
+        tx_packets INTEGER NOT NULL DEFAULT 0 CHECK (tx_packets >= 0),
+        rx_packets INTEGER NOT NULL DEFAULT 0 CHECK (rx_packets >= 0),
+        tx_flow_count INTEGER NOT NULL DEFAULT 0 CHECK (tx_flow_count >= 0),
+        rx_flow_count INTEGER NOT NULL DEFAULT 0 CHECK (rx_flow_count >= 0),
+        first_sample_at TEXT NOT NULL,
+        last_sample_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (device_id, bucket_start),
+        FOREIGN KEY (device_id) REFERENCES v3_device_profiles(device_id)
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_device_traffic_minutes_bucket
+        ON v3_device_traffic_minutes(bucket_start, device_id)
+    """.strip(),
+    """
+    CREATE TABLE v3_device_traffic_protocol_minutes (
+        device_id TEXT NOT NULL,
+        bucket_start TEXT NOT NULL,
+        direction TEXT NOT NULL CHECK (direction IN ('tx', 'rx')),
+        protocol TEXT NOT NULL,
+        bytes INTEGER NOT NULL DEFAULT 0 CHECK (bytes >= 0),
+        packets INTEGER NOT NULL DEFAULT 0 CHECK (packets >= 0),
+        flow_count INTEGER NOT NULL DEFAULT 0 CHECK (flow_count >= 0),
+        first_sample_at TEXT NOT NULL,
+        last_sample_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (device_id, bucket_start, direction, protocol),
+        FOREIGN KEY (device_id) REFERENCES v3_device_profiles(device_id)
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_device_traffic_protocol_bucket
+        ON v3_device_traffic_protocol_minutes(bucket_start, protocol, device_id)
+    """.strip(),
+    """
+    CREATE TABLE v3_device_traffic_peer_minutes (
+        device_id TEXT NOT NULL,
+        bucket_start TEXT NOT NULL,
+        direction TEXT NOT NULL CHECK (direction IN ('tx', 'rx')),
+        peer_key TEXT NOT NULL,
+        peer_device_id TEXT,
+        peer_ip TEXT NOT NULL,
+        protocol TEXT NOT NULL,
+        bytes INTEGER NOT NULL DEFAULT 0 CHECK (bytes >= 0),
+        packets INTEGER NOT NULL DEFAULT 0 CHECK (packets >= 0),
+        flow_count INTEGER NOT NULL DEFAULT 0 CHECK (flow_count >= 0),
+        first_sample_at TEXT NOT NULL,
+        last_sample_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (
+            device_id, bucket_start, direction, peer_key, protocol
+        ),
+        FOREIGN KEY (device_id) REFERENCES v3_device_profiles(device_id),
+        FOREIGN KEY (peer_device_id) REFERENCES v3_device_profiles(device_id)
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_device_traffic_peer_window
+        ON v3_device_traffic_peer_minutes(device_id, bucket_start, direction)
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_device_traffic_peer_sort
+        ON v3_device_traffic_peer_minutes(device_id, bytes DESC, packets DESC)
+    """.strip(),
+    """
+    CREATE TABLE v3_traffic_ingest_batches (
+        source_id TEXT NOT NULL,
+        source_session_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        batch_sequence INTEGER NOT NULL CHECK (batch_sequence >= 0),
+        received_at TEXT NOT NULL,
+        first_sample_at TEXT,
+        last_sample_at TEXT,
+        accepted_samples INTEGER NOT NULL DEFAULT 0 CHECK (accepted_samples >= 0),
+        rejected_samples INTEGER NOT NULL DEFAULT 0 CHECK (rejected_samples >= 0),
+        duplicate_samples INTEGER NOT NULL DEFAULT 0 CHECK (duplicate_samples >= 0),
+        unassigned_samples INTEGER NOT NULL DEFAULT 0 CHECK (unassigned_samples >= 0),
+        status TEXT NOT NULL CHECK (status IN ('committed', 'partial', 'rejected')),
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (source_id, source_session_id, batch_id)
+    )
+    """.strip(),
+    """
+    CREATE UNIQUE INDEX idx_v3_traffic_ingest_batch_sequence
+        ON v3_traffic_ingest_batches(
+            source_id, source_session_id, batch_sequence
+        )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_traffic_ingest_batches_received
+        ON v3_traffic_ingest_batches(received_at)
+    """.strip(),
+    """
+    CREATE TABLE v3_traffic_ingest_samples (
+        source_id TEXT NOT NULL,
+        source_session_id TEXT NOT NULL,
+        sample_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (source_id, source_session_id, sample_id),
+        FOREIGN KEY (source_id, source_session_id, batch_id)
+            REFERENCES v3_traffic_ingest_batches(
+                source_id, source_session_id, batch_id
+            )
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_traffic_ingest_samples_occurred
+        ON v3_traffic_ingest_samples(occurred_at)
+    """.strip(),
+    """
+    CREATE TABLE v3_traffic_unassigned_minutes (
+        source_id TEXT NOT NULL,
+        bucket_start TEXT NOT NULL,
+        reason_code TEXT NOT NULL,
+        sample_count INTEGER NOT NULL DEFAULT 0 CHECK (sample_count >= 0),
+        bytes INTEGER NOT NULL DEFAULT 0 CHECK (bytes >= 0),
+        packets INTEGER NOT NULL DEFAULT 0 CHECK (packets >= 0),
+        first_sample_at TEXT NOT NULL,
+        last_sample_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (source_id, bucket_start, reason_code)
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_traffic_unassigned_bucket
+        ON v3_traffic_unassigned_minutes(bucket_start, reason_code)
+    """.strip(),
+)
+
+V3_DEVICE_TRAFFIC_MIGRATION = SchemaMigration(
+    version=5,
+    name="device_traffic_aggregation",
+    statements=V3_DEVICE_TRAFFIC_STATEMENTS,
+)
+
 V3_MIGRATIONS = (
     V3_DEVICE_STATE_MIGRATION,
     V3_MQTT_HEARTBEAT_MIGRATION,
     V3_REALTIME_EVENT_MIGRATION,
     V3_DEVICE_LIFECYCLE_MIGRATION,
+    V3_DEVICE_TRAFFIC_MIGRATION,
 )
 
 V3_DEVICE_STATE_TABLES = frozenset(
@@ -289,6 +465,34 @@ V3_DEVICE_LIFECYCLE_INDEXES = frozenset(
     }
 )
 
+V3_DEVICE_TRAFFIC_TABLES = frozenset(
+    {
+        "v3_device_ip_bindings",
+        "v3_device_traffic_minutes",
+        "v3_device_traffic_protocol_minutes",
+        "v3_device_traffic_peer_minutes",
+        "v3_traffic_ingest_batches",
+        "v3_traffic_ingest_samples",
+        "v3_traffic_unassigned_minutes",
+    }
+)
+
+V3_DEVICE_TRAFFIC_INDEXES = frozenset(
+    {
+        "idx_v3_device_ip_bindings_open_device",
+        "idx_v3_device_ip_bindings_ip_time",
+        "idx_v3_device_ip_bindings_device_time",
+        "idx_v3_device_traffic_minutes_bucket",
+        "idx_v3_device_traffic_protocol_bucket",
+        "idx_v3_device_traffic_peer_window",
+        "idx_v3_device_traffic_peer_sort",
+        "idx_v3_traffic_ingest_batch_sequence",
+        "idx_v3_traffic_ingest_batches_received",
+        "idx_v3_traffic_ingest_samples_occurred",
+        "idx_v3_traffic_unassigned_bucket",
+    }
+)
+
 V3_EXPECTED_OBJECTS = {
     MIGRATION_TABLE: "table",
     **{name: "table" for name in V3_DEVICE_STATE_TABLES},
@@ -299,6 +503,8 @@ V3_EXPECTED_OBJECTS = {
     **{name: "index" for name in V3_REALTIME_EVENT_INDEXES},
     **{name: "table" for name in V3_DEVICE_LIFECYCLE_TABLES},
     **{name: "index" for name in V3_DEVICE_LIFECYCLE_INDEXES},
+    **{name: "table" for name in V3_DEVICE_TRAFFIC_TABLES},
+    **{name: "index" for name in V3_DEVICE_TRAFFIC_INDEXES},
 }
 
 V3_EXPECTED_OBJECT_VERSIONS = {
@@ -311,6 +517,8 @@ V3_EXPECTED_OBJECT_VERSIONS = {
     **{name: 3 for name in V3_REALTIME_EVENT_INDEXES},
     **{name: 4 for name in V3_DEVICE_LIFECYCLE_TABLES},
     **{name: 4 for name in V3_DEVICE_LIFECYCLE_INDEXES},
+    **{name: 5 for name in V3_DEVICE_TRAFFIC_TABLES},
+    **{name: 5 for name in V3_DEVICE_TRAFFIC_INDEXES},
 }
 
 

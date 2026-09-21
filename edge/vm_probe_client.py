@@ -12,9 +12,11 @@ Example:
       --bpf "host 192.168.41.136 and not tcp port 5000"
 """
 import argparse
+from datetime import datetime, timezone
 import os
 import time
 from typing import Dict, List, Optional
+from uuid import uuid4
 
 import requests
 from scapy.all import ICMP, IP, TCP, UDP, Raw, sniff
@@ -52,12 +54,19 @@ def packet_to_flow(pkt) -> Optional[Dict]:
             payload = ''
 
     return {
+        'occurred_at': datetime.fromtimestamp(
+            float(pkt.time), tz=timezone.utc
+        ).isoformat().replace('+00:00', 'Z'),
         'src_ip': ip.src,
         'dst_ip': ip.dst,
         'src_port': src_port,
         'dst_port': dst_port,
         'protocol': protocol,
+        'network_protocol': protocol,
         'length': len(pkt),
+        'bytes': len(pkt),
+        'packets': 1,
+        'flow_count': 0,
         'flags': flags,
         'payload': payload,
         'source': 'real',
@@ -108,6 +117,9 @@ def main():
 
     capturing = bool(args.autostart)
     total_sent = 0
+    source_session_id = uuid4().hex
+    batch_sequence = 0
+    sample_sequence = 0
 
     try:
         while True:
@@ -162,16 +174,27 @@ def main():
 
                 for start in range(0, len(flows), max(1, args.batch_size)):
                     batch = flows[start:start + args.batch_size]
+                    for flow in batch:
+                        flow['sample_id'] = f'{source_session_id}-{sample_sequence}'
+                        sample_sequence += 1
+                    batch_id = f'{source_session_id}-{batch_sequence}'
+                    envelope = {
+                        'schema_version': 2,
+                        'source_id': f'probe:{probe_id}',
+                        'source_session_id': source_session_id,
+                        'batch_id': batch_id,
+                        'batch_sequence': batch_sequence,
+                        'probe_id': probe_id,
+                        'probe_name': args.name,
+                        'flows': batch,
+                        'alerts': [],
+                    }
+                    batch_sequence += 1
                     try:
                         result = post_json(
                             session,
                             f'{base}/api/probe/push',
-                            {
-                                'probe_id': probe_id,
-                                'probe_name': args.name,
-                                'flows': batch,
-                                'alerts': [],
-                            },
+                            envelope,
                             timeout=8,
                         )
                         total_sent += int(result.get('flows_received', len(batch)))

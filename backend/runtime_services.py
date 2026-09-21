@@ -121,12 +121,15 @@ class BackendServiceContainer:
 
     database_path: Path | None
     mqtt_settings_provider: Callable[[], MqttSubscriberSettings]
+    traffic_clock: Callable[[], Any] | None = None
     mqtt_subscriber_factory: Callable[
         [DeviceStateService, MqttSubscriberSettings, Mapping[str, str]], Any
     ] = _default_mqtt_factory
     environment: Mapping[str, str] = field(default_factory=lambda: os.environ, repr=False)
     mqtt_subscriber: Any = field(default=None, init=False, repr=False)
     capture_service: Any = field(default=None, init=False, repr=False)
+    traffic_window: Any = field(default=None, init=False, repr=False)
+    traffic_service: Any = field(default=None, init=False, repr=False)
     mqtt_state: str = field(default="stopped", init=False)
     mqtt_reason: str | None = field(default=None, init=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
@@ -139,8 +142,31 @@ class BackendServiceContainer:
             if self.capture_service is None:
                 from services.traffic_capture import TrafficCapture
 
-                self.capture_service = TrafficCapture(application=app)
+                self.capture_service = TrafficCapture(
+                    application=app,
+                    traffic_aggregation_service=self.get_traffic_service(),
+                )
             return self.capture_service
+
+    def get_traffic_window(self):
+        with self._lock:
+            if self.traffic_window is None:
+                from services.device_traffic import RealtimeTrafficWindow
+
+                self.traffic_window = RealtimeTrafficWindow(clock=self.traffic_clock)
+            return self.traffic_window
+
+    def get_traffic_service(self):
+        with self._lock:
+            if self.traffic_service is None:
+                from services.device_traffic import DeviceTrafficService
+
+                self.traffic_service = DeviceTrafficService(
+                    self.database_path,
+                    realtime_window=self.get_traffic_window(),
+                    clock=self.traffic_clock,
+                )
+            return self.traffic_service
 
 
 def get_service_container(app) -> BackendServiceContainer:

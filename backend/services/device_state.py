@@ -323,6 +323,21 @@ class DeviceStateService:
                 uptime_ms,
             ),
         )
+        # The backend receive time is the trusted start of an IP binding. Keep
+        # this update in the observation transaction so historical traffic is
+        # never interpreted from only the profile's latest IP address.
+        if normalized_ip is not None:
+            from services.device_traffic import record_ip_binding
+
+            record_ip_binding(
+                connection,
+                device_id=device_id,
+                ip_address=normalized_ip,
+                valid_from=received,
+                source=source.strip(),
+                source_observation_id=int(cursor.lastrowid),
+                created_at=received,
+            )
         connection.execute(
             "UPDATE v3_device_current_state SET "
             "connection_status = 'online', ip_address = ?, "

@@ -105,7 +105,7 @@ python backend/v3_db_upgrade.py apply `
 - `v3_device_profiles` 含档案版本、来源、重要性和退役字段，且
   `v3_device_management_audit` 追加式管理审计表存在；
 - `v3_device_profiles` 为零行；旧 `assets` 行数未变化；
-- 重复执行 `apply` 时版本 `1`、`2`、`3`、`4` 出现在 `skipped_versions`，不会重新执行。
+- 重复执行 `apply` 时版本 `1`～`5` 出现在 `skipped_versions`，不会重新执行。
 
 本轮绝不把旧 `assets` 转成 v3 设备。重复 IP 或 MAC 只进入审计报告，不能据此
 自动生成 `device_id`、合并记录或认领物理设备。

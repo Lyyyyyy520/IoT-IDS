@@ -22,6 +22,7 @@ V1_CHECKSUM = "3fe72003fd5eb35063bd5aea3f677bc66ef0aaaa36cded58a83f46738bd26952"
 V2_CHECKSUM = "77ce4e371366c7d3e53640debb212c9a736fd5e9f8849b06e6d3700508d48078"
 V3_CHECKSUM = "bfe9842f09d391284b408dd0df36e205e4ad9f92361ee304dd52955c9f6aa329"
 V4_CHECKSUM = "685caf41c5d21471c14ef7b6608cce6d43a4cd69fff3961c1888c3166a4bebcd"
+V5_CHECKSUM = "77e7011d94ef2b3a7022013fbef0c2e68f70f1ca9ead58446dd3d4bde78c74c6"
 
 
 def _settings(enabled=True):
@@ -137,9 +138,10 @@ def test_multiple_apps_have_independent_services_and_identical_routes(tmp_path):
     assert set(first.blueprints) == {
         "legacy_api",
         "probe",
-        "v3_devices",
-        "v3_realtime",
-    }
+            "v3_devices",
+            "v3_realtime",
+            "v3_traffic",
+        }
 
 
 def test_missing_database_health_and_all_database_routes_fail_closed(tmp_path):
@@ -376,4 +378,5 @@ def test_migration_checksums_are_unchanged():
         V2_CHECKSUM,
         V3_CHECKSUM,
         V4_CHECKSUM,
+        V5_CHECKSUM,
     ]

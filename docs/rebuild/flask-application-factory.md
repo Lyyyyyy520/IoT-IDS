@@ -6,7 +6,7 @@
 
 - 创建 Flask app，并应用可覆盖配置；
 - 为该 app 创建独立的 `BackendServiceContainer`；
-- 注册 legacy、probe 和 v3 三个 Blueprint；
+- 注册 legacy、probe 及各个独立 v3 Blueprint；
 - 注册缺库时的安全错误处理。
 
 它不会创建或打开数据库、执行 migration、创建用户、加载 Paho、连接 Broker 或启动
@@ -14,8 +14,9 @@
 
 legacy 路由函数主体保持不变，统一移入 `legacy_api` Blueprint。probe 继续使用现有
 `probe` Blueprint。v3 通过
-`create_v3_realtime_blueprint(app.config["DATABASE_PATH"])` 注册，因此正式 app 始终有
-`/api/v3/monitor` 和 `/api/v3/events`；缺少数据库时返回 503，而不是 404 或演示数据。
+`create_v3_realtime_blueprint(...)`、`create_v3_devices_blueprint(...)` 和
+`create_v3_traffic_blueprint(...)` 注册，因此正式 app 始终有 monitor/events、设备管理
+以及只读 traffic/peers 路由；缺少数据库时返回 503，而不是 404 或演示数据。
 
 ## 2. 唯一数据库路径
 
@@ -34,7 +35,7 @@ legacy 数据库助手从当前 Flask app 读取该值，并用 SQLite URI `mode
 
 - 文件是否可打开；
 - legacy 核心表是否就绪；
-- migration 1～3 及 v3 对象是否完整。
+- migration 1～5 及 v3 对象是否完整。
 
 任一数据库条件不满足时整体 `status` 为 `degraded`。
 

@@ -3,15 +3,68 @@ Probe Integration API — receives data from Raspberry Pi probe nodes
 """
 from functools import wraps
 import hmac
+import logging
 
-from flask import Blueprint, request, jsonify, session
+from flask import Blueprint, current_app, request, jsonify, session
 from database import query_all, query_one, execute
-from datetime import datetime
+from datetime import datetime, timezone
 from config import probe_token
 from contracts import Role
 from services.auth import effective_role, require_admin, require_operator
 
 probe_bp = Blueprint('probe', __name__)
+LOGGER = logging.getLogger(__name__)
+
+
+def _ingest_versioned_traffic(data: dict) -> dict:
+    """Adapt the probe v2 envelope to the shared strict aggregation service."""
+    version = data.get('schema_version')
+    if version is None:
+        return {
+            'status': 'not_ingested',
+            'reason_code': 'legacy_probe_schema_no_idempotency',
+        }
+    if version != 2:
+        return {'status': 'rejected', 'reason_code': 'unsupported_schema_version'}
+    required = {
+        'source_id', 'source_session_id', 'batch_id', 'batch_sequence', 'flows'
+    }
+    if not required <= set(data):
+        return {'status': 'rejected', 'reason_code': 'invalid_batch_envelope'}
+    if not isinstance(data.get('flows'), list):
+        return {'status': 'rejected', 'reason_code': 'invalid_batch_envelope'}
+    sample_fields = {
+        'sample_id', 'occurred_at', 'src_ip', 'dst_ip', 'network_protocol',
+        'application_protocol', 'application_protocol_inferred', 'src_port',
+        'dst_port', 'bytes', 'packets', 'flow_count',
+    }
+    samples = [
+        {key: value for key, value in flow.items() if key in sample_fields}
+        if isinstance(flow, dict) else flow
+        for flow in data['flows']
+    ]
+    from runtime_services import get_service_container
+
+    service = get_service_container(
+        current_app._get_current_object()
+    ).get_traffic_service()
+    try:
+        return service.ingest_batch(
+            source_id=data['source_id'],
+            source_session_id=data['source_session_id'],
+            batch_id=data['batch_id'],
+            batch_sequence=data['batch_sequence'],
+            samples=samples,
+            received_at=datetime.now(timezone.utc),
+        )
+    except Exception as exc:
+        reason = getattr(exc, 'code', 'aggregation_failed')
+        service.mark_degraded(reason)
+        LOGGER.error(
+            'probe_traffic_ingest_failed code=%s type=%s',
+            reason, type(exc).__name__,
+        )
+        return {'status': 'degraded', 'reason_code': reason}
 
 
 def _request_probe_token() -> str:
@@ -133,6 +186,7 @@ def push_data():
 
     alerts_received = 0
     flows_received = 0
+    traffic_aggregation = _ingest_versioned_traffic(data)
 
     # Process alerts
     for alert in data.get('alerts', []):
@@ -179,20 +233,25 @@ def push_data():
                 dst_ip=flow.get('dst_ip', ''),
                 src_port=int(flow.get('src_port', 0) or 0),
                 dst_port=int(flow.get('dst_port', 0) or 0),
-                protocol=flow.get('protocol', ''),
-                length=int(flow.get('length', 0) or 0),
+                protocol=flow.get('network_protocol', flow.get('protocol', '')),
+                length=int(flow.get('bytes', flow.get('length', 0)) or 0),
                 flags=flow.get('flags', ''),
                 payload=flow.get('payload', ''),
                 source=flow.get('source', 'real'),
+                aggregate_v3=False,
             )
             flows_received += 1
-        except Exception as e:
-            print(f'[Probe] flow processing failed: {e}')
+        except Exception as exc:
+            LOGGER.error(
+                'probe_legacy_flow_failed code=legacy_pipeline_failure type=%s',
+                type(exc).__name__,
+            )
 
     return jsonify({
         'success': True,
         'alerts_received': alerts_received,
         'flows_received': flows_received,
+        'traffic_aggregation': traffic_aggregation,
         'timestamp': datetime.now().isoformat(),
     })
 

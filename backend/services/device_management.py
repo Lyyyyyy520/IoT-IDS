@@ -41,6 +41,10 @@ _EXPLICIT_REFERENCE_TABLES = {
     "v3_mqtt_boot_sessions",
     "v3_mqtt_device_cursors",
     "v3_realtime_events",
+    "v3_device_ip_bindings",
+    "v3_device_traffic_minutes",
+    "v3_device_traffic_protocol_minutes",
+    "v3_device_traffic_peer_minutes",
 }
 _REFERENCE_SCAN_EXCLUSIONS = {
     "v3_device_profiles",
@@ -657,6 +661,23 @@ class DeviceManagementService:
                 "SELECT COUNT(*) FROM v3_device_current_state WHERE device_id = ?",
                 (device_id,),
             ),
+            "traffic_ip_bindings": count(
+                "SELECT COUNT(*) FROM v3_device_ip_bindings WHERE device_id = ?",
+                (device_id,),
+            ),
+            "traffic_minutes": count(
+                "SELECT COUNT(*) FROM v3_device_traffic_minutes WHERE device_id = ?",
+                (device_id,),
+            ),
+            "traffic_protocol_minutes": count(
+                "SELECT COUNT(*) FROM v3_device_traffic_protocol_minutes WHERE device_id = ?",
+                (device_id,),
+            ),
+            "traffic_peer_minutes": count(
+                "SELECT COUNT(*) FROM v3_device_traffic_peer_minutes "
+                "WHERE device_id = ? OR peer_device_id = ?",
+                (device_id, device_id),
+            ),
             "future_references": {},
         }
         tables = [
@@ -689,6 +710,10 @@ class DeviceManagementService:
                 "mqtt_boot_sessions",
                 "mqtt_cursor",
                 "non_management_events",
+                "traffic_ip_bindings",
+                "traffic_minutes",
+                "traffic_protocol_minutes",
+                "traffic_peer_minutes",
             )
             if references[key] > 0
         ]

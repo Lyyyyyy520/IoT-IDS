@@ -31,6 +31,7 @@ from services.auth import (
 from api.probe import probe_bp
 from api.v3_devices import create_v3_devices_blueprint
 from api.v3_realtime import create_v3_realtime_blueprint
+from api.v3_traffic import create_v3_traffic_blueprint
 from runtime_services import (
     BackendServiceContainer,
     EXTENSION_KEY,
@@ -1115,6 +1116,7 @@ def create_app(
         "mqtt_settings_provider": (
             mqtt_settings_provider or default_mqtt_settings_provider
         ),
+        "traffic_clock": application.config.get("V3_CLOCK"),
     }
     if mqtt_subscriber_factory is not None:
         container_options["mqtt_subscriber_factory"] = mqtt_subscriber_factory
@@ -1147,6 +1149,12 @@ def create_app(
             poll_interval=application.config["V3_POLL_INTERVAL"],
             keepalive_interval=application.config["V3_KEEPALIVE_INTERVAL"],
             max_idle_cycles=application.config.get("V3_MAX_IDLE_CYCLES"),
+        )
+    )
+    application.register_blueprint(
+        create_v3_traffic_blueprint(
+            get_service_container(application).get_traffic_service(),
+            clock=application.config.get("V3_CLOCK"),
         )
     )
 

@@ -8,8 +8,10 @@ Works in two modes:
 import threading
 import time
 import random
-from datetime import datetime
+from datetime import datetime, timezone
+import logging
 from typing import Optional, Callable
+from uuid import uuid4
 from flask import current_app, has_app_context
 
 from database import execute
@@ -46,13 +48,15 @@ except Exception:
     DEVICE_GNN_AVAILABLE = False
 
 FLOW_PACKET_THRESHOLD = 4   # packets per flow before extraction
+LOGGER = logging.getLogger(__name__)
 
 
 class TrafficCapture:
     """Background traffic capture with dual-engine detection."""
 
-    def __init__(self, application=None):
+    def __init__(self, application=None, traffic_aggregation_service=None):
         self.application = application
+        self.traffic_aggregation_service = traffic_aggregation_service
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.packet_count = 0
@@ -62,6 +66,9 @@ class TrafficCapture:
         self.capture_interface = None
         self.scapy_error = ''
         self.on_alert: Optional[Callable] = None  # callback(alert_dict)
+        self._traffic_source_session_id = uuid4().hex
+        self._traffic_sequence = 0
+        self._traffic_lock = threading.Lock()
         # GAT flow-based detection state
         self.gat_detector = None
         self.flow_buffers = {}   # flow key -> FlowFeatureExtractor
@@ -143,9 +150,55 @@ class TrafficCapture:
             'scapy_error': self.scapy_error,
         }
 
+    def _aggregate_packet_v3(self, *, src_ip, dst_ip, src_port, dst_port,
+                             protocol, length, occurred_at=None):
+        service = self.traffic_aggregation_service
+        if service is None:
+            return
+        at = occurred_at or datetime.now(timezone.utc)
+        if at.tzinfo is None or at.utcoffset() is None:
+            at = at.replace(tzinfo=timezone.utc)
+        else:
+            at = at.astimezone(timezone.utc)
+        with self._traffic_lock:
+            sequence = self._traffic_sequence
+            self._traffic_sequence += 1
+        identifier = f"{self._traffic_source_session_id}-{sequence}"
+        try:
+            service.ingest_batch(
+                source_id="local-capture",
+                source_session_id=self._traffic_source_session_id,
+                batch_id=identifier,
+                batch_sequence=sequence,
+                received_at=datetime.now(timezone.utc),
+                samples=[{
+                    "sample_id": identifier,
+                    "occurred_at": at,
+                    "src_ip": src_ip,
+                    "dst_ip": dst_ip,
+                    "network_protocol": protocol,
+                    "application_protocol": None,
+                    "application_protocol_inferred": False,
+                    "src_port": src_port or None,
+                    "dst_port": dst_port or None,
+                    "bytes": length,
+                    "packets": 1,
+                    # This source observes packets, not completed flows.
+                    "flow_count": 0,
+                }],
+            )
+        except Exception as exc:
+            service.mark_degraded("capture_aggregation_failed")
+            LOGGER.error(
+                "traffic_source_failed source=local-capture "
+                "code=capture_aggregation_failed type=%s",
+                type(exc).__name__,
+            )
+
     def _process_packet(self, src_ip: str, dst_ip: str, src_port: int, dst_port: int,
                          protocol: str, length: int, flags: str = '', payload: str = '',
-                         known_normal: bool = False, source: Optional[str] = None):
+                         known_normal: bool = False, source: Optional[str] = None,
+                         aggregate_v3: bool = True, occurred_at=None):
         """Process a single packet through the detection pipeline.
 
         ``source`` lets remote probes use the same rule, model, logging and
@@ -153,6 +206,13 @@ class TrafficCapture:
         """
         source_label = source or self.capture_mode
         self.packet_count += 1
+
+        if aggregate_v3 and source_label == 'real':
+            self._aggregate_packet_v3(
+                src_ip=src_ip, dst_ip=dst_ip, src_port=src_port,
+                dst_port=dst_port, protocol=protocol, length=length,
+                occurred_at=occurred_at,
+            )
 
         # 0. GAT flow-based detection (binary Normal/Attack)
         self._feed_gat_flow(src_ip, dst_ip, src_port, dst_port, protocol, length, flags)
@@ -291,11 +351,12 @@ class TrafficCapture:
 
     def process_external_packet(self, src_ip: str, dst_ip: str, src_port: int, dst_port: int,
                                 protocol: str, length: int, flags: str = '',
-                                payload: str = '', source: str = 'real'):
+                                payload: str = '', source: str = 'real',
+                                aggregate_v3: bool = False):
         """Feed a packet received from a remote or VM probe into the IDS pipeline."""
         self._process_packet(
             src_ip, dst_ip, src_port, dst_port, protocol, length, flags, payload,
-            known_normal=False, source=source,
+            known_normal=False, source=source, aggregate_v3=aggregate_v3,
         )
 
     def _capture_scapy(self, interface=None):
