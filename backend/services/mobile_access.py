@@ -12,10 +12,12 @@ import sqlite3
 from typing import Callable
 from uuid import uuid4
 
+from werkzeug.security import generate_password_hash
+
 from config import MobileSecuritySettings
 from contracts import Role, is_valid_device_id
 from v3_database import (
-    V3_MOBILE_ACCESS_MIGRATION,
+    V3_MOBILE_USER_ADMIN_MIGRATION,
     connect_v3_existing,
     read_applied_migrations,
 )
@@ -24,6 +26,7 @@ from v3_database import (
 Clock = Callable[[], datetime]
 FaultInjector = Callable[[str], None]
 _AREA_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+_USERNAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{2,63}$")
 _CLIENT_INSTANCE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$")
 _PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _PAIRING_NORMALIZED_LENGTH = 32
@@ -51,6 +54,21 @@ class MobileUserNotFound(MobileAccessError):
 
 class MobileUserIneligible(MobileAccessError):
     code = "mobile_user_ineligible"
+    status = 409
+
+
+class MobileUserDisabled(MobileAccessError):
+    code = "mobile_user_disabled"
+    status = 409
+
+
+class MobileUsernameConflict(MobileAccessError):
+    code = "mobile_username_conflict"
+    status = 409
+
+
+class MobileUserProfileConflict(MobileAccessError):
+    code = "mobile_user_profile_version_conflict"
     status = 409
 
 
@@ -172,6 +190,15 @@ def _client_name(value) -> str:
     return _text(value, "client_display_name", maximum=100)
 
 
+def _username(value) -> str:
+    normalized = _text(value, "username", minimum=3, maximum=64)
+    if not _USERNAME_PATTERN.fullmatch(normalized):
+        raise MobileAccessError(
+            "username must start with a letter and contain only letters, digits, ., _, or -"
+        )
+    return normalized
+
+
 def _normalize_pairing_code(value) -> str:
     if not isinstance(value, str):
         return ""
@@ -216,11 +243,11 @@ class MobileAccessService:
         try:
             connection = connect_v3_existing(self.database_path)
             ledger = {row["version"]: row for row in read_applied_migrations(connection)}
-            migration = ledger.get(V3_MOBILE_ACCESS_MIGRATION.version)
+            migration = ledger.get(V3_MOBILE_USER_ADMIN_MIGRATION.version)
             if (
                 migration is None
-                or migration["name"] != V3_MOBILE_ACCESS_MIGRATION.name
-                or migration["checksum"] != V3_MOBILE_ACCESS_MIGRATION.checksum
+                or migration["name"] != V3_MOBILE_USER_ADMIN_MIGRATION.name
+                or migration["checksum"] != V3_MOBILE_USER_ADMIN_MIGRATION.checksum
             ):
                 connection.close()
                 raise MobileStoreUnavailable("mobile schema migration is unavailable")
@@ -269,10 +296,20 @@ class MobileAccessService:
             raise MobileUserNotFound("target user does not exist")
         return row
 
-    def _eligible_user(self, connection: sqlite3.Connection, user_id: int) -> sqlite3.Row:
+    def _role_user(self, connection: sqlite3.Connection, user_id: int) -> sqlite3.Row:
         row = self._user(connection, user_id)
         if row["role"] != Role.USER.value:
             raise MobileUserIneligible("only role=user accounts can use mobile access")
+        return row
+
+    def _eligible_user(self, connection: sqlite3.Connection, user_id: int) -> sqlite3.Row:
+        row = self._role_user(connection, user_id)
+        profile = connection.execute(
+            "SELECT account_status FROM v3_mobile_user_profiles WHERE user_id=?",
+            (user_id,),
+        ).fetchone()
+        if profile is not None and profile["account_status"] == "disabled":
+            raise MobileUserDisabled("mobile user account is disabled")
         return row
 
     @staticmethod
@@ -281,6 +318,283 @@ class MobileAccessService:
             "SELECT COUNT(*) FROM v3_mobile_user_scopes "
             "WHERE user_id = ? AND revoked_at IS NULL", (user_id,)
         ).fetchone()[0])
+
+    @staticmethod
+    def _user_summary_row(
+        connection: sqlite3.Connection, user_id: int, now_text: str
+    ) -> sqlite3.Row:
+        row = connection.execute(
+            "SELECT u.id AS user_id, u.username, "
+            "COALESCE(p.display_name, u.username) AS display_name, "
+            "COALESCE(p.mobile_only, 0) AS mobile_only, "
+            "COALESCE(p.account_status, 'active') AS account_status, "
+            "COALESCE(p.profile_version, 0) AS profile_version, "
+            "p.created_at, p.updated_at, p.disabled_at, p.disabled_reason, "
+            "(SELECT COUNT(*) FROM v3_mobile_user_scopes s WHERE s.user_id=u.id "
+            " AND s.revoked_at IS NULL AND s.scope_kind='device') AS device_scope_count, "
+            "(SELECT COUNT(*) FROM v3_mobile_user_scopes s WHERE s.user_id=u.id "
+            " AND s.revoked_at IS NULL AND s.scope_kind='area') AS area_scope_count, "
+            "(SELECT COUNT(*) FROM v3_mobile_sessions ms WHERE ms.user_id=u.id "
+            " AND ms.revoked_at IS NULL AND ms.refresh_expires_at>?) AS active_session_count, "
+            "(SELECT COUNT(*) FROM v3_mobile_sessions ms WHERE ms.user_id=u.id "
+            " AND (ms.revoked_at IS NOT NULL OR ms.refresh_expires_at<=?)) "
+            " AS revoked_session_count, "
+            "(SELECT MAX(mp.expires_at) FROM v3_mobile_pairings mp WHERE mp.user_id=u.id "
+            " AND mp.claimed_at IS NULL AND mp.invalidated_at IS NULL "
+            " AND mp.expires_at>?) AS unused_pairing_expires_at "
+            "FROM users u LEFT JOIN v3_mobile_user_profiles p ON p.user_id=u.id "
+            "WHERE u.id=? AND u.role='user'",
+            (now_text, now_text, now_text, user_id),
+        ).fetchone()
+        if row is None:
+            raise MobileUserNotFound("mobile user does not exist")
+        return row
+
+    @staticmethod
+    def _summary(row: sqlite3.Row) -> dict:
+        return {
+            "user_id": int(row["user_id"]),
+            "username": row["username"],
+            "display_name": row["display_name"],
+            "mobile_only": bool(row["mobile_only"]),
+            "account_status": row["account_status"],
+            "profile_version": int(row["profile_version"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "disabled_at": row["disabled_at"],
+            "disabled_reason": row["disabled_reason"],
+            "device_scope_count": int(row["device_scope_count"]),
+            "area_scope_count": int(row["area_scope_count"]),
+            "active_session_count": int(row["active_session_count"]),
+            "revoked_session_count": int(row["revoked_session_count"]),
+            "unused_pairing": {
+                "available": row["unused_pairing_expires_at"] is not None,
+                "expires_at": row["unused_pairing_expires_at"],
+            },
+        }
+
+    def list_mobile_users(
+        self,
+        *,
+        search: str | None = None,
+        account_status: str | None = None,
+        mobile_only: bool | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        if search is not None:
+            search = _text(search, "search", maximum=100)
+        if account_status not in {None, "active", "disabled"}:
+            raise MobileAccessError("account_status must be active or disabled")
+        if mobile_only is not None and type(mobile_only) is not bool:
+            raise MobileAccessError("mobile_only must be a boolean")
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise MobileAccessError("limit must be between 1 and 100")
+        if type(offset) is not int or offset < 0:
+            raise MobileAccessError("offset must be non-negative")
+        connection = self._connect()
+        now_text = _iso(self._now())
+        conditions = ["u.role='user'"]
+        parameters: list[object] = []
+        if search:
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            conditions.append(
+                "(u.username LIKE ? ESCAPE '\\' OR "
+                "COALESCE(p.display_name, u.username) LIKE ? ESCAPE '\\')"
+            )
+            parameters.extend([f"%{escaped}%", f"%{escaped}%"])
+        if account_status:
+            conditions.append("COALESCE(p.account_status, 'active')=?")
+            parameters.append(account_status)
+        if mobile_only is not None:
+            conditions.append("COALESCE(p.mobile_only, 0)=?")
+            parameters.append(1 if mobile_only else 0)
+        where = " WHERE " + " AND ".join(conditions)
+        try:
+            total = int(connection.execute(
+                "SELECT COUNT(*) FROM users u LEFT JOIN v3_mobile_user_profiles p "
+                "ON p.user_id=u.id" + where,
+                parameters,
+            ).fetchone()[0])
+            ids = connection.execute(
+                "SELECT u.id FROM users u LEFT JOIN v3_mobile_user_profiles p "
+                "ON p.user_id=u.id" + where
+                + " ORDER BY u.username COLLATE NOCASE, u.id LIMIT ? OFFSET ?",
+                [*parameters, limit, offset],
+            ).fetchall()
+            items = [
+                self._summary(self._user_summary_row(connection, int(row[0]), now_text))
+                for row in ids
+            ]
+            return {
+                "items": items,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_more": offset + len(items) < total,
+            }
+        finally:
+            connection.close()
+
+    def get_mobile_user(self, user_id: int) -> dict:
+        user_id = _positive_user_id(user_id)
+        connection = self._connect()
+        try:
+            return self._summary(
+                self._user_summary_row(connection, user_id, _iso(self._now()))
+            )
+        finally:
+            connection.close()
+
+    def create_mobile_user(
+        self,
+        *,
+        username,
+        display_name,
+        actor: MobileActor,
+        request_id: str,
+    ) -> dict:
+        username = _username(username)
+        display_name = _text(display_name, "display_name", maximum=100)
+        actor.validate()
+        request_id = _request_id(request_id)
+        connection = self._connect()
+        now = self._now()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute(
+                "SELECT 1 FROM users WHERE username=? COLLATE NOCASE", (username,)
+            ).fetchone():
+                raise MobileUsernameConflict("username already exists")
+            password_hash = generate_password_hash(secrets.token_urlsafe(48))
+            cursor = connection.execute(
+                "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'user')",
+                (username, password_hash),
+            )
+            user_id = int(cursor.lastrowid)
+            now_text = _iso(now)
+            connection.execute(
+                "INSERT INTO v3_mobile_user_profiles "
+                "(user_id, display_name, mobile_only, account_status, profile_version, "
+                "created_by, created_at, updated_at) VALUES (?, ?, 1, 'active', 1, ?, ?, ?)",
+                (user_id, display_name, actor.user_id, now_text, now_text),
+            )
+            self._audit(
+                connection, action="mobile_user_created",
+                actor=f"web-admin:{actor.user_id}:{actor.username}",
+                request_id=request_id, result="success", reason="mobile_user_created",
+                user_id=user_id, occurred_at=now,
+            )
+            self.fault_injector("create_mobile_user_before_commit")
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return self.get_mobile_user(user_id)
+
+    def update_mobile_user(
+        self,
+        user_id: int,
+        *,
+        expected_profile_version,
+        display_name=None,
+        account_status=None,
+        disabled_reason=None,
+        actor: MobileActor,
+        request_id: str,
+    ) -> dict:
+        user_id = _positive_user_id(user_id)
+        if type(expected_profile_version) is not int or expected_profile_version < 0:
+            raise MobileAccessError(
+                "expected_profile_version must be a non-negative integer"
+            )
+        if display_name is not None:
+            display_name = _text(display_name, "display_name", maximum=100)
+        if account_status not in {None, "active", "disabled"}:
+            raise MobileAccessError("account_status must be active or disabled")
+        if disabled_reason is not None:
+            disabled_reason = _text(disabled_reason, "disabled_reason", maximum=256)
+        if account_status == "disabled" and not disabled_reason:
+            raise MobileAccessError("disabled_reason is required when disabling a user")
+        if display_name is None and account_status is None:
+            raise MobileAccessError("PATCH must change display_name or account_status")
+        actor.validate()
+        request_id = _request_id(request_id)
+        connection = self._connect()
+        now = self._now()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            user = self._role_user(connection, user_id)
+            profile = connection.execute(
+                "SELECT * FROM v3_mobile_user_profiles WHERE user_id=?", (user_id,)
+            ).fetchone()
+            current_version = int(profile["profile_version"]) if profile else 0
+            if current_version != expected_profile_version:
+                raise MobileUserProfileConflict("mobile user profile version is stale")
+            current_name = profile["display_name"] if profile else user["username"]
+            current_status = profile["account_status"] if profile else "active"
+            next_name = display_name if display_name is not None else current_name
+            next_status = account_status if account_status is not None else current_status
+            if next_name == current_name and next_status == current_status:
+                connection.rollback()
+                return self.get_mobile_user(user_id)
+            version = current_version + 1
+            now_text = _iso(now)
+            disabled_at = now_text if next_status == "disabled" else None
+            reason = disabled_reason if next_status == "disabled" else None
+            if profile is None:
+                connection.execute(
+                    "INSERT INTO v3_mobile_user_profiles "
+                    "(user_id, display_name, mobile_only, account_status, profile_version, "
+                    "created_by, created_at, updated_at, disabled_at, disabled_reason) "
+                    "VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        user_id, next_name, next_status, version, actor.user_id,
+                        now_text, now_text, disabled_at, reason,
+                    ),
+                )
+            else:
+                connection.execute(
+                    "UPDATE v3_mobile_user_profiles SET display_name=?, account_status=?, "
+                    "profile_version=?, updated_at=?, disabled_at=?, disabled_reason=? "
+                    "WHERE user_id=?",
+                    (
+                        next_name, next_status, version, now_text, disabled_at,
+                        reason, user_id,
+                    ),
+                )
+            action = "mobile_user_updated"
+            if current_status != next_status and next_status == "disabled":
+                action = "mobile_user_disabled"
+                connection.execute(
+                    "UPDATE v3_mobile_sessions SET revoked_at=COALESCE(revoked_at, ?), "
+                    "revoked_reason=CASE WHEN revoked_at IS NULL THEN 'account_disabled' "
+                    "ELSE revoked_reason END WHERE user_id=?",
+                    (now_text, user_id),
+                )
+                connection.execute(
+                    "UPDATE v3_mobile_pairings SET invalidated_at=? WHERE user_id=? "
+                    "AND claimed_at IS NULL AND invalidated_at IS NULL",
+                    (now_text, user_id),
+                )
+            elif current_status != next_status:
+                action = "mobile_user_restored"
+            self._audit(
+                connection, action=action,
+                actor=f"web-admin:{actor.user_id}:{actor.username}",
+                request_id=request_id, result="success", reason=action,
+                user_id=user_id, occurred_at=now,
+            )
+            self.fault_injector("update_mobile_user_before_commit")
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        return self.get_mobile_user(user_id)
 
     def _normalize_scopes(
         self, connection: sqlite3.Connection, scopes
@@ -313,7 +627,7 @@ class MobileAccessService:
         user_id = _positive_user_id(user_id)
         connection = self._connect()
         try:
-            user = self._eligible_user(connection, user_id)
+            user = self._role_user(connection, user_id)
             version_row = connection.execute(
                 "SELECT scope_version FROM v3_mobile_scope_sets WHERE user_id = ?",
                 (user_id,),
@@ -352,7 +666,7 @@ class MobileAccessService:
         now = self._now()
         try:
             connection.execute("BEGIN IMMEDIATE")
-            self._eligible_user(connection, user_id)
+            self._role_user(connection, user_id)
             normalized = self._normalize_scopes(connection, scopes)
             row = connection.execute(
                 "SELECT scope_version FROM v3_mobile_scope_sets WHERE user_id = ?",

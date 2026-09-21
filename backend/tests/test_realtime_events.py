@@ -103,11 +103,11 @@ def test_migration_v1_v2_v3_checksums_are_frozen_and_v4_is_repeatable(tmp_path):
         connection.close()
 
     assert first["applied_versions"] == [1, 2]
-    assert upgraded["applied_versions"] == [3, 4, 5, 6]
+    assert upgraded["applied_versions"] == [3, 4, 5, 6, 7]
     assert upgraded["skipped_versions"] == [1, 2]
     assert repeated["applied_versions"] == []
-    assert repeated["skipped_versions"] == [1, 2, 3, 4, 5, 6]
-    assert [row[0] for row in versions] == [1, 2, 3, 4, 5, 6]
+    assert repeated["skipped_versions"] == [1, 2, 3, 4, 5, 6, 7]
+    assert [row[0] for row in versions] == [1, 2, 3, 4, 5, 6, 7]
 
 
 def test_accepted_mqtt_writes_events_and_rejected_replay_writes_none(tmp_path):

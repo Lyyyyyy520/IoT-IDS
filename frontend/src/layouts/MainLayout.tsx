@@ -13,6 +13,7 @@ import {
   FileTextOutlined,
   SwapOutlined,
   MonitorOutlined,
+  MobileOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -45,6 +46,7 @@ const adminNavItems: MenuItem[] = [
   { key: '/traffic', icon: <SwapOutlined />, label: '流量分析' },
   { key: '/policy', icon: <SafetyOutlined />, label: '策略管理' },
   { key: '/logs', icon: <FileTextOutlined />, label: '审计日志' },
+  { key: '/mobile-access', icon: <MobileOutlined />, label: 'APP 访问管理' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
 

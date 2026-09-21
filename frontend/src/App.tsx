@@ -14,6 +14,7 @@ import MonitorPage from './pages/Monitor';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 const DevicesPage = lazy(() => import('./pages/Devices'));
+const MobileAccessPage = lazy(() => import('./pages/MobileAccess'));
 
 function LoadingScreen() {
   return (
@@ -41,7 +42,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 /** Administrator-only legacy pages; the backend remains the authority. */
-function RequireAdmin({ children }: { children: React.ReactNode }) {
+export function RequireAdmin({ children }: { children: React.ReactNode }) {
   const { authenticated, loading, isAdmin } = useAuth();
 
   if (loading) return <LoadingScreen />;
@@ -117,6 +118,16 @@ export default function App() {
           {/* Administrator-only pages. */}
           <Route path="policy" element={<RequireAdmin><Policy /></RequireAdmin>} />
           <Route path="logs" element={<RequireAdmin><Logs /></RequireAdmin>} />
+          <Route
+            path="mobile-access"
+            element={
+              <RequireAdmin>
+                <Suspense fallback={<LoadingScreen />}>
+                  <MobileAccessPage />
+                </Suspense>
+              </RequireAdmin>
+            }
+          />
         </Route>
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

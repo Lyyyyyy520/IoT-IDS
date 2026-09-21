@@ -220,6 +220,81 @@ def create_v3_mobile_blueprint(
             raise ApiInputError("invalid_query", f"查询参数 {name} 必须是非负整数")
         return int(raw)
 
+    def boolean(name: str) -> bool | None:
+        raw = one(name)
+        if raw is None:
+            return None
+        if raw == "true":
+            return True
+        if raw == "false":
+            return False
+        raise ApiInputError("invalid_query", f"查询参数 {name} 必须是 true 或 false")
+
+    @blueprint.get("/api/v3/mobile-users")
+    @admin(write=False)
+    def list_mobile_users():
+        def execute():
+            allowed = {
+                "search", "account_status", "mobile_only", "limit", "offset",
+            }
+            if set(request.args) - allowed:
+                raise ApiInputError(
+                    "unknown_query_parameters", "存在不支持的查询参数"
+                )
+            return jsonify(service.list_mobile_users(
+                search=one("search"),
+                account_status=one("account_status"),
+                mobile_only=boolean("mobile_only"),
+                limit=integer("limit", 50),
+                offset=integer("offset", 0),
+            ))
+        return handle(execute)
+
+    @blueprint.post("/api/v3/mobile-users")
+    @secure
+    @admin(write=True)
+    def create_mobile_user():
+        def execute():
+            payload = _json_body(
+                allowed={"username", "display_name"},
+                required={"username", "display_name"},
+            )
+            return jsonify(service.create_mobile_user(
+                username=payload["username"],
+                display_name=payload["display_name"],
+                actor=actor(),
+                request_id=g.v3_request_id,
+            )), 201
+        return handle(execute)
+
+    @blueprint.get("/api/v3/mobile-users/<int:user_id>")
+    @admin(write=False)
+    def get_mobile_user(user_id: int):
+        return handle(lambda: jsonify(service.get_mobile_user(user_id)))
+
+    @blueprint.patch("/api/v3/mobile-users/<int:user_id>")
+    @secure
+    @admin(write=True)
+    def patch_mobile_user(user_id: int):
+        def execute():
+            payload = _json_body(
+                allowed={
+                    "expected_profile_version", "display_name",
+                    "account_status", "disabled_reason",
+                },
+                required={"expected_profile_version"},
+            )
+            return jsonify(service.update_mobile_user(
+                user_id,
+                expected_profile_version=payload["expected_profile_version"],
+                display_name=payload.get("display_name"),
+                account_status=payload.get("account_status"),
+                disabled_reason=payload.get("disabled_reason"),
+                actor=actor(),
+                request_id=g.v3_request_id,
+            ))
+        return handle(execute)
+
     @blueprint.get("/api/v3/mobile-users/<int:user_id>/scopes")
     @admin(write=False)
     def get_scopes(user_id: int):

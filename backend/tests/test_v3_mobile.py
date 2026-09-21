@@ -5,6 +5,7 @@ import sqlite3
 from types import SimpleNamespace
 
 import pytest
+from werkzeug.security import check_password_hash
 
 from app import create_app
 from config import MobileSecuritySettings
@@ -20,6 +21,7 @@ from v3_database import (
     V3_MIGRATIONS,
     V3_MOBILE_ACCESS_INDEXES,
     V3_MOBILE_ACCESS_MIGRATION,
+    V3_MOBILE_USER_ADMIN_MIGRATION,
     V3_MOBILE_ACCESS_TABLES,
     apply_v3_migrations,
     connect_v3,
@@ -35,6 +37,7 @@ FROZEN_CHECKSUMS = [
     "77e7011d94ef2b3a7022013fbef0c2e68f70f1ca9ead58446dd3d4bde78c74c6",
 ]
 V6_CHECKSUM = "f1ce25c5393381750c7582eb7dc783c7625db80a0dad483c1e46cf1b7521b61d"
+V7_CHECKSUM = "5e8e572496607b58d0ccf93be0bcd1deaaa7d3935f93cef54cccd35e905b3623"
 NOW = datetime(2026, 9, 21, 4, 0, tzinfo=timezone.utc)
 ADMIN = MobileActor(1, "admin-test", "admin")
 
@@ -192,9 +195,10 @@ def _bearer(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_v6_migration_is_additive_idempotent_and_keeps_v1_to_v5_frozen(tmp_path):
+def test_v6_v7_migrations_are_additive_idempotent_and_keep_prior_checksums(tmp_path):
     assert [item.checksum for item in V3_MIGRATIONS[:5]] == FROZEN_CHECKSUMS
     assert V3_MOBILE_ACCESS_MIGRATION.checksum == V6_CHECKSUM
+    assert V3_MOBILE_USER_ADMIN_MIGRATION.checksum == V7_CHECKSUM
     database_path = tmp_path / "upgrade.sqlite"
     init_db(database_path)
     connection = connect_v3(database_path)
@@ -213,9 +217,9 @@ def test_v6_migration_is_additive_idempotent_and_keeps_v1_to_v5_frozen(tmp_path)
         }
     finally:
         connection.close()
-    assert first["applied_versions"] == [6]
+    assert first["applied_versions"] == [6, 7]
     assert second["applied_versions"] == []
-    assert second["skipped_versions"] == [1, 2, 3, 4, 5, 6]
+    assert second["skipped_versions"] == [1, 2, 3, 4, 5, 6, 7]
     assert V3_MOBILE_ACCESS_TABLES <= objects.keys()
     assert V3_MOBILE_ACCESS_INDEXES <= objects.keys()
     assert "access_token" not in session_columns
@@ -842,3 +846,195 @@ def test_production_settings_require_https_and_a_separate_secret():
         ).validate()
     with pytest.raises(Exception):
         _settings(environment="production", allow_insecure_http=True).validate()
+
+
+def test_mobile_only_user_creation_uses_random_hash_and_denies_web_login(
+    mobile_context,
+):
+    created = mobile_context.service.create_mobile_user(
+        username="resident.mobile",
+        display_name="住户移动账号",
+        actor=ADMIN,
+        request_id="create-mobile-user",
+    )
+    assert created["mobile_only"] is True
+    assert created["account_status"] == "active"
+    assert created["profile_version"] == 1
+    assert created["device_scope_count"] == 0
+    assert created["area_scope_count"] == 0
+    with sqlite3.connect(mobile_context.database_path) as connection:
+        row = connection.execute(
+            "SELECT password_hash, role FROM users WHERE id=?", (created["user_id"],)
+        ).fetchone()
+    assert row[1] == "user"
+    assert not check_password_hash(row[0], "predictable-password")
+    login = mobile_context.client.post(
+        "/api/auth/login",
+        json={"username": "resident.mobile", "password": "anything"},
+    )
+    assert login.status_code == 401
+    assert login.get_json()["message"] == "该账号仅支持 APP 配对登录"
+
+
+def test_mobile_user_admin_api_permissions_csrf_validation_and_duplicate(
+    mobile_context,
+):
+    client = mobile_context.client
+    assert client.get("/api/v3/mobile-users").status_code == 401
+    _login(client, 2, "operator-test", "operator")
+    assert client.get("/api/v3/mobile-users").status_code == 403
+    _login(client, 3, "mobile-alice", "user")
+    assert client.get("/api/v3/mobile-users").status_code == 403
+    _login(client)
+    assert client.post(
+        "/api/v3/mobile-users",
+        json={"username": "no-csrf", "display_name": "No CSRF"},
+    ).status_code == 403
+    csrf = _csrf(client)
+    rejected_role = client.post(
+        "/api/v3/mobile-users",
+        json={
+            "username": "bad-role", "display_name": "Bad",
+            "role": "admin",
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert rejected_role.status_code == 400
+    assert rejected_role.get_json()["error"]["code"] == "unknown_fields"
+    created = client.post(
+        "/api/v3/mobile-users",
+        json={"username": "resident.two", "display_name": "住户二"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert created.status_code == 201
+    user = created.get_json()
+    duplicate = client.post(
+        "/api/v3/mobile-users",
+        json={"username": "resident.two", "display_name": "重复"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.get_json()["error"]["code"] == "mobile_username_conflict"
+    listing = client.get(
+        "/api/v3/mobile-users?search=resident.two&mobile_only=true"
+        "&account_status=active&limit=10&offset=0"
+    )
+    assert listing.status_code == 200
+    assert [item["user_id"] for item in listing.get_json()["items"]] == [
+        user["user_id"]
+    ]
+    no_scope_pair = client.post(
+        "/api/v3/pairing/start",
+        json={"user_id": user["user_id"]},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert no_scope_pair.status_code == 409
+    assert no_scope_pair.get_json()["error"]["code"] == "mobile_scope_required"
+
+
+def test_profile_version_disable_restore_revokes_sessions_and_pairings(
+    mobile_context,
+):
+    user = mobile_context.service.create_mobile_user(
+        username="resident.three",
+        display_name="住户三",
+        actor=ADMIN,
+        request_id="create-three",
+    )
+    _set_scopes(
+        mobile_context,
+        [{"scope_kind": "device", "scope_value": "camera-01"}],
+        user_id=user["user_id"],
+    )
+    _started, claimed = _pair(
+        mobile_context, user_id=user["user_id"], client_suffix="disable"
+    )
+    unused = mobile_context.service.start_pairing(
+        user["user_id"], actor=ADMIN, request_id="unused-before-disable"
+    )
+    with pytest.raises(Exception) as stale:
+        mobile_context.service.update_mobile_user(
+            user["user_id"],
+            expected_profile_version=0,
+            display_name="冲突草稿",
+            actor=ADMIN,
+            request_id="stale-profile",
+        )
+    assert stale.value.code == "mobile_user_profile_version_conflict"
+    disabled = mobile_context.service.update_mobile_user(
+        user["user_id"],
+        expected_profile_version=1,
+        account_status="disabled",
+        disabled_reason="设备遗失",
+        actor=ADMIN,
+        request_id="disable-user",
+    )
+    assert disabled["account_status"] == "disabled"
+    assert disabled["profile_version"] == 2
+    with sqlite3.connect(mobile_context.database_path) as connection:
+        session = connection.execute(
+            "SELECT revoked_reason FROM v3_mobile_sessions WHERE session_id=?",
+            (claimed["session_id"],),
+        ).fetchone()
+        pairing = connection.execute(
+            "SELECT invalidated_at FROM v3_mobile_pairings WHERE pairing_id=?",
+            (unused["pairing_id"],),
+        ).fetchone()
+    assert session[0] == "account_disabled"
+    assert pairing[0] is not None
+    with pytest.raises(Exception) as denied:
+        mobile_context.service.authenticate_access(claimed["access_token"])
+    assert denied.value.code == "mobile_session_revoked"
+    restored = mobile_context.service.update_mobile_user(
+        user["user_id"],
+        expected_profile_version=2,
+        account_status="active",
+        actor=ADMIN,
+        request_id="restore-user",
+    )
+    assert restored["account_status"] == "active"
+    assert restored["profile_version"] == 3
+    with pytest.raises(Exception):
+        mobile_context.service.authenticate_access(claimed["access_token"])
+    new_pairing = mobile_context.service.start_pairing(
+        user["user_id"], actor=ADMIN, request_id="pair-after-restore"
+    )
+    assert "pairing_code" in new_pairing
+
+
+def test_mobile_user_patch_requires_csrf_and_audit_contains_no_secrets(
+    mobile_context,
+):
+    user = mobile_context.service.create_mobile_user(
+        username="resident.four",
+        display_name="住户四",
+        actor=ADMIN,
+        request_id="create-four",
+    )
+    client = mobile_context.client
+    _login(client)
+    path = f"/api/v3/mobile-users/{user['user_id']}"
+    assert client.patch(
+        path,
+        json={"expected_profile_version": 1, "display_name": "新名称"},
+    ).status_code == 403
+    csrf = _csrf(client)
+    updated = client.patch(
+        path,
+        json={"expected_profile_version": 1, "display_name": "新名称"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert updated.status_code == 200
+    assert updated.get_json()["display_name"] == "新名称"
+    with sqlite3.connect(mobile_context.database_path) as connection:
+        audits = connection.execute(
+            "SELECT action, actor, stable_reason_code "
+            "FROM v3_mobile_security_audit WHERE user_id=? ORDER BY audit_id",
+            (user["user_id"],),
+        ).fetchall()
+    serialized = repr(audits)
+    assert "password" not in serialized
+    assert "token" not in serialized
+    assert [row[0] for row in audits] == [
+        "mobile_user_created", "mobile_user_updated"
+    ]

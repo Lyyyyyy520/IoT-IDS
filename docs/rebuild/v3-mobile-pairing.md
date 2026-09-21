@@ -13,6 +13,8 @@ admin/operator 装饰器识别。移动 token 只能访问：
 
 Web 管理端专用接口为：
 
+- `GET|POST /api/v3/mobile-users`
+- `GET|PATCH /api/v3/mobile-users/{user_id}`
 - `GET|PUT /api/v3/mobile-users/{user_id}/scopes`
 - `POST /api/v3/pairing/start`
 - `GET /api/v3/mobile-sessions`
@@ -52,7 +54,53 @@ Bearer token 访问 mobile overview。
 迁移不导入旧用户、不创建默认用户，也不改变 migration v1～v5。升级仍只能通过
 `backend/v3_db_upgrade.py plan/apply` 显式执行。
 
-## 3. 授权范围
+### Migration v7：移动用户管理
+
+迁移名为 `mobile_user_administration`，checksum 为
+`5e8e572496607b58d0ccf93be0bcd1deaaa7d3935f93cef54cccd35e905b3623`。
+它新增 `v3_mobile_user_profiles`，保存 display name、mobile-only 标记、账号状态、
+profile version、创建者以及禁用时间/原因；用户名、role 和 password hash 仍只来自
+legacy `users` 表，密码没有复制到 v3。
+
+新建 mobile-only 用户的 legacy role 固定为 `user`。服务端为 legacy password hash
+生成不可返回、不可预测的随机秘密，但 Web 登录还会显式检查 `mobile_only` 并拒绝，
+不能把“用户不知道秘密”当成登录边界。系统不创建默认用户，也没有把普通用户提升为
+admin/operator 的 API。
+
+禁用用户在同一事务中撤销全部有效移动 session、使全部未使用配对码失效并保留 scope
+和安全审计。恢复仅恢复账号资格，不复活旧 session，必须重新配对。
+
+## 3. Web 移动用户管理
+
+只有 Web admin Cookie session 可以使用以下接口；写操作继续要求从已认证 GET 响应头
+获得的 `X-CSRF-Token`：
+
+```http
+GET /api/v3/mobile-users?search=resident&account_status=active&mobile_only=true&limit=50&offset=0
+POST /api/v3/mobile-users
+GET /api/v3/mobile-users/42
+PATCH /api/v3/mobile-users/42
+```
+
+创建请求只接受 username 和 display name：
+
+```json
+{"username": "resident-a", "display_name": "A 栋住户"}
+```
+
+role、密码和管理员权限字段会作为未知字段拒绝。重复用户名返回
+`409 mobile_username_conflict`。新账号默认 scope 为空，因而不能生成配对码。
+修改 display name 或 active/disabled 状态必须携带 `expected_profile_version`；
+版本冲突返回 `409 mobile_user_profile_version_conflict`，客户端不得自动重试覆盖。
+
+列表返回 scope 数量、active/revoked session 数量，以及是否存在尚未使用的 pairing
+和其到期时间；永远不返回 pairing code、token、hash 或随机 Web 秘密。
+
+Web 管理页面为 `/mobile-access`，使用真实 `/api/v3/devices` 构建设备范围并从真实
+设备的 `area_id` 去重生成区域选项。配对码明文只存在于当前 React state：关闭
+对话框、切换用户、离开路由或到期都会清除，不写浏览器存储、URL 或日志。
+
+## 4. 授权范围
 
 目标账号必须已存在且角色严格为 `user`。管理员和操作员账号不能绑定为普通 APP
 账号。
@@ -88,7 +136,7 @@ device scope 必须引用现存 v3 设备；area scope 只接受受限的 `area_
 每次 overview 请求都从数据库读取当前范围。area scope 动态匹配设备当前的
 `area_id`；设备移动区域或管理员撤销范围后，现有 session 的下一次请求立即生效。
 
-## 4. 一次性配对
+## 5. 一次性配对
 
 管理员先为 role=user 账号配置至少一个有效范围，然后创建配对码：
 
@@ -146,7 +194,7 @@ Content-Type: application/json
 }
 ```
 
-## 5. Token 生命周期
+## 6. Token 生命周期
 
 access token 默认 30 分钟，允许配置范围为 5～60 分钟。refresh token 默认 30 天，
 允许范围为 1 小时～90 天。二者由 `secrets` 生成，数据库只保存服务端 secret
@@ -175,7 +223,7 @@ access token 过期、session 撤销或用户角色不再是 `user` 时立即返
 撤销当前 session，重复注销返回幂等成功。管理员也可以在
 `/api/v3/mobile-sessions` 查询并撤销会话；列表不会返回 token、token hash 或配对码。
 
-## 6. Mobile overview
+## 7. Mobile overview
 
 ```http
 GET /api/v3/mobile/overview
@@ -212,7 +260,7 @@ Authorization: Bearer <opaque access token>
 overview 不返回 MAC、当前 IP、peer IP、端口、graph ID、GNN 分数/特征、MQTT 或
 probe 凭据。未观测设备保持 `unknown`；退役、维护、disabled 与连接状态分开表达。
 
-## 7. HTTPS、代理、限流与部署
+## 8. HTTPS、代理、限流与部署
 
 生产环境必须显式设置：
 

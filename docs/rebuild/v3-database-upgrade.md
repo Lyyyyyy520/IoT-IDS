@@ -95,19 +95,21 @@ python backend/v3_db_upgrade.py apply `
 
 升级成功后，再对已升级副本执行 `plan`。预期结果：
 
-- migration 版本为 `6`；该版本独立于 REST/API 的 `v3` 名称；
+- migration 版本为 `7`；该版本独立于 REST/API 的 `v3` 名称；
 - `pending_migrations` 为空；
 - `v3_schema_migrations` 有 `device_state_foundation`、`mqtt_heartbeat_sessions`、
   `realtime_event_log`、`device_lifecycle_management`、
-  `device_traffic_aggregation` 和 `mobile_pairing_and_scoped_sessions` 六条记录；
+  `device_traffic_aggregation`、`mobile_pairing_and_scoped_sessions` 和
+  `mobile_user_administration` 七条记录；
 - 四张设备状态表存在；
 - `v3_mqtt_boot_sessions` 和 `v3_mqtt_device_cursors` 两张 MQTT 会话表存在；
 - `v3_realtime_events` 追加式事件表及两个查询索引存在；
 - `v3_device_profiles` 含档案版本、来源、重要性和退役字段，且
   `v3_device_management_audit` 追加式管理审计表存在；
 - v5 流量聚合表与 v6 移动范围、配对、会话、refresh 历史、安全审计及限流表存在；
+- v7 `v3_mobile_user_profiles` 移动用户扩展档案表及状态索引存在；
 - `v3_device_profiles` 为零行；旧 `assets` 行数未变化；
-- 重复执行 `apply` 时版本 `1`～`6` 出现在 `skipped_versions`，不会重新执行。
+- 重复执行 `apply` 时版本 `1`～`7` 出现在 `skipped_versions`，不会重新执行。
 
 本轮绝不把旧 `assets` 转成 v3 设备。重复 IP 或 MAC 只进入审计报告，不能据此
 自动生成 `device_id`、合并记录或认领物理设备。

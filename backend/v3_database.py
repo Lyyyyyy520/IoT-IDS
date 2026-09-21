@@ -540,6 +540,34 @@ V3_MOBILE_ACCESS_MIGRATION = SchemaMigration(
     statements=V3_MOBILE_ACCESS_STATEMENTS,
 )
 
+V3_MOBILE_USER_ADMIN_STATEMENTS = (
+    """
+    CREATE TABLE v3_mobile_user_profiles (
+        user_id INTEGER PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        mobile_only INTEGER NOT NULL DEFAULT 0 CHECK (mobile_only IN (0, 1)),
+        account_status TEXT NOT NULL DEFAULT 'active'
+            CHECK (account_status IN ('active', 'disabled')),
+        profile_version INTEGER NOT NULL DEFAULT 1 CHECK (profile_version > 0),
+        created_by INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        disabled_at TEXT,
+        disabled_reason TEXT
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_mobile_user_profiles_status
+        ON v3_mobile_user_profiles(account_status, mobile_only, user_id)
+    """.strip(),
+)
+
+V3_MOBILE_USER_ADMIN_MIGRATION = SchemaMigration(
+    version=7,
+    name="mobile_user_administration",
+    statements=V3_MOBILE_USER_ADMIN_STATEMENTS,
+)
+
 V3_MIGRATIONS = (
     V3_DEVICE_STATE_MIGRATION,
     V3_MQTT_HEARTBEAT_MIGRATION,
@@ -547,6 +575,7 @@ V3_MIGRATIONS = (
     V3_DEVICE_LIFECYCLE_MIGRATION,
     V3_DEVICE_TRAFFIC_MIGRATION,
     V3_MOBILE_ACCESS_MIGRATION,
+    V3_MOBILE_USER_ADMIN_MIGRATION,
 )
 
 V3_DEVICE_STATE_TABLES = frozenset(
@@ -651,6 +680,11 @@ V3_MOBILE_ACCESS_INDEXES = frozenset(
     }
 )
 
+V3_MOBILE_USER_ADMIN_TABLES = frozenset({"v3_mobile_user_profiles"})
+V3_MOBILE_USER_ADMIN_INDEXES = frozenset(
+    {"idx_v3_mobile_user_profiles_status"}
+)
+
 V3_EXPECTED_OBJECTS = {
     MIGRATION_TABLE: "table",
     **{name: "table" for name in V3_DEVICE_STATE_TABLES},
@@ -665,6 +699,8 @@ V3_EXPECTED_OBJECTS = {
     **{name: "index" for name in V3_DEVICE_TRAFFIC_INDEXES},
     **{name: "table" for name in V3_MOBILE_ACCESS_TABLES},
     **{name: "index" for name in V3_MOBILE_ACCESS_INDEXES},
+    **{name: "table" for name in V3_MOBILE_USER_ADMIN_TABLES},
+    **{name: "index" for name in V3_MOBILE_USER_ADMIN_INDEXES},
 }
 
 V3_EXPECTED_OBJECT_VERSIONS = {
@@ -681,6 +717,8 @@ V3_EXPECTED_OBJECT_VERSIONS = {
     **{name: 5 for name in V3_DEVICE_TRAFFIC_INDEXES},
     **{name: 6 for name in V3_MOBILE_ACCESS_TABLES},
     **{name: 6 for name in V3_MOBILE_ACCESS_INDEXES},
+    **{name: 7 for name in V3_MOBILE_USER_ADMIN_TABLES},
+    **{name: 7 for name in V3_MOBILE_USER_ADMIN_INDEXES},
 }
 
 

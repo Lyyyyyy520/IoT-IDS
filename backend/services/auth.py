@@ -30,6 +30,26 @@ def login_user(username: str, password: str) -> dict:
     if not user:
         return {'success': False, 'message': '账号不存在'}
 
+    profile_table = query_one(
+        "SELECT 1 AS present FROM sqlite_master "
+        "WHERE type='table' AND name='v3_mobile_user_profiles'"
+    )
+    if profile_table:
+        mobile_profile = query_one(
+            "SELECT mobile_only FROM v3_mobile_user_profiles WHERE user_id=?",
+            (user['id'],),
+        )
+        if mobile_profile and bool(mobile_profile['mobile_only']):
+            execute(
+                "INSERT INTO audit_logs (user_id, username, action, detail) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    user['id'], username, 'login_failed',
+                    'mobile_only_web_login_denied',
+                ),
+            )
+            return {'success': False, 'message': '该账号仅支持 APP 配对登录'}
+
     if not check_password_hash(user['password_hash'], password):
         execute(
             "INSERT INTO audit_logs (user_id, username, action, detail) VALUES (?, ?, ?, ?)",

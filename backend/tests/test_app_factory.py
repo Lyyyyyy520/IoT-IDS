@@ -24,6 +24,7 @@ V3_CHECKSUM = "bfe9842f09d391284b408dd0df36e205e4ad9f92361ee304dd52955c9f6aa329"
 V4_CHECKSUM = "685caf41c5d21471c14ef7b6608cce6d43a4cd69fff3961c1888c3166a4bebcd"
 V5_CHECKSUM = "77e7011d94ef2b3a7022013fbef0c2e68f70f1ca9ead58446dd3d4bde78c74c6"
 V6_CHECKSUM = "f1ce25c5393381750c7582eb7dc783c7625db80a0dad483c1e46cf1b7521b61d"
+V7_CHECKSUM = "5e8e572496607b58d0ccf93be0bcd1deaaa7d3935f93cef54cccd35e905b3623"
 
 
 def _settings(enabled=True):
@@ -382,4 +383,5 @@ def test_migration_checksums_are_unchanged():
         V4_CHECKSUM,
         V5_CHECKSUM,
         V6_CHECKSUM,
+        V7_CHECKSUM,
     ]

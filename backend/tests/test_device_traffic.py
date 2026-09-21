@@ -113,9 +113,9 @@ def test_v5_migration_new_upgrade_and_idempotent(tmp_path: Path):
         "77e7011d94ef2b3a7022013fbef0c2e68f70f1ca9ead58446dd3d4bde78c74c6"
     )
     assert first["applied_versions"] == [1, 2, 3, 4]
-    assert upgrade["applied_versions"] == [5, 6]
+    assert upgrade["applied_versions"] == [5, 6, 7]
     assert repeated["applied_versions"] == []
-    assert repeated["skipped_versions"] == [1, 2, 3, 4, 5, 6]
+    assert repeated["skipped_versions"] == [1, 2, 3, 4, 5, 6, 7]
     assert legacy_count == 1
     assert bindings == 0
 
