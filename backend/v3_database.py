@@ -408,12 +408,145 @@ V3_DEVICE_TRAFFIC_MIGRATION = SchemaMigration(
     statements=V3_DEVICE_TRAFFIC_STATEMENTS,
 )
 
+V3_MOBILE_ACCESS_STATEMENTS = (
+    """
+    CREATE TABLE v3_mobile_scope_sets (
+        user_id INTEGER PRIMARY KEY,
+        scope_version INTEGER NOT NULL DEFAULT 0 CHECK (scope_version >= 0),
+        updated_by INTEGER NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """.strip(),
+    """
+    CREATE TABLE v3_mobile_user_scopes (
+        scope_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        scope_kind TEXT NOT NULL CHECK (scope_kind IN ('device', 'area')),
+        scope_value TEXT NOT NULL,
+        scope_version INTEGER NOT NULL CHECK (scope_version > 0),
+        created_by INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        revoked_at TEXT
+    )
+    """.strip(),
+    """
+    CREATE UNIQUE INDEX idx_v3_mobile_scopes_active_unique
+        ON v3_mobile_user_scopes(user_id, scope_kind, scope_value)
+        WHERE revoked_at IS NULL
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_mobile_scopes_user_active
+        ON v3_mobile_user_scopes(user_id, revoked_at, scope_kind, scope_value)
+    """.strip(),
+    """
+    CREATE TABLE v3_mobile_pairings (
+        pairing_id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        code_selector TEXT NOT NULL UNIQUE,
+        code_hash TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        max_attempts INTEGER NOT NULL CHECK (max_attempts > 0),
+        attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+        claimed_at TEXT,
+        invalidated_at TEXT,
+        created_by INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_mobile_pairings_user_active
+        ON v3_mobile_pairings(user_id, claimed_at, invalidated_at, expires_at)
+    """.strip(),
+    """
+    CREATE TABLE v3_mobile_sessions (
+        session_id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        client_instance_id TEXT NOT NULL,
+        client_display_name TEXT NOT NULL,
+        access_token_selector TEXT NOT NULL UNIQUE,
+        access_token_hash TEXT NOT NULL UNIQUE,
+        refresh_token_selector TEXT NOT NULL UNIQUE,
+        refresh_token_hash TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        issued_at TEXT NOT NULL,
+        access_expires_at TEXT NOT NULL,
+        refresh_expires_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        revoked_at TEXT,
+        revoked_reason TEXT,
+        token_generation INTEGER NOT NULL DEFAULT 1 CHECK (token_generation > 0)
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_mobile_sessions_user_status
+        ON v3_mobile_sessions(user_id, revoked_at, refresh_expires_at, session_id)
+    """.strip(),
+    """
+    CREATE TABLE v3_mobile_refresh_history (
+        refresh_token_selector TEXT PRIMARY KEY,
+        refresh_token_hash TEXT NOT NULL UNIQUE,
+        session_id TEXT NOT NULL,
+        token_generation INTEGER NOT NULL CHECK (token_generation > 0),
+        rotated_at TEXT NOT NULL,
+        replayed_at TEXT
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_mobile_refresh_history_session
+        ON v3_mobile_refresh_history(session_id, token_generation)
+    """.strip(),
+    """
+    CREATE TABLE v3_mobile_security_audit (
+        audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        action TEXT NOT NULL,
+        user_id INTEGER,
+        session_id TEXT,
+        pairing_id TEXT,
+        actor TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        result TEXT NOT NULL CHECK (result IN ('success', 'failure', 'no_op')),
+        stable_reason_code TEXT NOT NULL
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_mobile_audit_user_time
+        ON v3_mobile_security_audit(user_id, occurred_at, audit_id)
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_mobile_audit_session
+        ON v3_mobile_security_audit(session_id, audit_id)
+    """.strip(),
+    """
+    CREATE TABLE v3_mobile_rate_limits (
+        action TEXT NOT NULL,
+        bucket_key TEXT NOT NULL,
+        window_started_at TEXT NOT NULL,
+        attempt_count INTEGER NOT NULL CHECK (attempt_count > 0),
+        blocked_until TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (action, bucket_key)
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_mobile_rate_limits_blocked
+        ON v3_mobile_rate_limits(blocked_until, updated_at)
+    """.strip(),
+)
+
+V3_MOBILE_ACCESS_MIGRATION = SchemaMigration(
+    version=6,
+    name="mobile_pairing_and_scoped_sessions",
+    statements=V3_MOBILE_ACCESS_STATEMENTS,
+)
+
 V3_MIGRATIONS = (
     V3_DEVICE_STATE_MIGRATION,
     V3_MQTT_HEARTBEAT_MIGRATION,
     V3_REALTIME_EVENT_MIGRATION,
     V3_DEVICE_LIFECYCLE_MIGRATION,
     V3_DEVICE_TRAFFIC_MIGRATION,
+    V3_MOBILE_ACCESS_MIGRATION,
 )
 
 V3_DEVICE_STATE_TABLES = frozenset(
@@ -493,6 +626,31 @@ V3_DEVICE_TRAFFIC_INDEXES = frozenset(
     }
 )
 
+V3_MOBILE_ACCESS_TABLES = frozenset(
+    {
+        "v3_mobile_scope_sets",
+        "v3_mobile_user_scopes",
+        "v3_mobile_pairings",
+        "v3_mobile_sessions",
+        "v3_mobile_refresh_history",
+        "v3_mobile_security_audit",
+        "v3_mobile_rate_limits",
+    }
+)
+
+V3_MOBILE_ACCESS_INDEXES = frozenset(
+    {
+        "idx_v3_mobile_scopes_active_unique",
+        "idx_v3_mobile_scopes_user_active",
+        "idx_v3_mobile_pairings_user_active",
+        "idx_v3_mobile_sessions_user_status",
+        "idx_v3_mobile_refresh_history_session",
+        "idx_v3_mobile_audit_user_time",
+        "idx_v3_mobile_audit_session",
+        "idx_v3_mobile_rate_limits_blocked",
+    }
+)
+
 V3_EXPECTED_OBJECTS = {
     MIGRATION_TABLE: "table",
     **{name: "table" for name in V3_DEVICE_STATE_TABLES},
@@ -505,6 +663,8 @@ V3_EXPECTED_OBJECTS = {
     **{name: "index" for name in V3_DEVICE_LIFECYCLE_INDEXES},
     **{name: "table" for name in V3_DEVICE_TRAFFIC_TABLES},
     **{name: "index" for name in V3_DEVICE_TRAFFIC_INDEXES},
+    **{name: "table" for name in V3_MOBILE_ACCESS_TABLES},
+    **{name: "index" for name in V3_MOBILE_ACCESS_INDEXES},
 }
 
 V3_EXPECTED_OBJECT_VERSIONS = {
@@ -519,6 +679,8 @@ V3_EXPECTED_OBJECT_VERSIONS = {
     **{name: 4 for name in V3_DEVICE_LIFECYCLE_INDEXES},
     **{name: 5 for name in V3_DEVICE_TRAFFIC_TABLES},
     **{name: 5 for name in V3_DEVICE_TRAFFIC_INDEXES},
+    **{name: 6 for name in V3_MOBILE_ACCESS_TABLES},
+    **{name: 6 for name in V3_MOBILE_ACCESS_INDEXES},
 }
 
 

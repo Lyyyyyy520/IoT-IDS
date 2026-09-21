@@ -15,8 +15,9 @@
 legacy 路由函数主体保持不变，统一移入 `legacy_api` Blueprint。probe 继续使用现有
 `probe` Blueprint。v3 通过
 `create_v3_realtime_blueprint(...)`、`create_v3_devices_blueprint(...)` 和
-`create_v3_traffic_blueprint(...)` 注册，因此正式 app 始终有 monitor/events、设备管理
-以及只读 traffic/peers 路由；缺少数据库时返回 503，而不是 404 或演示数据。
+`create_v3_traffic_blueprint(...)` 和 `create_v3_mobile_blueprint(...)` 注册，因此正式
+app 始终有 monitor/events、设备管理、只读 traffic/peers 以及受限 mobile 路由；
+缺少数据库时返回 503，而不是 404 或演示数据。
 
 ## 2. 唯一数据库路径
 
@@ -35,7 +36,7 @@ legacy 数据库助手从当前 Flask app 读取该值，并用 SQLite URI `mode
 
 - 文件是否可打开；
 - legacy 核心表是否就绪；
-- migration 1～5 及 v3 对象是否完整。
+- migration 1～6 及 v3 对象是否完整。
 
 任一数据库条件不满足时整体 `status` 为 `degraded`。
 
@@ -66,7 +67,7 @@ python backend/app.py
 - 调用来自正式运行入口；
 - 当前不是 Flask debug reloader 父进程；
 - 显式数据库文件存在且可读；
-- migration 1、2、3 的名称和 checksum 与代码一致，全部 v3 对象存在。
+- migration 1～6 的名称和 checksum 与代码一致，全部 v3 对象存在。
 
 启动和停止均幂等。创建或启动失败时只记录异常类型和稳定原因码，随后调用 subscriber
 的 `stop()` 清理可能已经启动的网络循环和工作线程；密码不进入日志。

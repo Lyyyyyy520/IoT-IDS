@@ -1,5 +1,6 @@
 """Environment-backed runtime settings for the transitional backend."""
 from dataclasses import dataclass, field
+from hashlib import sha256
 import os
 from pathlib import Path
 import secrets
@@ -65,6 +66,116 @@ def flask_debug_enabled() -> bool:
 
 class MqttConfigurationError(ValueError):
     """Raised for invalid MQTT environment configuration without secret values."""
+
+
+class MobileConfigurationError(ValueError):
+    """Raised for unsafe or invalid mobile-session configuration."""
+
+
+@dataclass(frozen=True)
+class MobileSecuritySettings:
+    token_secret: str = field(repr=False)
+    environment: str = "development"
+    allow_insecure_http: bool = False
+    trust_proxy: bool = False
+    pairing_ttl_seconds: int = 300
+    access_ttl_seconds: int = 1800
+    refresh_ttl_seconds: int = 30 * 24 * 60 * 60
+    pairing_max_attempts: int = 5
+    rate_window_seconds: int = 300
+    rate_block_seconds: int = 300
+    claim_rate_limit: int = 10
+    refresh_rate_limit: int = 20
+
+    def validate(self) -> "MobileSecuritySettings":
+        if len(self.token_secret) < 32:
+            raise MobileConfigurationError(
+                "IOT_IDS_MOBILE_TOKEN_SECRET must contain at least 32 characters"
+            )
+        if self.environment == "production" and self.allow_insecure_http:
+            raise MobileConfigurationError(
+                "plaintext mobile HTTP cannot be enabled in production"
+            )
+        limits = (
+            ("pairing TTL", self.pairing_ttl_seconds, 60, 900),
+            ("access TTL", self.access_ttl_seconds, 300, 3600),
+            ("refresh TTL", self.refresh_ttl_seconds, 3600, 90 * 24 * 60 * 60),
+            ("pairing attempts", self.pairing_max_attempts, 1, 10),
+            ("rate window", self.rate_window_seconds, 10, 3600),
+            ("rate block", self.rate_block_seconds, 10, 24 * 60 * 60),
+            ("claim rate", self.claim_rate_limit, 1, 100),
+            ("refresh rate", self.refresh_rate_limit, 1, 200),
+        )
+        for label, value, minimum, maximum in limits:
+            if type(value) is not int or not minimum <= value <= maximum:
+                raise MobileConfigurationError(
+                    f"mobile {label} must be between {minimum} and {maximum}"
+                )
+        return self
+
+
+def mobile_security_settings(
+    environment: Mapping[str, str] | None = None,
+    *,
+    fallback_secret: str | bytes | None = None,
+) -> MobileSecuritySettings:
+    """Load mobile security settings without starting services or opening a database."""
+    source = os.environ if environment is None else environment
+    mode = _env_value(source, "IOT_IDS_ENV", "development").lower()
+    configured_secret = source.get("IOT_IDS_MOBILE_TOKEN_SECRET", "").strip()
+    if not configured_secret:
+        if mode == "production":
+            raise MobileConfigurationError(
+                "IOT_IDS_MOBILE_TOKEN_SECRET is required in production"
+            )
+        if fallback_secret is None:
+            configured_secret = secrets.token_hex(32)
+        elif isinstance(fallback_secret, bytes):
+            configured_secret = sha256(
+                b"iot-ids-mobile-token:" + fallback_secret
+            ).hexdigest()
+        else:
+            configured_secret = sha256(
+                ("iot-ids-mobile-token:" + str(fallback_secret)).encode("utf-8")
+            ).hexdigest()
+    try:
+        settings = MobileSecuritySettings(
+            token_secret=configured_secret,
+            environment=mode,
+            allow_insecure_http=_boolean_setting(
+                source, "IOT_IDS_MOBILE_ALLOW_INSECURE_HTTP", False
+            ),
+            trust_proxy=_boolean_setting(
+                source, "IOT_IDS_MOBILE_TRUST_PROXY", False
+            ),
+            pairing_ttl_seconds=_integer_setting(
+                source, "IOT_IDS_MOBILE_PAIRING_TTL_SECONDS", 300
+            ),
+            access_ttl_seconds=_integer_setting(
+                source, "IOT_IDS_MOBILE_ACCESS_TTL_SECONDS", 1800
+            ),
+            refresh_ttl_seconds=_integer_setting(
+                source, "IOT_IDS_MOBILE_REFRESH_TTL_SECONDS", 30 * 24 * 60 * 60
+            ),
+            pairing_max_attempts=_integer_setting(
+                source, "IOT_IDS_MOBILE_PAIRING_MAX_ATTEMPTS", 5
+            ),
+            rate_window_seconds=_integer_setting(
+                source, "IOT_IDS_MOBILE_RATE_WINDOW_SECONDS", 300
+            ),
+            rate_block_seconds=_integer_setting(
+                source, "IOT_IDS_MOBILE_RATE_BLOCK_SECONDS", 300
+            ),
+            claim_rate_limit=_integer_setting(
+                source, "IOT_IDS_MOBILE_CLAIM_RATE_LIMIT", 10
+            ),
+            refresh_rate_limit=_integer_setting(
+                source, "IOT_IDS_MOBILE_REFRESH_RATE_LIMIT", 20
+            ),
+        )
+    except MqttConfigurationError as exc:
+        raise MobileConfigurationError(str(exc)) from exc
+    return settings.validate()
 
 
 def _env_value(environment: Mapping[str, str], name: str, default: str = "") -> str:

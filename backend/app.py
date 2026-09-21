@@ -8,9 +8,11 @@ from datetime import datetime
 import os
 
 from config import (
+    MobileSecuritySettings,
     cors_origins,
     database_path as configured_database_path,
     flask_debug_enabled,
+    mobile_security_settings,
     runtime_environment,
     session_secret,
 )
@@ -30,6 +32,7 @@ from services.auth import (
 # Register probe blueprint
 from api.probe import probe_bp
 from api.v3_devices import create_v3_devices_blueprint
+from api.v3_mobile import create_v3_mobile_blueprint
 from api.v3_realtime import create_v3_realtime_blueprint
 from api.v3_traffic import create_v3_traffic_blueprint
 from runtime_services import (
@@ -1085,6 +1088,7 @@ def create_app(
     mqtt_settings_provider=None,
     mqtt_subscriber_factory=None,
     service_environment=None,
+    mobile_settings: MobileSecuritySettings | None = None,
 ):
     """Create one side-effect-free Flask application instance."""
     overrides = dict(config_overrides or {})
@@ -1104,6 +1108,15 @@ def create_app(
         V3_KEEPALIVE_INTERVAL=15.0,
     )
     application.config.update(overrides)
+    resolved_mobile_settings = (
+        mobile_settings
+        or application.config.get("MOBILE_SECURITY_SETTINGS")
+        or mobile_security_settings(fallback_secret=configured_secret)
+    )
+    if not isinstance(resolved_mobile_settings, MobileSecuritySettings):
+        raise TypeError("MOBILE_SECURITY_SETTINGS must be MobileSecuritySettings")
+    resolved_mobile_settings.validate()
+    application.config["MOBILE_SECURITY_SETTINGS"] = resolved_mobile_settings
 
     configured_path = application.config.get("DATABASE_PATH")
     normalized_path = (
@@ -1157,6 +1170,14 @@ def create_app(
             clock=application.config.get("V3_CLOCK"),
         )
     )
+    mobile_blueprint = create_v3_mobile_blueprint(
+        normalized_path,
+        resolved_mobile_settings,
+        clock=application.config.get("V3_CLOCK"),
+        fault_injector=application.config.get("MOBILE_FAULT_INJECTOR"),
+    )
+    application.extensions["iot_ids_mobile_access"] = mobile_blueprint.mobile_service
+    application.register_blueprint(mobile_blueprint)
 
     @application.errorhandler(DatabaseUnavailableError)
     def database_unavailable(_error):
