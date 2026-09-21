@@ -24,6 +24,9 @@ vi.mock('../../features/devices/useDeviceWorkspace', () => ({
     return state.workspace;
   },
 }));
+vi.mock('../../features/traffic/DeviceTrafficPanel', () => ({
+  default: () => <div>设备流量分析测试面板</div>,
+}));
 
 function workspace(overrides: Record<string, unknown> = {}) {
   return {
@@ -88,6 +91,10 @@ function renderPage(initialEntry = '/devices') {
   );
 }
 
+function openManage() {
+  fireEvent.click(screen.getByRole('tab', { name: '管理' }));
+}
+
 beforeEach(() => {
   state.role = 'admin';
   state.options = null;
@@ -95,8 +102,10 @@ beforeEach(() => {
 });
 
 describe('DevicesPage permissions and server-backed interactions', () => {
-  it('shows write and danger operations to admin, but keeps operator strictly read-only', () => {
+  it('shows write and danger operations to admin, but keeps operator strictly read-only', async () => {
     const rendered = renderPage();
+    await screen.findByText('设备流量分析测试面板');
+    openManage();
     expect(screen.getByRole('button', { name: '新增设备档案' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '编辑档案' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '退役设备' })).toBeInTheDocument();
@@ -105,8 +114,9 @@ describe('DevicesPage permissions and server-backed interactions', () => {
     rendered.unmount();
     state.role = 'operator';
     renderPage();
+    await screen.findByText('设备流量分析测试面板');
     expect(screen.getByText('值守人员 · 只读')).toBeInTheDocument();
-    expect(screen.getByText('值守人员只读')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '管理' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '新增设备档案' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '编辑档案' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /危险操作/ })).not.toBeInTheDocument();
@@ -115,6 +125,7 @@ describe('DevicesPage permissions and server-backed interactions', () => {
   it('passes the query device_id into the workspace for automatic selection', () => {
     renderPage('/devices?device_id=camera-01');
     expect(state.options.initialDeviceId).toBe('camera-01');
+    expect(screen.getByRole('tab', { name: '流量' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('creates without an IP field and reports the real unknown server state', async () => {
@@ -152,6 +163,7 @@ describe('DevicesPage permissions and server-backed interactions', () => {
 
   it('submits the current profile_version when editing', async () => {
     renderPage();
+    openManage();
     fireEvent.click(screen.getByRole('button', { name: '编辑档案' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('显示名称'), { target: { value: '东门主摄像头' } });
@@ -173,6 +185,7 @@ describe('DevicesPage permissions and server-backed interactions', () => {
       { code: 'profile_version_conflict' },
     ));
     renderPage();
+    openManage();
     fireEvent.click(screen.getByRole('button', { name: '编辑档案' }));
     const dialog = await screen.findByRole('dialog');
     const nameInput = within(dialog).getByLabelText('显示名称');
@@ -187,8 +200,10 @@ describe('DevicesPage permissions and server-backed interactions', () => {
 
   it('keeps operation mode separate from connection state and explains the mode effect', async () => {
     renderPage();
+    fireEvent.click(screen.getByRole('tab', { name: '概览' }));
     expect(screen.getByText('连接：在线')).toBeInTheDocument();
     expect(screen.getByText('模式：运行中')).toBeInTheDocument();
+    openManage();
     fireEvent.click(screen.getByRole('button', { name: '修改运行模式' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('运行模式'), { target: { value: 'maintenance' } });
@@ -203,6 +218,7 @@ describe('DevicesPage permissions and server-backed interactions', () => {
 
   it('shows the manual credential warning after retirement', async () => {
     renderPage();
+    openManage();
     fireEvent.click(screen.getByRole('button', { name: '退役设备' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('退役原因'), { target: { value: '设备下线更换' } });
@@ -225,6 +241,7 @@ describe('DevicesPage permissions and server-backed interactions', () => {
       retired_at: '2026-09-20T03:00:00Z',
     };
     renderPage();
+    openManage();
     fireEvent.click(screen.getByRole('button', { name: '恢复设备' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText(/不会把设备自动设置为 online/)).toBeInTheDocument();
@@ -235,6 +252,7 @@ describe('DevicesPage permissions and server-backed interactions', () => {
 
   it('disables deletion when history exists and requires an exact name when it does not', async () => {
     const rendered = renderPage();
+    openManage();
     expect(screen.getByText('状态观测', { selector: 'li' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '不可恢复地删除设备' })).toBeDisabled();
 
@@ -249,6 +267,7 @@ describe('DevicesPage permissions and server-backed interactions', () => {
       } },
     });
     renderPage();
+    openManage();
     const confirmation = screen.getByLabelText(/手工输入完整设备名称/);
     fireEvent.change(confirmation, { target: { value: '东门摄像' } });
     expect(screen.getByRole('button', { name: '不可恢复地删除设备' })).toBeDisabled();

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { DeviceApiError, type DeviceDetail } from '../../api/v3Devices';
 import {
   CONNECTION_LABELS,
@@ -38,6 +38,9 @@ interface Props {
   onRestore: () => void;
   onDelete: (confirmation: string) => Promise<void>;
   onHistoryConflict: () => void;
+  activeTab: 'overview' | 'traffic' | 'manage';
+  onTabChange: (tab: 'overview' | 'traffic' | 'manage') => void;
+  trafficContent: ReactNode;
 }
 
 export default function DeviceDetailPanel({
@@ -52,6 +55,9 @@ export default function DeviceDetailPanel({
   onRestore,
   onDelete,
   onHistoryConflict,
+  activeTab,
+  onTabChange,
+  trafficContent,
 }: Props) {
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -127,11 +133,22 @@ export default function DeviceDetailPanel({
         </div>
       )}
 
-      <div className="device-detail-scroll">
+      <div className="device-detail-tabs" role="tablist" aria-label="设备详情视图">
+        <button type="button" role="tab" aria-selected={activeTab === 'overview'} onClick={() => onTabChange('overview')}>概览</button>
+        <button type="button" role="tab" aria-selected={activeTab === 'traffic'} onClick={() => onTabChange('traffic')}>流量</button>
+        {isAdmin && (
+          <button type="button" role="tab" aria-selected={activeTab === 'manage'} onClick={() => onTabChange('manage')}>管理</button>
+        )}
+      </div>
+
+      {activeTab === 'traffic' ? (
+        <div className="device-detail-scroll" role="tabpanel" aria-label="设备流量">{trafficContent}</div>
+      ) : (
+      <div className="device-detail-scroll" role="tabpanel" aria-label={activeTab === 'manage' ? '设备管理' : '设备概览'}>
         <div className="detail-section">
           <div className="detail-section-title">
             <h3>档案与身份</h3>
-            {isAdmin ? (
+            {isAdmin && activeTab === 'manage' ? (
               <div className="detail-actions" aria-label="管理员设备操作">
                 <button type="button" className="devices-button" onClick={onEdit} disabled={mutationPending}>编辑档案</button>
                 <button type="button" className="devices-button" onClick={onMode} disabled={mutationPending || device.lifecycle_status === 'retired'}>修改运行模式</button>
@@ -141,9 +158,9 @@ export default function DeviceDetailPanel({
                   <button type="button" className="devices-button warning" onClick={onRetire} disabled={mutationPending}>退役设备</button>
                 )}
               </div>
-            ) : (
+            ) : !isAdmin ? (
               <span className="read-only-badge">值守人员只读</span>
-            )}
+            ) : null}
           </div>
           <dl className="device-detail-grid">
             <div><dt>显示名称</dt><dd>{device.display_name}</dd></div>
@@ -192,7 +209,7 @@ export default function DeviceDetailPanel({
           </div>
         </div>
 
-        {isAdmin && (
+        {isAdmin && activeTab === 'manage' && (
           <div className="danger-zone" aria-labelledby="danger-zone-title">
             <h3 id="danger-zone-title">危险操作：彻底删除误添加设备</h3>
             <p>该操作不可恢复。只有没有历史证据的误添加设备才能删除，管理审计会继续保留。</p>
@@ -225,6 +242,7 @@ export default function DeviceDetailPanel({
           </div>
         )}
       </div>
+      )}
     </section>
   );
 }

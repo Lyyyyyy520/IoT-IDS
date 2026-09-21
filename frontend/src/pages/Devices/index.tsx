@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import DeviceDetailPanel from '../../features/devices/DeviceDetailPanel';
@@ -13,11 +13,15 @@ import type {
 } from '../../api/v3Devices';
 import './devices.css';
 
+const DeviceTrafficPanel = lazy(() => import('../../features/traffic/DeviceTrafficPanel'));
+type DetailTab = 'overview' | 'traffic' | 'manage';
+
 export default function DevicesPage() {
   const { isAdmin, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedDeviceId = searchParams.get('device_id');
   const [dialog, setDialog] = useState<DeviceDialog>(null);
+  const [detailTab, setDetailTab] = useState<DetailTab>('traffic');
   const [notice, setNotice] = useState<{ kind: 'success' | 'warning'; message: string } | null>(null);
 
   const updateQuerySelection = useCallback((deviceId: string | null) => {
@@ -42,6 +46,14 @@ export default function DevicesPage() {
     onSelectionChange: updateQuerySelection,
     onInvalidSelection: clearInvalidSelection,
   });
+
+  useEffect(() => {
+    if (workspace.detail?.device_id) setDetailTab('traffic');
+  }, [workspace.detail?.device_id]);
+
+  useEffect(() => {
+    if (!isAdmin && detailTab === 'manage') setDetailTab('traffic');
+  }, [detailTab, isAdmin]);
 
   const createDevice = async (input: CreateDeviceInput) => {
     workspace.clearFilters();
@@ -130,7 +142,10 @@ export default function DevicesPage() {
           items={workspace.items}
           total={workspace.total}
           selectedId={workspace.selectedId}
-          onSelect={(deviceId) => void workspace.selectDevice(deviceId)}
+          onSelect={(deviceId) => {
+            setDetailTab('traffic');
+            void workspace.selectDevice(deviceId);
+          }}
           loading={workspace.listLoading}
           loadingMore={workspace.loadingMore}
           hasMore={workspace.hasMore}
@@ -151,6 +166,21 @@ export default function DevicesPage() {
           onRestore={() => setDialog('restore')}
           onDelete={deleteDevice}
           onHistoryConflict={() => void workspace.refreshDetail()}
+          activeTab={detailTab}
+          onTabChange={setDetailTab}
+          trafficContent={workspace.detail ? (
+            <Suspense fallback={<div className="traffic-loading">正在加载流量分析模块…</div>}>
+              <DeviceTrafficPanel
+                device={workspace.detail}
+                isAdmin={isAdmin}
+                active={detailTab === 'traffic'}
+                onSelectPeer={(deviceId) => {
+                  setDetailTab('traffic');
+                  void workspace.selectDevice(deviceId);
+                }}
+              />
+            </Suspense>
+          ) : null}
         />
       </div>
 
