@@ -193,7 +193,7 @@ def test_apply_creates_verified_pre_migration_backup_and_additive_schema(tmp_pat
     assert result["backup"]["backup_integrity_check"] == ["ok"]
     assert result["pre_integrity_check"] == ["ok"]
     assert result["post_integrity_check"] == ["ok"]
-    assert result["applied_versions"] == [1, 2, 3, 4, 5, 6, 7]
+    assert result["applied_versions"] == [1, 2, 3, 4, 5, 6, 7, 8]
     assert V3_DEVICE_STATE_TABLES <= _table_names(database_path)
     assert MIGRATION_TABLE in _table_names(database_path)
     assert MIGRATION_TABLE not in _table_names(backup_path)
@@ -202,7 +202,7 @@ def test_apply_creates_verified_pre_migration_backup_and_additive_schema(tmp_pat
         assert connection.execute("SELECT COUNT(*) FROM assets").fetchone()[0] == 4
         assert connection.execute("SELECT COUNT(*) FROM legacy_marker").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM v3_device_profiles").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM v3_schema_migrations").fetchone()[0] == 7
+        assert connection.execute("SELECT COUNT(*) FROM v3_schema_migrations").fetchone()[0] == 8
 
 
 def test_repeated_apply_is_idempotent_and_does_not_rerun_recorded_migration(tmp_path):
@@ -227,7 +227,7 @@ def test_repeated_apply_is_idempotent_and_does_not_rerun_recorded_migration(tmp_
     second = apply_upgrade(database_path, backup_directory)
 
     assert second["applied_versions"] == []
-    assert second["skipped_versions"] == [1, 2, 3, 4, 5, 6, 7]
+    assert second["skipped_versions"] == [1, 2, 3, 4, 5, 6, 7, 8]
     with sqlite3.connect(database_path) as connection:
         assert connection.execute(
             "SELECT version, name, checksum, applied_at FROM v3_schema_migrations"
@@ -247,13 +247,15 @@ def test_upgrade_plan_and_apply_add_pending_v3_and_v4_migrations_to_v2(tmp_path)
 
     plan = plan_database(database_path)
     assert plan["current_schema_version"] == 2
-    assert [item["version"] for item in plan["pending_migrations"]] == [3, 4, 5, 6, 7]
+    assert [item["version"] for item in plan["pending_migrations"]] == [
+        3, 4, 5, 6, 7, 8,
+    ]
     assert plan["schema_drift"] == []
 
     result = apply_upgrade(database_path, backup_directory)
-    assert result["applied_versions"] == [3, 4, 5, 6, 7]
+    assert result["applied_versions"] == [3, 4, 5, 6, 7, 8]
     assert result["skipped_versions"] == [1, 2]
-    assert result["current_schema_version"] == 7
+    assert result["current_schema_version"] == 8
     assert "v3_realtime_events" in _table_names(database_path)
     assert "v3_device_management_audit" in _table_names(database_path)
     assert "v3_device_traffic_minutes" in _table_names(database_path)

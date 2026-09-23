@@ -217,9 +217,9 @@ def test_v6_v7_migrations_are_additive_idempotent_and_keep_prior_checksums(tmp_p
         }
     finally:
         connection.close()
-    assert first["applied_versions"] == [6, 7]
+    assert first["applied_versions"] == [6, 7, 8]
     assert second["applied_versions"] == []
-    assert second["skipped_versions"] == [1, 2, 3, 4, 5, 6, 7]
+    assert second["skipped_versions"] == [1, 2, 3, 4, 5, 6, 7, 8]
     assert V3_MOBILE_ACCESS_TABLES <= objects.keys()
     assert V3_MOBILE_ACCESS_INDEXES <= objects.keys()
     assert "access_token" not in session_columns
@@ -517,7 +517,16 @@ def test_overview_uses_current_device_and_area_scopes_without_sensitive_fields(
     assert by_id["sensor-01"]["retired"] is True
     assert by_id["sensor-01"]["availability_status"] == "retired"
     assert body["security_capability"] == {
-        "available": False, "reason": "incident_pipeline_not_ready"
+        "available": True,
+        "reason": "recorded_incident_workflow_available_gnn_unavailable",
+        "gnn": {
+            "available": False,
+            "reason": "gnn_capability_unavailable",
+        },
+        "semantics": "no_recorded_incidents_is_not_a_safety_assurance",
+        "unread_count": 0,
+        "unacknowledged_count": 0,
+        "recent_notices": [],
     }
     forbidden = {
         "mac", "identity_value", "ip_address", "peer_ip", "port",

@@ -568,6 +568,227 @@ V3_MOBILE_USER_ADMIN_MIGRATION = SchemaMigration(
     statements=V3_MOBILE_USER_ADMIN_STATEMENTS,
 )
 
+V3_INCIDENT_WORKFLOW_STATEMENTS = (
+    """
+    CREATE TABLE v3_incidents (
+        incident_id TEXT PRIMARY KEY,
+        incident_type TEXT NOT NULL,
+        severity TEXT NOT NULL
+            CHECK (severity IN ('info', 'low', 'medium', 'high', 'critical')),
+        status TEXT NOT NULL DEFAULT 'open'
+            CHECK (status IN (
+                'open', 'acknowledged', 'recovering', 'resolved', 'false_positive'
+            )),
+        source TEXT NOT NULL CHECK (source IN ('manual', 'rule', 'system')),
+        admin_title TEXT NOT NULL,
+        admin_summary TEXT NOT NULL,
+        user_title TEXT NOT NULL,
+        user_summary TEXT NOT NULL,
+        mobile_published INTEGER NOT NULL DEFAULT 1
+            CHECK (mobile_published IN (0, 1)),
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        resolved_at TEXT,
+        incident_version INTEGER NOT NULL DEFAULT 1
+            CHECK (incident_version > 0),
+        created_by INTEGER NOT NULL,
+        resolution_summary TEXT,
+        false_positive_reason TEXT
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_incidents_status_updated
+        ON v3_incidents(status, updated_at DESC, incident_id)
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_incidents_source_severity
+        ON v3_incidents(source, severity, first_seen_at DESC)
+    """.strip(),
+    """
+    CREATE TABLE v3_incident_devices (
+        incident_id TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        incident_role TEXT NOT NULL
+            CHECK (incident_role IN (
+                'affected', 'suspected_source', 'observer', 'unknown'
+            )),
+        user_visible INTEGER NOT NULL DEFAULT 0
+            CHECK (user_visible IN (0, 1)),
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (incident_id, device_id, incident_role),
+        CHECK (user_visible = 0 OR incident_role = 'affected'),
+        FOREIGN KEY (incident_id) REFERENCES v3_incidents(incident_id),
+        FOREIGN KEY (device_id) REFERENCES v3_device_profiles(device_id)
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_incident_devices_device
+        ON v3_incident_devices(device_id, incident_role, incident_id)
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_incident_devices_mobile
+        ON v3_incident_devices(incident_id, user_visible, incident_role, device_id)
+    """.strip(),
+    """
+    CREATE TABLE v3_incident_timeline (
+        timeline_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        incident_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        actor_user_id INTEGER,
+        actor_username TEXT NOT NULL,
+        actor_role TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        public_progress TEXT,
+        admin_details TEXT,
+        resulting_status TEXT NOT NULL,
+        incident_version INTEGER NOT NULL CHECK (incident_version > 0),
+        FOREIGN KEY (incident_id) REFERENCES v3_incidents(incident_id)
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_incident_timeline_incident
+        ON v3_incident_timeline(incident_id, timeline_id)
+    """.strip(),
+    """
+    CREATE TABLE v3_mobile_notice_acknowledgements (
+        incident_id TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        first_read_at TEXT,
+        acknowledged_at TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (incident_id, user_id),
+        FOREIGN KEY (incident_id) REFERENCES v3_incidents(incident_id)
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_mobile_notice_ack_user
+        ON v3_mobile_notice_acknowledgements(user_id, updated_at, incident_id)
+    """.strip(),
+    """
+    CREATE TABLE v3_mobile_notice_changes (
+        change_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        incident_id TEXT NOT NULL,
+        user_id INTEGER,
+        change_kind TEXT NOT NULL
+            CHECK (change_kind IN (
+                'opened', 'updated', 'recovering', 'resolved',
+                'false_positive', 'read', 'acknowledged'
+            )),
+        incident_version INTEGER NOT NULL CHECK (incident_version > 0),
+        changed_at TEXT NOT NULL,
+        FOREIGN KEY (incident_id) REFERENCES v3_incidents(incident_id)
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_mobile_notice_changes_cursor
+        ON v3_mobile_notice_changes(change_id, incident_id, user_id)
+    """.strip(),
+    """
+    CREATE TABLE v3_help_requests (
+        help_request_id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        mobile_session_id TEXT NOT NULL,
+        incident_id TEXT,
+        device_id TEXT,
+        category TEXT NOT NULL
+            CHECK (category IN (
+                'device_issue', 'security_question', 'service_problem', 'other'
+            )),
+        user_message TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open'
+            CHECK (status IN ('open', 'in_progress', 'waiting_for_user', 'closed')),
+        public_response TEXT,
+        internal_note TEXT,
+        assigned_to INTEGER,
+        idempotency_key TEXT NOT NULL,
+        request_fingerprint TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        closed_at TEXT,
+        request_version INTEGER NOT NULL DEFAULT 1 CHECK (request_version > 0),
+        UNIQUE (user_id, mobile_session_id, idempotency_key),
+        FOREIGN KEY (mobile_session_id) REFERENCES v3_mobile_sessions(session_id),
+        FOREIGN KEY (incident_id) REFERENCES v3_incidents(incident_id),
+        FOREIGN KEY (device_id) REFERENCES v3_device_profiles(device_id)
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_help_requests_user
+        ON v3_help_requests(user_id, updated_at DESC, help_request_id)
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_help_requests_status
+        ON v3_help_requests(status, updated_at DESC, help_request_id)
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_help_requests_incident_device
+        ON v3_help_requests(incident_id, device_id, help_request_id)
+    """.strip(),
+    """
+    CREATE TABLE v3_help_request_timeline (
+        timeline_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        help_request_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        actor_user_id INTEGER,
+        actor_username TEXT NOT NULL,
+        actor_role TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        public_response TEXT,
+        internal_note TEXT,
+        resulting_status TEXT NOT NULL,
+        request_version INTEGER NOT NULL CHECK (request_version > 0),
+        FOREIGN KEY (help_request_id) REFERENCES v3_help_requests(help_request_id)
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_help_request_timeline_request
+        ON v3_help_request_timeline(help_request_id, timeline_id)
+    """.strip(),
+    """
+    CREATE TABLE v3_support_contacts (
+        contact_id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        phone TEXT,
+        email TEXT,
+        working_hours TEXT,
+        public_note TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        config_version INTEGER NOT NULL DEFAULT 1 CHECK (config_version > 0),
+        updated_by INTEGER NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """.strip(),
+    """
+    CREATE TABLE v3_incident_workflow_audit (
+        audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT NOT NULL
+            CHECK (entity_type IN ('incident', 'notice', 'help_request', 'support_contact')),
+        entity_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        actor_user_id INTEGER,
+        actor_username TEXT NOT NULL,
+        actor_role TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        result TEXT NOT NULL CHECK (result IN ('success', 'no_op'))
+    )
+    """.strip(),
+    """
+    CREATE INDEX idx_v3_incident_workflow_audit_entity
+        ON v3_incident_workflow_audit(entity_type, entity_id, audit_id)
+    """.strip(),
+)
+
+V3_INCIDENT_WORKFLOW_MIGRATION = SchemaMigration(
+    version=8,
+    name="incident_and_mobile_notice_workflow",
+    statements=V3_INCIDENT_WORKFLOW_STATEMENTS,
+)
+
 V3_MIGRATIONS = (
     V3_DEVICE_STATE_MIGRATION,
     V3_MQTT_HEARTBEAT_MIGRATION,
@@ -576,6 +797,7 @@ V3_MIGRATIONS = (
     V3_DEVICE_TRAFFIC_MIGRATION,
     V3_MOBILE_ACCESS_MIGRATION,
     V3_MOBILE_USER_ADMIN_MIGRATION,
+    V3_INCIDENT_WORKFLOW_MIGRATION,
 )
 
 V3_DEVICE_STATE_TABLES = frozenset(
@@ -685,6 +907,37 @@ V3_MOBILE_USER_ADMIN_INDEXES = frozenset(
     {"idx_v3_mobile_user_profiles_status"}
 )
 
+V3_INCIDENT_WORKFLOW_TABLES = frozenset(
+    {
+        "v3_incidents",
+        "v3_incident_devices",
+        "v3_incident_timeline",
+        "v3_mobile_notice_acknowledgements",
+        "v3_mobile_notice_changes",
+        "v3_help_requests",
+        "v3_help_request_timeline",
+        "v3_support_contacts",
+        "v3_incident_workflow_audit",
+    }
+)
+
+V3_INCIDENT_WORKFLOW_INDEXES = frozenset(
+    {
+        "idx_v3_incidents_status_updated",
+        "idx_v3_incidents_source_severity",
+        "idx_v3_incident_devices_device",
+        "idx_v3_incident_devices_mobile",
+        "idx_v3_incident_timeline_incident",
+        "idx_v3_mobile_notice_ack_user",
+        "idx_v3_mobile_notice_changes_cursor",
+        "idx_v3_help_requests_user",
+        "idx_v3_help_requests_status",
+        "idx_v3_help_requests_incident_device",
+        "idx_v3_help_request_timeline_request",
+        "idx_v3_incident_workflow_audit_entity",
+    }
+)
+
 V3_EXPECTED_OBJECTS = {
     MIGRATION_TABLE: "table",
     **{name: "table" for name in V3_DEVICE_STATE_TABLES},
@@ -701,6 +954,8 @@ V3_EXPECTED_OBJECTS = {
     **{name: "index" for name in V3_MOBILE_ACCESS_INDEXES},
     **{name: "table" for name in V3_MOBILE_USER_ADMIN_TABLES},
     **{name: "index" for name in V3_MOBILE_USER_ADMIN_INDEXES},
+    **{name: "table" for name in V3_INCIDENT_WORKFLOW_TABLES},
+    **{name: "index" for name in V3_INCIDENT_WORKFLOW_INDEXES},
 }
 
 V3_EXPECTED_OBJECT_VERSIONS = {
@@ -719,6 +974,8 @@ V3_EXPECTED_OBJECT_VERSIONS = {
     **{name: 6 for name in V3_MOBILE_ACCESS_INDEXES},
     **{name: 7 for name in V3_MOBILE_USER_ADMIN_TABLES},
     **{name: 7 for name in V3_MOBILE_USER_ADMIN_INDEXES},
+    **{name: 8 for name in V3_INCIDENT_WORKFLOW_TABLES},
+    **{name: 8 for name in V3_INCIDENT_WORKFLOW_INDEXES},
 }
 
 

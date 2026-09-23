@@ -31,10 +31,10 @@ def test_status_and_role_contracts_are_frozen():
     assert enum_values(OperationMode) == ("active", "maintenance", "disabled")
     assert enum_values(DetectionReadiness) == ("warming_up", "ready", "degraded")
     assert enum_values(IncidentRole) == (
-        "victim", "compromised_source", "external_source", "unknown"
+        "affected", "suspected_source", "observer", "unknown"
     )
     assert enum_values(IncidentStage) == (
-        "open", "active", "recovering", "resolved", "false_positive"
+        "open", "acknowledged", "recovering", "resolved", "false_positive"
     )
 
 

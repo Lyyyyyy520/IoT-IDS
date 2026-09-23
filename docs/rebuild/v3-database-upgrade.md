@@ -100,7 +100,8 @@ python backend/v3_db_upgrade.py apply `
 - `v3_schema_migrations` 有 `device_state_foundation`、`mqtt_heartbeat_sessions`、
   `realtime_event_log`、`device_lifecycle_management`、
   `device_traffic_aggregation`、`mobile_pairing_and_scoped_sessions` 和
-  `mobile_user_administration` 七条记录；
+  `mobile_user_administration` 与
+  `incident_and_mobile_notice_workflow` 共八条记录；
 - 四张设备状态表存在；
 - `v3_mqtt_boot_sessions` 和 `v3_mqtt_device_cursors` 两张 MQTT 会话表存在；
 - `v3_realtime_events` 追加式事件表及两个查询索引存在；

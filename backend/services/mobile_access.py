@@ -1401,16 +1401,36 @@ class MobileAccessService:
                         row["connection_status"], row["operation_mode"], retired
                     ),
                 })
+            try:
+                # Delayed import avoids a module cycle: the incident service
+                # consumes MobilePrincipal while pairing stays independently
+                # importable before migration v8 is installed.
+                from services.incident_workflow import (
+                    IncidentStoreUnavailable,
+                    IncidentWorkflowService,
+                )
+
+                security_capability = IncidentWorkflowService(
+                    self.database_path,
+                    self.settings,
+                    clock=self.clock,
+                ).overview_security(principal)
+            except IncidentStoreUnavailable:
+                security_capability = {
+                    "available": False,
+                    "reason": "incident_pipeline_not_ready",
+                    "gnn": {
+                        "available": False,
+                        "reason": "gnn_capability_unavailable",
+                    },
+                }
             return {
                 "generated_at": _iso(self._now()),
                 "user": {
                     "user_id": principal.user_id, "username": principal.username,
                 },
                 "devices": devices,
-                "security_capability": {
-                    "available": False,
-                    "reason": "incident_pipeline_not_ready",
-                },
+                "security_capability": security_capability,
             }
         finally:
             connection.close()

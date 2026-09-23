@@ -8,7 +8,11 @@ export type RealtimeEventType =
   | 'device.connection_changed'
   | 'device.telemetry_updated'
   | 'device.inventory_changed'
-  | 'system.component_changed';
+  | 'system.component_changed'
+  | 'incident.opened'
+  | 'incident.updated'
+  | 'incident.recovering'
+  | 'incident.resolved';
 
 export interface MonitorDevice {
   device_id: string;
@@ -37,6 +41,33 @@ export interface SystemComponentHealth {
 export interface MonitorCapability {
   available: boolean;
   reason: string | null;
+  semantics?: string;
+}
+
+export type IncidentStatus =
+  | 'open'
+  | 'acknowledged'
+  | 'recovering'
+  | 'resolved'
+  | 'false_positive';
+
+export interface MonitorIncidentSummary {
+  incident_id: string;
+  incident_type: string;
+  severity: 'info' | 'low' | 'medium' | 'high' | 'critical';
+  status: IncidentStatus;
+  source: 'manual' | 'rule' | 'system';
+  admin_title: string;
+  first_seen_at: string;
+  updated_at: string;
+  resolved_at?: string | null;
+  incident_version: number;
+}
+
+export interface MonitorIncidentData {
+  active: MonitorIncidentSummary[];
+  recent: MonitorIncidentSummary[];
+  empty_meaning: 'no_recorded_incidents_not_proven_safe';
 }
 
 export interface MonitorSnapshot {
@@ -50,6 +81,7 @@ export interface MonitorSnapshot {
     graph: MonitorCapability;
     incident: MonitorCapability;
   };
+  incidents?: MonitorIncidentData | null;
 }
 
 export interface ApiErrorEnvelope {
@@ -133,11 +165,43 @@ export interface DeviceInventoryChangedEvent {
   };
 }
 
+export type IncidentEventType =
+  | 'incident.opened'
+  | 'incident.updated'
+  | 'incident.recovering'
+  | 'incident.resolved';
+
+export interface IncidentChangedEvent<
+  T extends IncidentEventType = IncidentEventType,
+> {
+  event_id: number;
+  event_type: T;
+  occurred_at: string;
+  device_id: null;
+  state_version: number;
+  payload: {
+    incident_id: string;
+    status: IncidentStatus;
+    severity: MonitorIncidentSummary['severity'];
+    incident_version: number;
+    source?: 'manual' | 'rule' | 'system';
+    updated_at?: string;
+    affected_device_ids?: string[];
+  };
+}
+
 export type MonitorRealtimeEvent =
   | DeviceConnectionChangedEvent
   | DeviceTelemetryUpdatedEvent
   | DeviceInventoryChangedEvent
   | SystemComponentChangedEvent;
+
+export type MonitorStreamEvent =
+  | MonitorRealtimeEvent
+  | IncidentChangedEvent<'incident.opened'>
+  | IncidentChangedEvent<'incident.updated'>
+  | IncidentChangedEvent<'incident.recovering'>
+  | IncidentChangedEvent<'incident.resolved'>;
 
 export interface SnapshotRequiredEvent {
   event_cursor: number;
@@ -227,6 +291,11 @@ function stringArray(value: unknown, label: string): string[] {
 const CONNECTION_STATUSES = ['unknown', 'online', 'stale', 'offline'] as const;
 const OPERATION_MODES = ['active', 'maintenance', 'disabled'] as const;
 const READINESS_VALUES = ['warming_up', 'ready', 'degraded'] as const;
+const INCIDENT_STATUSES = [
+  'open', 'acknowledged', 'recovering', 'resolved', 'false_positive',
+] as const;
+const INCIDENT_SEVERITIES = ['info', 'low', 'medium', 'high', 'critical'] as const;
+const INCIDENT_SOURCES = ['manual', 'rule', 'system'] as const;
 
 function parseDevice(value: unknown, index: number): MonitorDevice {
   const row = object(value, `devices[${index}]`);
@@ -265,7 +334,70 @@ function parseCapability(value: unknown, label: string): MonitorCapability {
   }
   return {
     available: capability.available,
+    ...(capability.semantics === undefined
+      ? {}
+      : { semantics: text(capability.semantics, label + '.semantics') }),
     reason: nullableText(capability.reason, `${label}.reason`),
+  };
+}
+
+function parseIncidentSummary(
+  value: unknown,
+  label: string,
+): MonitorIncidentSummary {
+  const row = object(value, label);
+  return {
+    incident_id: text(row.incident_id, label + '.incident_id'),
+    incident_type: text(row.incident_type, label + '.incident_type'),
+    severity: oneOf(row.severity, INCIDENT_SEVERITIES, label + '.severity'),
+    status: oneOf(row.status, INCIDENT_STATUSES, label + '.status'),
+    source: oneOf(row.source, INCIDENT_SOURCES, label + '.source'),
+    admin_title: text(row.admin_title, label + '.admin_title'),
+    first_seen_at: timestamp(
+      row.first_seen_at, label + '.first_seen_at',
+    ) as string,
+    updated_at: timestamp(
+      row.updated_at, label + '.updated_at',
+    ) as string,
+    ...(row.resolved_at === undefined
+      ? {}
+      : {
+          resolved_at: timestamp(
+            row.resolved_at, label + '.resolved_at', true,
+          ),
+        }),
+    incident_version: integer(
+      row.incident_version, label + '.incident_version', 1,
+    ),
+  };
+}
+
+function parseIncidentData(value: unknown): MonitorIncidentData | null {
+  if (value === null || value === undefined) return null;
+  const data = object(value, 'incidents');
+  if (!Array.isArray(data.active) || !Array.isArray(data.recent)) {
+    throw new MonitorApiError(
+      'invalid_response', 'incidents 列表字段格式错误',
+    );
+  }
+  if (
+    data.empty_meaning
+    !== 'no_recorded_incidents_not_proven_safe'
+  ) {
+    throw new MonitorApiError(
+      'invalid_response', 'incidents.empty_meaning 不受支持',
+    );
+  }
+  return {
+    active: data.active.map((entry, index) =>
+      parseIncidentSummary(
+        entry, 'incidents.active[' + index + ']',
+      )),
+    recent: data.recent.map((entry, index) =>
+      parseIncidentSummary(
+        entry, 'incidents.recent[' + index + ']',
+      )),
+    empty_meaning: data.empty_meaning,
   };
 }
 
@@ -289,6 +421,9 @@ export function parseMonitorSnapshot(value: unknown): MonitorSnapshot {
       graph: parseCapability(capabilities.graph, 'capabilities.graph'),
       incident: parseCapability(capabilities.incident, 'capabilities.incident'),
     },
+    ...(snapshot.incidents === undefined
+      ? {}
+      : { incidents: parseIncidentData(snapshot.incidents) }),
   };
 }
 
@@ -364,7 +499,7 @@ function parseProjection(payload: JsonObject): DeviceStateProjection {
   };
 }
 
-export function parseMonitorEvent(eventType: RealtimeEventType, data: string): MonitorRealtimeEvent {
+export function parseMonitorEvent(eventType: RealtimeEventType, data: string): MonitorStreamEvent {
   let raw: unknown;
   try {
     raw = JSON.parse(data);
@@ -381,6 +516,54 @@ export function parseMonitorEvent(eventType: RealtimeEventType, data: string): M
     state_version: integer(envelope.state_version, 'event.state_version', 1),
   };
   const payload = object(envelope.payload, 'event.payload');
+
+  if (
+    eventType === 'incident.opened'
+    || eventType === 'incident.updated'
+    || eventType === 'incident.recovering'
+    || eventType === 'incident.resolved'
+  ) {
+    if (envelope.device_id !== null) {
+      throw new MonitorApiError(
+        'invalid_response', '事件工作流 SSE 不得携带 device_id',
+      );
+    }
+    return {
+      ...common,
+      event_type: eventType,
+      device_id: null,
+      payload: {
+        incident_id: text(payload.incident_id, 'payload.incident_id'),
+        status: oneOf(payload.status, INCIDENT_STATUSES, 'payload.status'),
+        severity: oneOf(payload.severity, INCIDENT_SEVERITIES, 'payload.severity'),
+        incident_version: integer(
+          payload.incident_version, 'payload.incident_version', 1,
+        ),
+        ...(payload.source === undefined
+          ? {}
+          : {
+              source: oneOf(
+                payload.source, INCIDENT_SOURCES, 'payload.source',
+              ),
+            }),
+        ...(payload.updated_at === undefined
+          ? {}
+          : {
+              updated_at: timestamp(
+                payload.updated_at, 'payload.updated_at',
+              ) as string,
+            }),
+        ...(payload.affected_device_ids === undefined
+          ? {}
+          : {
+              affected_device_ids: stringArray(
+                payload.affected_device_ids,
+                'payload.affected_device_ids',
+              ),
+            }),
+      },
+    };
+  }
 
   if (eventType === 'device.inventory_changed') {
     if (envelope.device_id !== null) {

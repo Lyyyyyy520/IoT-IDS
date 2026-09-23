@@ -25,6 +25,7 @@ V4_CHECKSUM = "685caf41c5d21471c14ef7b6608cce6d43a4cd69fff3961c1888c3166a4bebcd"
 V5_CHECKSUM = "77e7011d94ef2b3a7022013fbef0c2e68f70f1ca9ead58446dd3d4bde78c74c6"
 V6_CHECKSUM = "f1ce25c5393381750c7582eb7dc783c7625db80a0dad483c1e46cf1b7521b61d"
 V7_CHECKSUM = "5e8e572496607b58d0ccf93be0bcd1deaaa7d3935f93cef54cccd35e905b3623"
+V8_CHECKSUM = "b87d02359023eafef439bbf04ce0f9c4929e73bd03a08f3dff955c7f1306d3ac"
 
 
 def _settings(enabled=True):
@@ -144,6 +145,7 @@ def test_multiple_apps_have_independent_services_and_identical_routes(tmp_path):
             "v3_realtime",
             "v3_traffic",
             "v3_mobile",
+            "v3_incidents",
         }
 
 
@@ -384,4 +386,5 @@ def test_migration_checksums_are_unchanged():
         V5_CHECKSUM,
         V6_CHECKSUM,
         V7_CHECKSUM,
+        V8_CHECKSUM,
     ]

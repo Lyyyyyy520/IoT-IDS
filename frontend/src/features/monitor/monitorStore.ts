@@ -8,6 +8,7 @@ import {
   type MonitorApiErrorKind,
   type MonitorRealtimeEvent,
   type MonitorSnapshot,
+  type MonitorStreamEvent,
   type RealtimeEventType,
 } from '../../api/v3Monitor';
 
@@ -72,6 +73,10 @@ const EVENT_NAMES: RealtimeEventType[] = [
   'device.telemetry_updated',
   'device.inventory_changed',
   'system.component_changed',
+  'incident.opened',
+  'incident.updated',
+  'incident.recovering',
+  'incident.resolved',
 ];
 
 function defaultEventSource(url: string): EventSourceLike {
@@ -241,7 +246,7 @@ export class MonitorStore {
 
   private handleEvent(eventType: RealtimeEventType, message: MessageEvent<string>): void {
     if (!this.started) return;
-    let event: MonitorRealtimeEvent;
+    let event: MonitorStreamEvent;
     try {
       event = parseMonitorEvent(eventType, message.data);
       if (message.lastEventId && Number(message.lastEventId) !== event.event_id) {
@@ -265,6 +270,16 @@ export class MonitorStore {
 
     if (event.event_type === 'device.inventory_changed') {
       this.scheduleInventoryResync(event);
+      return;
+    }
+
+    if (
+      event.event_type === 'incident.opened'
+      || event.event_type === 'incident.updated'
+      || event.event_type === 'incident.recovering'
+      || event.event_type === 'incident.resolved'
+    ) {
+      this.scheduleIncidentResync(event);
       return;
     }
 
@@ -327,7 +342,7 @@ export class MonitorStore {
     });
   }
 
-  private scheduleInventoryResync(event: MonitorRealtimeEvent): void {
+  private scheduleInventoryResync(event: MonitorStreamEvent): void {
     const snapshot = this.state.snapshot;
     if (!snapshot || event.event_type !== 'device.inventory_changed') return;
     this.closeSource();
@@ -348,6 +363,42 @@ export class MonitorStore {
       this.inventoryTimer = null;
       this.lastInventoryResyncAt = this.now().getTime();
       if (this.started) void this.synchronize('inventory_changed');
+    }, delay);
+  }
+
+  private scheduleIncidentResync(event: MonitorStreamEvent): void {
+    const snapshot = this.state.snapshot;
+    if (
+      !snapshot
+      || !(
+        event.event_type === 'incident.opened'
+        || event.event_type === 'incident.updated'
+        || event.event_type === 'incident.recovering'
+        || event.event_type === 'incident.resolved'
+      )
+    ) return;
+    this.closeSource();
+    this.cancelRetry();
+    this.patch({
+      snapshot: { ...snapshot, event_cursor: event.event_id },
+      lastEventId: event.event_id,
+      realtime: 'idle',
+      stale: true,
+      phase: 'resyncing',
+      resyncReason: 'incident_changed:' + event.event_type,
+    });
+    if (this.inventoryTimer !== null) return;
+    const elapsed = this.now().getTime() - this.lastInventoryResyncAt;
+    const rateLimitDelay = Math.max(
+      0, this.inventoryResyncMinimumIntervalMs - elapsed,
+    );
+    const delay = Math.max(
+      this.inventoryResyncDelayMs, rateLimitDelay,
+    );
+    this.inventoryTimer = this.setTimer(() => {
+      this.inventoryTimer = null;
+      this.lastInventoryResyncAt = this.now().getTime();
+      if (this.started) void this.synchronize('incident_changed');
     }, delay);
   }
 

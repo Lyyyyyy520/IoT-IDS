@@ -72,6 +72,55 @@ describe('v3 monitor runtime contracts', () => {
     });
   });
 
+  it('parses incident capability data and a redacted incident SSE summary', () => {
+    const snapshot = parseMonitorSnapshot({
+      ...validSnapshot,
+      capabilities: {
+        ...validSnapshot.capabilities,
+        incident: {
+          available: true,
+          reason: 'recorded_incident_workflow_available',
+          semantics: 'no_recorded_incidents_is_not_a_safety_assurance',
+        },
+      },
+      incidents: {
+        active: [{
+          incident_id: 'inc_0123456789abcdef0123456789abcdef',
+          incident_type: 'device_anomaly',
+          severity: 'high',
+          status: 'open',
+          source: 'manual',
+          admin_title: '设备通信异常',
+          first_seen_at: '2026-09-20T02:00:00Z',
+          updated_at: '2026-09-20T02:00:00Z',
+          incident_version: 1,
+        }],
+        recent: [],
+        empty_meaning: 'no_recorded_incidents_not_proven_safe',
+      },
+    });
+    expect(snapshot.incidents?.active[0].status).toBe('open');
+    expect(snapshot.capabilities.graph.available).toBe(false);
+
+    const event = parseMonitorEvent('incident.opened', JSON.stringify({
+      event_id: 8,
+      event_type: 'incident.opened',
+      occurred_at: '2026-09-20T02:00:01Z',
+      device_id: null,
+      state_version: 1,
+      payload: {
+        incident_id: 'inc_0123456789abcdef0123456789abcdef',
+        status: 'open',
+        severity: 'high',
+        source: 'manual',
+        incident_version: 1,
+        affected_device_ids: ['camera-01'],
+      },
+    }));
+    expect(event.event_type).toBe('incident.opened');
+    expect(JSON.stringify(event)).not.toContain('admin_details');
+  });
+
   it.each([
     [401, 'unauthorized'],
     [403, 'forbidden'],

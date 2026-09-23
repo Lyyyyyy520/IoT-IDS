@@ -86,8 +86,14 @@ def test_empty_monitor_is_real_no_store_snapshot(tmp_path, role):
         "reason": "graph_snapshots_not_implemented",
     }
     assert payload["capabilities"]["incident"] == {
-        "available": False,
-        "reason": "incident_store_not_implemented",
+        "available": True,
+        "reason": "recorded_incident_workflow_available",
+        "semantics": "no_recorded_incidents_is_not_a_safety_assurance",
+    }
+    assert payload["incidents"] == {
+        "active": [],
+        "recent": [],
+        "empty_meaning": "no_recorded_incidents_not_proven_safe",
     }
 
 

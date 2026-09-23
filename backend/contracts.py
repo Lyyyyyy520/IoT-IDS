@@ -99,15 +99,15 @@ class DetectionReadiness(StringEnum):
 
 
 class IncidentRole(StringEnum):
-    VICTIM = "victim"
-    COMPROMISED_SOURCE = "compromised_source"
-    EXTERNAL_SOURCE = "external_source"
+    AFFECTED = "affected"
+    SUSPECTED_SOURCE = "suspected_source"
+    OBSERVER = "observer"
     UNKNOWN = "unknown"
 
 
 class IncidentStage(StringEnum):
     OPEN = "open"
-    ACTIVE = "active"
+    ACKNOWLEDGED = "acknowledged"
     RECOVERING = "recovering"
     RESOLVED = "resolved"
     FALSE_POSITIVE = "false_positive"

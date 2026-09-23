@@ -45,6 +45,8 @@ _EXPLICIT_REFERENCE_TABLES = {
     "v3_device_traffic_minutes",
     "v3_device_traffic_protocol_minutes",
     "v3_device_traffic_peer_minutes",
+    "v3_incident_devices",
+    "v3_help_requests",
 }
 _REFERENCE_SCAN_EXCLUSIONS = {
     "v3_device_profiles",
@@ -635,6 +637,12 @@ class DeviceManagementService:
         def count(query: str, parameters=()) -> int:
             return int(connection.execute(query, parameters).fetchone()[0])
 
+        def table_exists(name: str) -> bool:
+            return connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (name,),
+            ).fetchone() is not None
+
         references = {
             "state_observations": count(
                 "SELECT COUNT(*) FROM v3_device_state_observations WHERE device_id = ?",
@@ -678,6 +686,16 @@ class DeviceManagementService:
                 "WHERE device_id = ? OR peer_device_id = ?",
                 (device_id, device_id),
             ),
+            "incident_devices": count(
+                "SELECT COUNT(*) FROM v3_incident_devices "
+                "WHERE device_id = ?",
+                (device_id,),
+            ) if table_exists("v3_incident_devices") else 0,
+            "help_requests": count(
+                "SELECT COUNT(*) FROM v3_help_requests "
+                "WHERE device_id = ?",
+                (device_id,),
+            ) if table_exists("v3_help_requests") else 0,
             "future_references": {},
         }
         tables = [
@@ -714,6 +732,8 @@ class DeviceManagementService:
                 "traffic_minutes",
                 "traffic_protocol_minutes",
                 "traffic_peer_minutes",
+                "incident_devices",
+                "help_requests",
             )
             if references[key] > 0
         ]

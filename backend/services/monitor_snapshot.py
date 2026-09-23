@@ -6,6 +6,7 @@ from typing import Callable
 
 from contracts import API_VERSION, SCHEMA_VERSION
 from services.device_state import DeviceStateService
+from services.incident_workflow import monitor_incident_snapshot
 from services.realtime_events import (
     RealtimeEventStore,
     V3DatabaseUnavailable,
@@ -77,6 +78,9 @@ class MonitorSnapshotService:
                     "ORDER BY component_id"
                 ).fetchall()
                 event_cursor = current_event_cursor(connection)
+                incident_snapshot = monitor_incident_snapshot(
+                    connection
+                )
                 connection.commit()
         except V3DatabaseUnavailable:
             raise
@@ -116,10 +120,10 @@ class MonitorSnapshotService:
                     "reason": "graph_snapshots_not_implemented",
                 },
                 "incident": {
-                    "available": False,
-                    "reason": "incident_store_not_implemented",
+                    **incident_snapshot["capability"],
                 },
             },
+            "incidents": incident_snapshot["data"],
         }
 
 
