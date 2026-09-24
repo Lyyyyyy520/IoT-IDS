@@ -2,6 +2,7 @@ import type {
   ConnectionStatus,
   MonitorCapability,
   MonitorDevice,
+  MonitorIncidentData,
   MonitorRealtimeEvent,
   SystemComponentHealth,
 } from '../../api/v3Monitor';
@@ -191,10 +192,17 @@ function eventTitle(event: MonitorRealtimeEvent): string {
 export function RecentEventsPanel({
   events,
   incident,
+  incidents,
+  onViewIncident,
 }: {
   events: MonitorRealtimeEvent[];
   incident: MonitorCapability;
+  incidents?: MonitorIncidentData | null;
+  onViewIncident: (incidentId: string) => void;
 }) {
+  const summaries = [...(incidents?.active ?? []), ...(incidents?.recent ?? [])]
+    .filter((item, index, all) => all.findIndex((candidate) => candidate.incident_id === item.incident_id) === index)
+    .slice(0, 5);
   return (
     <section className="monitor-panel recent-panel" aria-labelledby="recent-title">
       <div className="panel-heading recent-heading">
@@ -212,6 +220,23 @@ export function RecentEventsPanel({
           不能代表“没有攻击”。
         </div>
       )}
+      {incident.available && (
+        <div className="monitor-incident-summary" data-testid="monitor-incident-summary">
+          {summaries.length === 0 ? (
+            <div className="panel-empty compact">
+              <strong>当前没有已记录事件</strong>
+              <span>这不是“系统安全”或“无攻击”的检测结论。</span>
+            </div>
+          ) : summaries.map((item) => (
+            <button type="button" key={item.incident_id} onClick={() => onViewIncident(item.incident_id)}>
+              <span className={`monitor-incident-severity severity-${item.severity}`}>{item.severity}</span>
+              <span><strong>{item.admin_title}</strong><small>{item.status} · {formatTime(item.updated_at)}</small></span>
+              <span aria-hidden="true">→</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <h3 className="incremental-heading">本次连接的状态增量</h3>
       <div className="recent-event-list">
         {events.length === 0 ? (
           <div className="panel-empty compact">

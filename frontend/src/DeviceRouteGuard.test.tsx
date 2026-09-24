@@ -1,12 +1,15 @@
+import { useEffect } from 'react';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { RequireDeviceRole } from './App';
+import { RequireDeviceRole, RequireIncidentRole } from './App';
 
 const auth = vi.hoisted(() => ({
   authenticated: true,
   loading: false,
   role: 'admin',
+  userId: 7,
+  incidentWorkspaceCleanup: vi.fn(),
 }));
 
 vi.mock('./contexts/AuthContext', () => ({
@@ -15,14 +18,20 @@ vi.mock('./contexts/AuthContext', () => ({
     loading: auth.loading,
     isAdmin: auth.role === 'admin',
     canAccessMonitor: auth.role === 'admin' || auth.role === 'operator',
+    user: { id: auth.userId, username: `${auth.role}-test`, role: auth.role },
   }),
   AuthProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-function renderGuard() {
-  return render(
+function IncidentWorkspaceProbe() {
+  useEffect(() => () => auth.incidentWorkspaceCleanup(), []);
+  return <div>事件处置工作区</div>;
+}
+
+function guardTree(path = '/devices') {
+  return (
     <MemoryRouter
-      initialEntries={['/devices']}
+      initialEntries={[path]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <Routes>
@@ -32,18 +41,28 @@ function renderGuard() {
           path="/devices"
           element={<RequireDeviceRole><div>设备管理工作区</div></RequireDeviceRole>}
         />
+        <Route
+          path="/incidents"
+          element={<RequireIncidentRole><IncidentWorkspaceProbe /></RequireIncidentRole>}
+        />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function renderGuard(path = '/devices') {
+  return render(guardTree(path));
 }
 
 beforeEach(() => {
   auth.authenticated = true;
   auth.loading = false;
   auth.role = 'admin';
+  auth.userId = 7;
+  auth.incidentWorkspaceCleanup.mockClear();
 });
 
-describe('RequireDeviceRole', () => {
+describe('v3 management route guards', () => {
   it.each(['admin', 'operator'])('allows the %s role', (role) => {
     auth.role = role;
     renderGuard();
@@ -62,5 +81,26 @@ describe('RequireDeviceRole', () => {
     auth.role = 'user';
     renderGuard();
     expect(screen.getByText('登录页')).toBeInTheDocument();
+  });
+
+  it.each(['admin', 'operator'])('allows %s into the incident workspace', (role) => {
+    auth.role = role;
+    renderGuard('/incidents');
+    expect(screen.getByText('事件处置工作区')).toBeInTheDocument();
+  });
+
+  it('rejects a user at the incident route boundary', () => {
+    auth.role = 'user';
+    renderGuard('/incidents');
+    expect(screen.getByText('普通用户首页')).toBeInTheDocument();
+    expect(screen.queryByText('事件处置工作区')).not.toBeInTheDocument();
+  });
+
+  it('remounts the incident workspace when the authenticated user changes', () => {
+    const view = renderGuard('/incidents');
+    auth.userId = 8;
+    view.rerender(guardTree('/incidents'));
+    expect(auth.incidentWorkspaceCleanup).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('事件处置工作区')).toBeInTheDocument();
   });
 });

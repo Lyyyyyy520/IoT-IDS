@@ -497,7 +497,8 @@ class IncidentWorkflowService:
     def create_incident(
         self, *, incident_type, severity, source, admin_title, admin_summary,
         user_title, user_summary, devices, publish_to_mobile: bool,
-        first_seen_at: datetime | None, actor: IncidentActor, request_id: str,
+        first_seen_at: datetime | None, public_progress=None,
+        actor: IncidentActor, request_id: str,
     ) -> dict:
         actor.validate(allow_system=True)
         request_id = _request_id(request_id)
@@ -520,6 +521,10 @@ class IncidentWorkflowService:
         admin_summary = _text(admin_summary, "admin_summary", maximum=2000)
         user_title = _public_text(user_title, "user_title", maximum=120)
         user_summary = _public_text(user_summary, "user_summary", maximum=500)
+        progress = (
+            _public_text(public_progress, "public_progress", maximum=500)
+            if public_progress is not None else None
+        )
         if type(publish_to_mobile) is not bool:
             raise IncidentWorkflowError("publish_to_mobile must be a boolean")
         if not isinstance(devices, list) or not devices:
@@ -598,7 +603,8 @@ class IncidentWorkflowService:
                 "resulting_status,incident_version) VALUES (?,?,?,?,?,?,?,?,?,?,1)",
                 (
                     incident_id, "opened", actor.user_id, actor.username,
-                    actor.role, now_text, request_id, None, "incident created", "open",
+                    actor.role, now_text, request_id, progress,
+                    "incident created", "open",
                 ),
             )
             self._audit(
@@ -628,6 +634,7 @@ class IncidentWorkflowService:
     def list_incidents(
         self, *, status: str | None = None, severity: str | None = None,
         source: str | None = None, device_id: str | None = None,
+        search: str | None = None,
         from_time: str | None = None, to_time: str | None = None,
         limit: int = 50, offset: int = 0,
     ) -> dict:
@@ -639,6 +646,8 @@ class IncidentWorkflowService:
             raise IncidentWorkflowError("source is invalid")
         if device_id is not None and not is_valid_device_id(device_id):
             raise IncidentWorkflowError("device_id is invalid")
+        if search is not None:
+            search = _text(search.strip(), "search", maximum=160)
         if (
             type(limit) is not int or not 1 <= limit <= 100
             or type(offset) is not int or offset < 0
@@ -657,6 +666,13 @@ class IncidentWorkflowService:
                 "WHERE d.incident_id=i.incident_id AND d.device_id=?)"
             )
             params.append(device_id)
+        if search is not None:
+            conditions.append(
+                "(LOWER(i.incident_id) LIKE ? OR LOWER(i.incident_type) LIKE ? "
+                "OR LOWER(i.admin_title) LIKE ? OR LOWER(i.user_title) LIKE ?)"
+            )
+            needle = f"%{search.lower()}%"
+            params.extend([needle, needle, needle, needle])
         if from_time is not None:
             conditions.append("i.updated_at>=?")
             params.append(from_time)
@@ -672,7 +688,14 @@ class IncidentWorkflowService:
                 "SELECT i.incident_id,i.incident_type,i.severity,i.status,"
                 "i.source,i.admin_title,i.user_title,i.first_seen_at,"
                 "i.last_seen_at,i.updated_at,i.resolved_at,i.incident_version,"
-                "i.mobile_published FROM v3_incidents i" + where
+                "i.mobile_published,"
+                "(SELECT COUNT(*) FROM v3_incident_devices d "
+                "WHERE d.incident_id=i.incident_id AND d.incident_role='affected') "
+                "AS affected_device_count,"
+                "(SELECT t.public_progress FROM v3_incident_timeline t "
+                "WHERE t.incident_id=i.incident_id AND t.public_progress IS NOT NULL "
+                "ORDER BY t.timeline_id DESC LIMIT 1) AS latest_public_progress "
+                "FROM v3_incidents i" + where
                 + " ORDER BY i.updated_at DESC,i.incident_id LIMIT ? OFFSET ?",
                 (*params, limit, offset),
             ).fetchall()
@@ -681,6 +704,9 @@ class IncidentWorkflowService:
                 item["mobile_published"] = bool(item["mobile_published"])
             return {
                 "items": items, "total": total, "limit": limit, "offset": offset,
+                "event_cursor": int(connection.execute(
+                    "SELECT COALESCE(MAX(event_id),0) FROM v3_realtime_events"
+                ).fetchone()[0]),
             }
 
     def get_incident(self, incident_id: str) -> dict:
@@ -1342,7 +1368,14 @@ class IncidentWorkflowService:
     def _help_admin(
         connection: sqlite3.Connection, row: sqlite3.Row
     ) -> dict:
-        result = dict(row)
+        result = {
+            key: row[key] for key in (
+                "help_request_id", "user_id", "incident_id", "device_id",
+                "category", "user_message", "status", "public_response",
+                "internal_note", "assigned_to", "created_at", "updated_at",
+                "closed_at", "request_version",
+            )
+        }
         result["timeline"] = [
             dict(item) for item in connection.execute(
                 "SELECT * FROM v3_help_request_timeline "
@@ -1353,26 +1386,52 @@ class IncidentWorkflowService:
         return result
 
     def list_help_requests(
-        self, *, status: str | None = None,
+        self, *, status: str | None = None, category: str | None = None,
+        user_id: int | None = None, device_id: str | None = None,
+        incident_id: str | None = None, from_time: str | None = None,
+        to_time: str | None = None,
         limit: int = 50, offset: int = 0,
     ) -> dict:
         if status is not None and status not in _HELP_STATUSES:
             raise IncidentWorkflowError("help status is invalid")
+        if category is not None and category not in _HELP_CATEGORIES:
+            raise IncidentWorkflowError("help category is invalid")
+        if user_id is not None and (type(user_id) is not int or user_id <= 0):
+            raise IncidentWorkflowError("help user_id is invalid")
+        if device_id is not None and not is_valid_device_id(device_id):
+            raise IncidentWorkflowError("help device_id is invalid")
+        if incident_id is not None:
+            incident_id = self._validate_incident_id(incident_id)
         if (
             type(limit) is not int or not 1 <= limit <= 100
             or type(offset) is not int or offset < 0
         ):
             raise IncidentWorkflowError("pagination is invalid")
-        where, params = (
-            (" WHERE status=?", [status]) if status else ("", [])
-        )
+        conditions, params = [], []
+        for column, value in (
+            ("status", status), ("category", category), ("user_id", user_id),
+            ("device_id", device_id), ("incident_id", incident_id),
+        ):
+            if value is not None:
+                conditions.append(f"{column}=?")
+                params.append(value)
+        if from_time is not None:
+            conditions.append("updated_at>=?")
+            params.append(from_time)
+        if to_time is not None:
+            conditions.append("updated_at<=?")
+            params.append(to_time)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
         with self._read() as connection:
             total = int(connection.execute(
                 "SELECT COUNT(*) FROM v3_help_requests" + where,
                 params,
             ).fetchone()[0])
             rows = connection.execute(
-                "SELECT * FROM v3_help_requests" + where
+                "SELECT help_request_id,user_id,incident_id,device_id,category,"
+                "user_message,status,public_response,internal_note,assigned_to,"
+                "created_at,updated_at,closed_at,request_version "
+                "FROM v3_help_requests" + where
                 + " ORDER BY updated_at DESC,help_request_id "
                 "LIMIT ? OFFSET ?",
                 (*params, limit, offset),

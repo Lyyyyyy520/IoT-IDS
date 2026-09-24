@@ -31,6 +31,7 @@ function renderPage() {
       <Routes>
         <Route path="/monitor" element={<MonitorPage />} />
         <Route path="/devices" element={<DeviceDestination />} />
+        <Route path="/incidents" element={<DeviceDestination />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -80,6 +81,39 @@ describe('MonitorPage real states', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看或管理 东门摄像头' }));
     expect(screen.getByTestId('device-destination')).toHaveTextContent(
       '/devices?device_id=camera-01',
+    );
+  });
+
+  it('shows real incident summaries and deep-links into incident management', () => {
+    const summary = {
+      incident_id: 'incident-42',
+      incident_type: 'device_anomaly',
+      severity: 'high' as const,
+      status: 'open' as const,
+      source: 'rule' as const,
+      admin_title: '门厅设备需要复核',
+      first_seen_at: '2026-09-20T01:59:00Z',
+      updated_at: '2026-09-20T02:00:00Z',
+      resolved_at: null,
+      incident_version: 1,
+    };
+    monitorState.snapshot = {
+      ...validSnapshot,
+      capabilities: {
+        ...validSnapshot.capabilities,
+        incident: { available: true, reason: null },
+      },
+      incidents: {
+        active: [summary],
+        recent: [],
+        empty_meaning: 'no_recorded_incidents_not_proven_safe',
+      },
+    };
+    renderPage();
+    expect(screen.getByText('门厅设备需要复核')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /门厅设备需要复核/ }));
+    expect(screen.getByTestId('device-destination')).toHaveTextContent(
+      '/incidents?incident_id=incident-42',
     );
   });
 

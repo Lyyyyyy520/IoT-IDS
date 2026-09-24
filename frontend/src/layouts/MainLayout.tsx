@@ -40,6 +40,12 @@ const devicesNavItem: MenuItem = {
   label: '设备管理',
 };
 
+const incidentsNavItem: MenuItem = {
+  key: '/incidents',
+  icon: <AlertOutlined />,
+  label: '事件与处置',
+};
+
 const adminNavItems: MenuItem[] = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '态势大屏' },
   { key: '/alerts', icon: <AlertOutlined />, label: '告警中心' },
@@ -59,7 +65,7 @@ export default function MainLayout() {
   const currentKey = '/' + location.pathname.split('/')[1];
   const baseNavItems = isAdmin ? adminNavItems : userNavItems;
   const navItems = canAccessMonitor
-    ? [monitorNavItem, devicesNavItem, ...baseNavItems]
+    ? [monitorNavItem, devicesNavItem, incidentsNavItem, ...baseNavItems]
     : baseNavItems;
 
   const handleLogout = async () => {

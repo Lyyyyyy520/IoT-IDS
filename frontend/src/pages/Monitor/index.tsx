@@ -154,6 +154,8 @@ export default function MonitorPage() {
             <RecentEventsPanel
               events={monitor.recentEvents}
               incident={monitor.snapshot.capabilities.incident}
+              incidents={monitor.snapshot.incidents}
+              onViewIncident={(incidentId) => navigate(`/incidents?incident_id=${encodeURIComponent(incidentId)}`)}
             />
           </div>
           <div className="monitor-right-column">

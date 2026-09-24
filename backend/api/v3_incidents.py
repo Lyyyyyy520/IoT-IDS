@@ -337,7 +337,7 @@ def create_v3_incidents_blueprint(
         def execute():
             allowed = {
                 "status", "severity", "source", "device_id",
-                "from", "to", "limit", "offset",
+                "search", "from", "to", "limit", "offset",
             }
             if set(request.args) - allowed:
                 raise ApiInputError(
@@ -360,6 +360,7 @@ def create_v3_incidents_blueprint(
             return jsonify(service.list_incidents(
                 status=one("status"), severity=one("severity"),
                 source=one("source"), device_id=one("device_id"),
+                search=one("search"),
                 from_time=from_value, to_time=to_value,
                 limit=integer("limit", 50, positive=True),
                 offset=integer("offset", 0),
@@ -382,7 +383,7 @@ def create_v3_incidents_blueprint(
                     "incident_type", "severity", "source",
                     "admin_title", "admin_summary", "user_title",
                     "user_summary", "devices", "publish_to_mobile",
-                    "first_seen_at",
+                    "first_seen_at", "public_progress",
                 },
                 required={
                     "incident_type", "severity", "source",
@@ -408,6 +409,7 @@ def create_v3_incidents_blueprint(
                     payload.get("first_seen_at"),
                     "first_seen_at",
                 ),
+                public_progress=payload.get("public_progress"),
                 actor=actor(), request_id=g.v3_request_id,
             )), 201
         return handle(execute)
@@ -602,13 +604,41 @@ def create_v3_incidents_blueprint(
     @admin(write=False)
     def help_requests():
         def execute():
-            if set(request.args) - {"status", "limit", "offset"}:
+            allowed = {
+                "status", "category", "user_id", "device_id",
+                "incident_id", "from", "to", "limit", "offset",
+            }
+            if set(request.args) - allowed:
                 raise ApiInputError(
                     "unknown_query_parameters",
                     "存在不支持的查询参数",
                 )
+            from_value, to_value = one("from"), one("to")
+            if from_value is not None:
+                from_value = _timestamp(
+                    from_value, "from"
+                ).astimezone(timezone.utc).isoformat().replace(
+                    "+00:00", "Z"
+                )
+            if to_value is not None:
+                to_value = _timestamp(
+                    to_value, "to"
+                ).astimezone(timezone.utc).isoformat().replace(
+                    "+00:00", "Z"
+                )
+            user_id = one("user_id")
+            if user_id is not None:
+                if not _NON_NEGATIVE_INTEGER.fullmatch(user_id) or int(user_id) == 0:
+                    raise ApiInputError(
+                        "invalid_query", "查询参数 user_id 必须是正整数"
+                    )
+                user_id = int(user_id)
             return jsonify(service.list_help_requests(
                 status=one("status"),
+                category=one("category"), user_id=user_id,
+                device_id=one("device_id"),
+                incident_id=one("incident_id"),
+                from_time=from_value, to_time=to_value,
                 limit=integer("limit", 50, positive=True),
                 offset=integer("offset", 0),
             ))

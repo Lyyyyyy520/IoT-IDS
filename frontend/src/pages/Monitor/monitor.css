@@ -173,6 +173,18 @@
 .gate-code { color: #d09c54; font: 700 28px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .1em; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
+.monitor-incident-summary { display: grid; gap: 7px; margin: 0 10px 12px; }
+.monitor-incident-summary > button { width: 100%; display: grid; grid-template-columns: auto 1fr auto; gap: 9px; align-items: center; border: 1px solid rgba(67,151,179,.28); border-radius: 6px; padding: 8px; background: rgba(8,27,39,.72); color: var(--text-primary); text-align: left; cursor: pointer; }
+.monitor-incident-summary > button:hover,.monitor-incident-summary > button:focus-visible { border-color: var(--accent-cyan); outline: none; }
+.monitor-incident-summary > button span:nth-child(2) { display: flex; flex-direction: column; gap: 3px; }
+.monitor-incident-summary small { color: var(--text-muted); }
+.monitor-incident-severity { border: 1px solid currentColor; border-radius: 4px; padding: 2px 5px; font-size: 10px; text-transform: uppercase; }
+.monitor-incident-severity.severity-info,.monitor-incident-severity.severity-low { color: #75b9d4; }
+.monitor-incident-severity.severity-medium { color: #dfbc58; }
+.monitor-incident-severity.severity-high { color: #ef956d; }
+.monitor-incident-severity.severity-critical { color: #ff716a; }
+.incremental-heading { color: var(--text-secondary); font-size: 11px; margin: 8px 10px; }
+
 .monitor-workspace button:focus-visible, .monitor-workspace input:focus-visible { outline: 2px solid #62d1d7; outline-offset: 2px; }
 @keyframes monitor-spin { to { transform: rotate(360deg); } }
 

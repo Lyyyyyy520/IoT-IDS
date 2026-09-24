@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { Fragment, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Spin } from 'antd';
 import MainLayout from './layouts/MainLayout';
@@ -15,6 +15,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 const DevicesPage = lazy(() => import('./pages/Devices'));
 const MobileAccessPage = lazy(() => import('./pages/MobileAccess'));
+const IncidentsPage = lazy(() => import('./pages/Incidents'));
 
 function LoadingScreen() {
   return (
@@ -69,6 +70,14 @@ export function RequireDeviceRole({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+export function RequireIncidentRole({ children }: { children: React.ReactNode }) {
+  const { authenticated, loading, canAccessMonitor, user } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (!authenticated) return <Navigate to="/login" replace />;
+  if (!canAccessMonitor) return <Navigate to="/dashboard" replace />;
+  return <Fragment key={user?.id ?? 'anonymous'}>{children}</Fragment>;
+}
+
 function AuthenticatedLanding() {
   const { canAccessMonitor } = useAuth();
   return <Navigate to={canAccessMonitor ? '/monitor' : '/dashboard'} replace />;
@@ -112,6 +121,16 @@ export default function App() {
                   <DevicesPage />
                 </Suspense>
               </RequireDeviceRole>
+            }
+          />
+          <Route
+            path="incidents"
+            element={
+              <RequireIncidentRole>
+                <Suspense fallback={<LoadingScreen />}>
+                  <IncidentsPage />
+                </Suspense>
+              </RequireIncidentRole>
             }
           />
 

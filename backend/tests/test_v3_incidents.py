@@ -746,6 +746,7 @@ def test_admin_api_permissions_csrf_and_mobile_auth_boundary(context):
         "admin_summary": "管理员摘要",
         "user_title": "设备提醒",
         "user_summary": "管理员正在核查，请留意后续进度。",
+        "public_progress": "管理员正在开始核查设备服务。",
         "publish_to_mobile": True,
         "devices": [{
             "device_id": "camera-01",
@@ -768,6 +769,9 @@ def test_admin_api_permissions_csrf_and_mobile_auth_boundary(context):
     )
     assert created.status_code == 201
     incident_id = created.get_json()["incident_id"]
+    assert created.get_json()["user_preview"]["public_progress"] == (
+        "管理员正在开始核查设备服务。"
+    )
     assert context.client.post(
         f"/api/v3/incidents/{incident_id}/ack",
         json={"expected_incident_version": 1},
@@ -787,6 +791,69 @@ def test_admin_api_permissions_csrf_and_mobile_auth_boundary(context):
     assert cookie_only.get(
         "/api/v3/mobile/notices"
     ).status_code == 401
+
+
+def test_admin_incident_list_search_progress_counts_and_event_cursor(context):
+    incident = _create(context.incident)
+    context.incident.transition_incident(
+        incident["incident_id"], target_status="acknowledged",
+        expected_incident_version=1,
+        public_progress="管理员已收到提醒并开始核查。",
+        actor=OPERATOR, request_id="list-progress",
+    )
+    _login(context.client)
+    response = context.client.get(
+        "/api/v3/incidents?search=%E9%80%9A%E4%BF%A1&status=acknowledged"
+        "&limit=10&offset=0"
+    )
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["event_cursor"] >= 2
+    assert body["total"] == 1
+    assert body["items"][0]["affected_device_count"] == 1
+    assert body["items"][0]["latest_public_progress"] == (
+        "管理员已收到提醒并开始核查。"
+    )
+    assert body["items"][0]["incident_id"] == incident["incident_id"]
+
+
+def test_help_admin_filters_and_detail_do_not_expose_mobile_session_or_idempotency(context):
+    incident = _create(context.incident)
+    help_item = context.incident.create_help_request(
+        context.principal,
+        incident_id=incident["incident_id"],
+        device_id="camera-01",
+        category="device_issue",
+        user_message="请协助确认设备使用安排。",
+        idempotency_key="filtered-help-key-001",
+        request_id="filtered-help-create",
+    )
+    filtered = context.incident.list_help_requests(
+        status="open", category="device_issue", user_id=3,
+        device_id="camera-01", incident_id=incident["incident_id"],
+        from_time="2026-09-23T01:00:00Z",
+        to_time="2026-09-23T03:00:00Z", limit=10, offset=0,
+    )
+    assert filtered["total"] == 1
+    assert filtered["items"][0]["help_request_id"] == help_item["help_request_id"]
+
+    _login(context.client)
+    response = context.client.get(
+        "/api/v3/help-requests?status=open&category=device_issue&user_id=3"
+        "&device_id=camera-01&incident_id="
+        f"{incident['incident_id']}&from=2026-09-23T01%3A00%3A00Z"
+        "&to=2026-09-23T03%3A00%3A00Z"
+    )
+    assert response.status_code == 200
+    assert response.get_json()["total"] == 1
+    detail = context.client.get(
+        f"/api/v3/help-requests/{help_item['help_request_id']}"
+    )
+    assert detail.status_code == 200
+    serialized = detail.get_data(as_text=True)
+    assert "mobile_session_id" not in serialized
+    assert "idempotency_key" not in serialized
+    assert "request_fingerprint" not in serialized
 
 
 def test_mobile_api_redaction_read_ack_help_and_support(context):
