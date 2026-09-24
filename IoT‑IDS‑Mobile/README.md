@@ -38,3 +38,21 @@ npx expo config --type public --json
 APP 前台每约 30 秒刷新 overview；从后台恢复时重新验证令牌并获取 session 和 overview。离线时可保留进程内最后一次真实数据，但明确标记过期。用户确认注销后立即清理本机凭据；服务端注销请求失败时提示管理员在 Web 端撤销。重置客户端还会清除随机客户端 ID。
 
 真实联调前请确认服务端 HTTPS、v3 migration 已显式完成、管理员已设置授权范围、设备时钟/网络和真机 SecureStore 行为。不要对真实数据库使用测试脚本。本轮未连接真实后端、Broker 或探针。
+
+## Android 直装 APK（无需 Expo Go 或 EAS）
+
+本项目仍使用 Expo SDK/React Native 作为代码框架，但生成的 APK 是独立安装包，手机上不需要 Expo Go，也不需要 EAS 云构建。
+
+Windows 本地构建需要 Android SDK、Android NDK、CMake 和 JDK 21。首次生成或 app.json 原生配置变更后，在本目录执行：
+
+```powershell
+npx expo prebuild --platform android
+cd android
+.\gradlew.bat assembleRelease
+```
+
+APK 输出在 `android/app/build/outputs/apk/release/app-release.apk`。当前生成的 Gradle 工程使用 debug 签名配置，适合私下安装试用；正式商店发布需要设置自己的签名密钥并妥善保管。
+
+iPhone 包后续需在 Mac 上用 Xcode 编译和签名；可通过 TestFlight 或登记设备的 Ad Hoc 方式安装。Windows 不能直接编译 iPhone 原生包。
+
+安装包不会内置后端。正式配对需要可从手机访问的 HTTPS 服务：管理员在 Web 端创建 `user` 账号、授权设备/区域并生成一次性配对码；APP 输入完整 HTTPS 服务器根地址（不要附 `/api`）、配对码和用户确认的客户端名称。仓库的一键演示服务只监听 `127.0.0.1`，且发布版 APP 不允许 HTTP，因此不能直接用它连接手机。

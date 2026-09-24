@@ -46,6 +46,7 @@
 .counter span { color: #8198a5; font-size: 11px; }
 .counter strong { font-size: 20px; font-variant-numeric: tabular-nums; }
 
+.monitor-sync, .monitor-account { align-self: end; }
 .monitor-sync { justify-content: flex-end; gap: 9px; flex-wrap: wrap; }
 .live-state { display: flex; align-items: center; gap: 6px; color: #9bb0bc; font-size: 12px; white-space: nowrap; }
 .live-state > span { width: 7px; height: 7px; border-radius: 50%; background: #63717b; }

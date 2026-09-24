@@ -7,10 +7,12 @@
     "userInterfaceStyle": "light",
     "backgroundColor": "#F7F5F0",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.iotids.mobile"
     },
     "android": {
-      "softwareKeyboardLayoutMode": "pan"
+      "softwareKeyboardLayoutMode": "pan",
+      "package": "com.iotids.mobile"
     },
     "plugins": [
       "expo-secure-store"
