@@ -6,8 +6,10 @@ it('registers only ordinary-user routes and never mounts legacy admin authentica
   const navigation = readFileSync(resolve(root, 'src/navigation/index.tsx'), 'utf8');
   const app = readFileSync(resolve(root, 'App.tsx'), 'utf8');
   expect(navigation).toContain('name="首页"');
+  expect(navigation).toContain('name="安全提醒"');
   expect(navigation).toContain('name="本人设备"');
   expect(navigation).toContain('name="设置"');
+  for (const workflow of ['提醒详情', '提交求助', '我的求助', '求助详情']) expect(navigation).toContain(`name="${workflow}"`);
   for (const legacy of ['LoginScreen', 'MonitorScreen', 'AnalysisScreen', 'AlertDetailScreen',
     'AssetsScreen', 'HistoryScreen', 'DashboardScreen']) {
     expect(navigation).not.toContain(legacy);

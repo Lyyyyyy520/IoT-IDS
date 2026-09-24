@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useMobile } from './MobileContext';
 import type { MobileDevice } from './api';
 import { ui } from './ui';
@@ -8,6 +9,7 @@ const labels = { all: '全部', online: '在线', stale: '延迟', offline: '离
 type Filter = keyof typeof labels;
 export default function DevicesScreen() {
   const auth = useMobile();
+  const navigation = useNavigation<any>();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [selected, setSelected] = useState<MobileDevice | null>(null);
@@ -42,6 +44,10 @@ export default function DevicesScreen() {
           <Text style={ui.body}>连接：{selected && labels[selected.connection_status]}</Text>
           <Text style={ui.body}>运行模式：{selected?.operation_mode}{selected?.retired ? ' · 已退役' : ''}</Text>
           <Text style={ui.muted}>详细信息将在后续版本提供</Text>
+          <TouchableOpacity accessibilityRole="button" style={ui.secondaryButton} onPress={() => {
+            const device = selected; setSelected(null);
+            if (device) navigation.navigate('提交求助', { deviceId: device.device_id });
+          }}><Text style={ui.secondaryText}>就此设备联系管理员</Text></TouchableOpacity>
           <TouchableOpacity accessibilityRole="button" style={ui.secondaryButton} onPress={() => setSelected(null)}>
             <Text style={ui.secondaryText}>关闭</Text>
           </TouchableOpacity>

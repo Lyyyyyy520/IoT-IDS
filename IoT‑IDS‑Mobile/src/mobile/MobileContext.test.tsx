@@ -13,7 +13,7 @@ jest.mock('./storage', () => ({ secureStorage: {
 } }));
 jest.mock('./api', () => {
   const actual = jest.requireActual('./api');
-  return { ...actual, mobileApi: { claim: jest.fn(), refresh: jest.fn(), session: jest.fn(), overview: jest.fn(), logout: jest.fn() } };
+  return { ...actual, mobileApi: { claim: jest.fn(), refresh: jest.fn(), session: jest.fn(), overview: jest.fn(), logout: jest.fn(), notices: jest.fn(), supportContact: jest.fn() } };
 });
 
 const server = { baseUrl: 'https://example.test', insecureLan: false };
@@ -39,8 +39,8 @@ beforeEach(() => {
   (secureStorage.clearRefresh as jest.Mock).mockResolvedValue(undefined);
   (mobileApi.refresh as jest.Mock).mockResolvedValue(rotated);
   (mobileApi.session as jest.Mock).mockResolvedValue(session);
-  (mobileApi.overview as jest.Mock).mockResolvedValue(overview);
-  (mobileApi.logout as jest.Mock).mockResolvedValue({ session_id: 's', revoked: true, already_revoked: false });
+(mobileApi.overview as jest.Mock).mockResolvedValue(overview);
+(mobileApi.logout as jest.Mock).mockResolvedValue({ session_id: 's', revoked: true, already_revoked: false });
 });
 
 describe('startup restoration', () => {
@@ -120,6 +120,10 @@ describe('startup restoration', () => {
       return 1 as unknown as ReturnType<typeof setInterval>;
     }) as typeof setInterval);
     (secureStorage.getRefresh as jest.Mock).mockResolvedValue('stored-secret');
+    (mobileApi.overview as jest.Mock).mockResolvedValue({ ...overview,
+      security_capability: { available: true, reason: 'incident_pipeline_available' } });
+    (mobileApi.notices as jest.Mock).mockResolvedValue({ mode: 'snapshot', notices: [], tombstones: [], next_cursor: '0:0', snapshot_required: false });
+    (mobileApi.supportContact as jest.Mock).mockResolvedValue({ available: false, reason: 'support_contact_not_configured' });
     const view = await render(<MobileProvider><Probe /></MobileProvider>);
     await waitFor(() => expect(screen.getByTestId('phase').props.children).toBe('authenticated'));
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
@@ -128,11 +132,14 @@ describe('startup restoration', () => {
       tick?.();
     });
     expect(mobileApi.overview).toHaveBeenCalledTimes(1);
+    expect(mobileApi.notices).not.toHaveBeenCalled();
     await act(async () => {
       onChange?.('active');
     });
     await waitFor(() => {
       expect(mobileApi.overview).toHaveBeenCalledTimes(2);
+      expect(mobileApi.notices).toHaveBeenCalledTimes(1);
+      expect(mobileApi.supportContact).toHaveBeenCalledTimes(1);
       expect(latest.busy).toBe(false);
     });
     expect(mobileApi.refresh).toHaveBeenCalledTimes(2);
@@ -141,4 +148,5 @@ describe('startup restoration', () => {
     interval.mockRestore();
     subscription.mockRestore();
   });
+
 });

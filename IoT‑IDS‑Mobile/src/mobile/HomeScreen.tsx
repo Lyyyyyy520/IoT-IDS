@@ -1,12 +1,26 @@
-import React from 'react';
-import { RefreshControl, ScrollView, Text, View } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useMobile } from './MobileContext';
+import type { MobileNotice } from './api';
 import { palette, ui } from './ui';
 
 const statusText = { online: '在线', stale: '延迟', offline: '离线', unknown: '未知' };
 export default function HomeScreen() {
   const auth = useMobile();
+  const navigation = useNavigation<any>();
+  const syncRef = useRef(auth.syncNotices);
+  syncRef.current = auth.syncNotices;
+  useEffect(() => {
+    if (auth.overview?.security_capability.available) void syncRef.current(true);
+  }, [auth.overview?.security_capability.available]);
   const devices = auth.overview?.devices ?? [];
+  const recent = (auth.notices ?? auth.overview?.security_capability.recent_notices ?? []).slice(0, 3);
+  const unread = auth.notices ? auth.notices.filter(item => !item.read && item.status !== 'false_positive').length :
+    auth.overview?.security_capability.unread_count;
+  const unacknowledged = auth.notices ? auth.notices.filter(item => !item.acknowledged && item.status !== 'false_positive').length :
+    auth.overview?.security_capability.unacknowledged_count;
+  const openNotice = (notice: MobileNotice) => navigation.navigate('提醒详情', { incidentId: notice.incident_id });
   const counts = {
     online: devices.filter(d => d.connection_status === 'online').length,
     stale: devices.filter(d => d.connection_status === 'stale').length,
@@ -27,7 +41,18 @@ export default function HomeScreen() {
     </View>
     <View style={ui.card}>
       <Text style={ui.cardTitle}>安全提醒</Text>
-      <Text style={ui.muted}>{auth.overview?.security_capability.available === false ? '安全事件功能尚未接入' : '安全提醒功能尚未接入'}</Text>
+      {auth.overview?.security_capability.available === false ? <Text style={ui.muted}>安全事件功能尚未接入</Text> : <>
+        {unread !== undefined && <Text style={ui.body}>未读 {unread} · 未标记已知晓 {unacknowledged ?? '—'}</Text>}
+        {(auth.noticesStale || auth.stale) && <Text accessibilityRole="alert" style={ui.warning}>提醒数据可能已过期</Text>}
+        {auth.notices === null && auth.noticesError && <Text accessibilityRole="alert" style={ui.warning}>{auth.noticesError}</Text>}
+        {unread === 0 && <Text style={ui.muted}>当前没有未读提醒。</Text>}
+        {recent.map(notice => <TouchableOpacity key={notice.incident_id} accessibilityRole="button" style={ui.secondaryButton} onPress={() => openNotice(notice)}>
+          <Text style={ui.secondaryText}>{notice.user_title} · {notice.status === 'resolved' ? '已完成处理' : notice.status === 'false_positive' ? '提醒已结束' : notice.public_progress}</Text>
+        </TouchableOpacity>)}
+        <TouchableOpacity accessibilityRole="button" style={ui.secondaryButton} onPress={() => navigation.navigate('安全提醒')}>
+          <Text style={ui.secondaryText}>查看安全提醒</Text>
+        </TouchableOpacity>
+      </>}
     </View>
     <Text style={ui.cardTitle}>设备简表</Text>
     {!auth.overview ? <Text style={ui.muted}>尚未获取授权设备数据</Text> : devices.length === 0 ?
