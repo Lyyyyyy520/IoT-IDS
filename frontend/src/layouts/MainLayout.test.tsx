@@ -36,6 +36,20 @@ beforeEach(() => {
   auth.role = 'admin';
 });
 
+describe('MainLayout system health navigation', () => {
+  it.each(['admin', 'operator'])('shows health workspace to %s', async (role) => {
+    auth.role = role;
+    await renderLayout();
+    expect(screen.getByText('系统健康')).toBeInTheDocument();
+  });
+
+  it('hides health workspace from regular users', async () => {
+    auth.role = 'user';
+    await renderLayout();
+    expect(screen.queryByText('系统健康')).not.toBeInTheDocument();
+  });
+});
+
 describe('MainLayout mobile access navigation', () => {
   it('shows APP access administration only to administrators', async () => {
     await renderLayout();

@@ -14,6 +14,7 @@ import {
   SwapOutlined,
   MonitorOutlined,
   MobileOutlined,
+  HeartOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -46,6 +47,12 @@ const incidentsNavItem: MenuItem = {
   label: '事件与处置',
 };
 
+const systemHealthNavItem: MenuItem = {
+  key: '/system-health',
+  icon: <HeartOutlined />,
+  label: '系统健康',
+};
+
 const adminNavItems: MenuItem[] = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '态势大屏' },
   { key: '/alerts', icon: <AlertOutlined />, label: '告警中心' },
@@ -65,7 +72,7 @@ export default function MainLayout() {
   const currentKey = '/' + location.pathname.split('/')[1];
   const baseNavItems = isAdmin ? adminNavItems : userNavItems;
   const navItems = canAccessMonitor
-    ? [monitorNavItem, devicesNavItem, incidentsNavItem, ...baseNavItems]
+    ? [monitorNavItem, devicesNavItem, incidentsNavItem, systemHealthNavItem, ...baseNavItems]
     : baseNavItems;
 
   const handleLogout = async () => {

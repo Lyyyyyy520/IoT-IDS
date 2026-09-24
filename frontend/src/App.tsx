@@ -16,6 +16,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 const DevicesPage = lazy(() => import('./pages/Devices'));
 const MobileAccessPage = lazy(() => import('./pages/MobileAccess'));
 const IncidentsPage = lazy(() => import('./pages/Incidents'));
+const SystemHealthPage = lazy(() => import('./pages/SystemHealth'));
 
 function LoadingScreen() {
   return (
@@ -137,6 +138,16 @@ export default function App() {
           {/* Administrator-only pages. */}
           <Route path="policy" element={<RequireAdmin><Policy /></RequireAdmin>} />
           <Route path="logs" element={<RequireAdmin><Logs /></RequireAdmin>} />
+          <Route
+            path="system-health"
+            element={
+              <RequireMonitorRole>
+                <Suspense fallback={<LoadingScreen />}>
+                  <SystemHealthPage />
+                </Suspense>
+              </RequireMonitorRole>
+            }
+          />
           <Route
             path="mobile-access"
             element={

@@ -1,0 +1,31 @@
+.system-health-page{display:flex;flex-direction:column;gap:14px;max-width:1440px;margin:0 auto;padding-bottom:24px;color:var(--text-primary)}
+.system-health-header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px 20px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-elevated)}
+.system-health-header h1{margin:4px 0;font-size:22px}
+.system-health-header p:last-child{color:var(--text-secondary);font-size:12px}
+.system-health-eyebrow{color:var(--accent-cyan);font:700 10px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.12em}
+.health-component-card{min-height:150px;border-color:var(--border-color)!important}
+.health-component-card.status-ready{border-inline-start:3px solid var(--risk-low)!important}
+.health-component-card.status-warming_up{border-inline-start:3px solid var(--risk-medium)!important}
+.health-component-card.status-degraded{border-inline-start:3px solid var(--risk-high)!important}
+.health-component-card.status-unavailable{border-inline-start:3px solid var(--risk-critical)!important}
+.health-card-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.health-card-header h2{margin:0;font-size:14px}
+.health-detail{margin:10px 0 0;color:var(--text-secondary);font-size:12px}
+.health-reason{margin:10px 0;color:var(--text-secondary);font-size:12px;line-height:1.55}
+.health-advice{margin:0 0 8px;color:var(--accent-cyan);font-size:11px;line-height:1.5}
+.health-updated{display:block;margin-top:10px;color:var(--text-muted);font-size:10px}
+.system-health-summary{display:flex;gap:20px;flex-wrap:wrap;padding:8px 2px;color:var(--text-secondary);font-size:12px}
+.health-capacity-card{border-color:var(--border-color)!important}
+.health-capacity-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+.health-capacity-grid div{display:flex;flex-direction:column;gap:5px}
+.health-capacity-grid span{color:var(--text-secondary);font-size:11px}
+.health-capacity-grid strong{font-size:15px}
+.system-health-footnote{color:var(--text-muted);font-size:11px;line-height:1.5}
+.system-health-loading{display:flex;align-items:center;justify-content:center;gap:10px;min-height:260px;color:var(--text-secondary)}
+
+.health-component-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px}
+
+.health-status-tag.status-ready{color:var(--risk-low);border-color:var(--risk-low);background:var(--risk-low-bg)}
+.health-status-tag.status-warming_up{color:var(--risk-medium);border-color:var(--risk-medium);background:var(--risk-medium-bg)}
+.health-status-tag.status-degraded{color:var(--risk-high);border-color:var(--risk-high);background:var(--risk-high-bg)}
+.health-status-tag.status-unavailable{color:var(--text-secondary);border-color:var(--border-color);background:var(--bg-surface)}
