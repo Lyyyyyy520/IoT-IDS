@@ -1,25 +1,27 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import HomeScreen from './HomeScreen';
 import DevicesScreen from './DevicesScreen';
 import NoticeListScreen, { NoticeDetailScreen } from './NoticeScreens';
 import MobileDeviceDetailScreen from './MobileDeviceDetailScreen';
 import { SubmitHelpScreen } from './HelpScreens';
-import { mobileApi, MobileApiError, type MobileNotice } from './api';
+import { mobileApi, MobileApiError, type MobileDeviceDetail, type MobileDeviceTraffic, type MobileNotice } from './api';
 import { useMobile } from './MobileContext';
+import type { AppLifecycleAdapter } from './appLifecycle';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
 const mockNavigation = { navigate: mockNavigate, replace: jest.fn(), goBack: mockGoBack };
+let mockRouteParams: { incidentId: string; deviceId: string } = { incidentId: 'inc-1', deviceId: 'door-1' };
 
 jest.mock('./MobileContext', () => ({ useMobile: jest.fn(), messageFor: (error: { kind?: string }) => error?.kind === 'network' ? '无法连接服务器，请检查网络后重试' : '操作未完成，请重试' }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
   useIsFocused: () => true,
-  useRoute: () => ({ params: { incidentId: 'inc-1', deviceId: 'door-1' } }),
+  useRoute: () => ({ params: mockRouteParams }),
 }));
 const useMobileMock = useMobile as jest.Mock;
-beforeEach(() => { mockNavigate.mockClear(); mockGoBack.mockClear(); });
+beforeEach(() => { mockNavigate.mockClear(); mockGoBack.mockClear(); mockRouteParams = { incidentId: 'inc-1', deviceId: 'door-1' }; });
 const base = {
   phase: 'authenticated', config: { baseUrl: 'https://example.test', insecureLan: false },
   session: null, lastSynced: '2026-09-21T04:00:00Z', stale: false,
@@ -43,6 +45,49 @@ const notice = (patch: Partial<MobileNotice> = {}): MobileNotice => ({
   public_progress: '管理员正在核查。', read: false, first_read_at: null, acknowledged: false,
   acknowledged_at: null, resolved_at: null, ...patch,
 });
+
+function fakeLifecycle(initial: 'active' | 'inactive' | 'background' = 'active') {
+  let state = initial;
+  const listeners = new Set<(next: 'active' | 'inactive' | 'background') => void>();
+  const adapter: AppLifecycleAdapter = {
+    currentState: () => state,
+    subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
+  };
+  return {
+    adapter,
+    emit(next: 'active' | 'inactive' | 'background') { state = next; listeners.forEach(listener => listener(next)); },
+    listenerCount: () => listeners.size,
+  };
+}
+
+const detailFor = (deviceId: string, displayName: string): MobileDeviceDetail => ({
+  device_id: deviceId, display_name: displayName, device_type: 'sensor', area_id: 'home',
+  connection_status: 'unknown', operation_mode: 'active', retired: false, retired_at: null,
+  last_updated_at: '2026-09-24T01:00:00Z', last_seen_at: null, availability_status: 'unknown',
+  status_text: { connection: '尚无可用的连接记录', operation: '正常运行模式' }, availability_text: '尚无可用的连接记录',
+  security_capability: { available: false, reason: 'incident_pipeline_not_ready', active_notice_count: null, recent_notices: [],
+    gnn: { available: false, reason: 'gnn_capability_unavailable' } },
+  traffic_capability: { available: true, reason: null },
+});
+
+const trafficFor = (deviceId: string): MobileDeviceTraffic => ({
+  device_id: deviceId, window: '15m', query_window: { from: '2026-09-24T00:45:00Z', to: '2026-09-24T01:00:00Z' },
+  generated_at: '2026-09-24T01:00:00Z', is_historical: false,
+  availability: { status: 'no_samples', available: false, reason: 'no_samples' },
+  freshness: { status: 'unavailable', latest_sample_at: null },
+  current_rate: { status: 'warming_up', label: '正在积累数据', window_seconds: 120, as_of: '2026-09-24T01:00:00Z',
+    uploaded_bytes_per_second: null, downloaded_bytes_per_second: null, uploaded_packets_per_second: null, downloaded_packets_per_second: null },
+  summary: null, trend_resolution_seconds: 60, trend: [], protocols: [], data_quality: { complete: null, message: '统计可能不完整。' },
+});
+
+function setupDetailRequests() {
+  const detailSpy = jest.spyOn(mobileApi, 'deviceDetail').mockImplementation(async (_server, _token, deviceId) => detailFor(deviceId, `名称 ${deviceId}`));
+  const trafficSpy = jest.spyOn(mobileApi, 'deviceTraffic').mockImplementation(async (_server, _token, deviceId) => trafficFor(deviceId));
+  const requestAuthorized = async (call: (server: { baseUrl: string; insecureLan: boolean }, token: string) => Promise<unknown>) =>
+    call({ baseUrl: 'https://example.test', insecureLan: false }, 'memory-only-token');
+  useMobileMock.mockReturnValue({ ...base, requestAuthorized, sync: jest.fn() });
+  return { detailSpy, trafficSpy };
+}
 
 describe('authorized user screens', () => {
   it('shows only scoped data, unknown and retired, without safety conclusions or secrets', async () => {
@@ -248,5 +293,135 @@ describe('authorized user screens', () => {
     await fireEvent.press(screen.getByText('提交求助'));
     expect(createSpy.mock.calls[2][3]).not.toBe(firstKey);
     createSpy.mockRestore();
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+describe('mobile device detail lifecycle', () => {
+  afterEach(() => { jest.useRealTimers(); });
+
+  it('starts detail and traffic refresh while visible and active', async () => {
+    const lifecycle = fakeLifecycle();
+    const { detailSpy, trafficSpy } = setupDetailRequests();
+    await render(<MobileDeviceDetailScreen lifecycle={lifecycle.adapter} />);
+    await waitFor(() => {
+      expect(detailSpy).toHaveBeenCalledTimes(1);
+      expect(trafficSpy).toHaveBeenCalledTimes(1);
+    });
+    expect(lifecycle.listenerCount()).toBe(1);
+    detailSpy.mockRestore(); trafficSpy.mockRestore();
+  });
+
+  it('pauses timers and aborts outstanding requests in background/inactive states', async () => {
+    jest.useFakeTimers();
+    const lifecycle = fakeLifecycle();
+    const pendingDetail = deferred<MobileDeviceDetail>();
+    const pendingTraffic = deferred<MobileDeviceTraffic>();
+    const detailSpy = jest.spyOn(mobileApi, 'deviceDetail').mockReturnValue(pendingDetail.promise);
+    const trafficSpy = jest.spyOn(mobileApi, 'deviceTraffic').mockReturnValue(pendingTraffic.promise);
+    const requestAuthorized = async (call: (server: { baseUrl: string; insecureLan: boolean }, token: string) => Promise<unknown>) =>
+      call({ baseUrl: 'https://example.test', insecureLan: false }, 'memory-only-token');
+    useMobileMock.mockReturnValue({ ...base, requestAuthorized, sync: jest.fn() });
+    const view = await render(<MobileDeviceDetailScreen lifecycle={lifecycle.adapter} />);
+    const initialDetailCalls = detailSpy.mock.calls.length;
+    const initialTrafficCalls = trafficSpy.mock.calls.length;
+    expect(initialDetailCalls).toBeGreaterThan(0);
+    expect(initialTrafficCalls).toBeGreaterThan(0);
+
+    await act(async () => { lifecycle.emit('inactive'); });
+    expect(detailSpy.mock.calls.every(call => call[3]?.aborted === true)).toBe(true);
+    expect(trafficSpy.mock.calls.every(call => call[4]?.aborted === true)).toBe(true);
+    await act(async () => { jest.advanceTimersByTime(60_000); });
+    expect(detailSpy).toHaveBeenCalledTimes(initialDetailCalls);
+    expect(trafficSpy).toHaveBeenCalledTimes(initialTrafficCalls);
+
+    await act(async () => { lifecycle.emit('background'); });
+    pendingDetail.resolve(detailFor('door-1', '迟到的设备详情'));
+    pendingTraffic.resolve(trafficFor('door-1'));
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { view.unmount(); });
+    jest.clearAllTimers();
+    expect(jest.getTimerCount()).toBe(0);
+    detailSpy.mockRestore(); trafficSpy.mockRestore();
+  });
+
+  it('refreshes immediately on foreground, ignores duplicate active events, and leaves no interval after unmount', async () => {
+    jest.useFakeTimers();
+    const lifecycle = fakeLifecycle();
+    const { detailSpy, trafficSpy } = setupDetailRequests();
+    const view = await render(<MobileDeviceDetailScreen lifecycle={lifecycle.adapter} />);
+    const initialDetailCalls = detailSpy.mock.calls.length;
+    const initialTrafficCalls = trafficSpy.mock.calls.length;
+    expect(initialDetailCalls).toBeGreaterThan(0);
+    expect(initialTrafficCalls).toBeGreaterThan(0);
+
+    await act(async () => { lifecycle.emit('background'); });
+    await act(async () => { jest.advanceTimersByTime(60_000); await Promise.resolve(); });
+    expect(detailSpy).toHaveBeenCalledTimes(initialDetailCalls);
+    expect(trafficSpy).toHaveBeenCalledTimes(initialTrafficCalls);
+
+    await act(async () => { lifecycle.emit('active'); });
+    const activeDetailCalls = detailSpy.mock.calls.length;
+    const activeTrafficCalls = trafficSpy.mock.calls.length;
+    expect(activeDetailCalls).toBeGreaterThan(initialDetailCalls);
+    expect(activeTrafficCalls).toBeGreaterThan(initialTrafficCalls);
+    await act(async () => { lifecycle.emit('active'); });
+    expect(detailSpy).toHaveBeenCalledTimes(activeDetailCalls);
+    expect(trafficSpy).toHaveBeenCalledTimes(activeTrafficCalls);
+
+    await act(async () => { jest.advanceTimersByTime(8_000); await Promise.resolve(); });
+    expect(trafficSpy).toHaveBeenCalledTimes(activeTrafficCalls + 1);
+    expect(detailSpy).toHaveBeenCalledTimes(activeDetailCalls);
+    await act(async () => { view.unmount(); });
+    await act(async () => { jest.advanceTimersByTime(60_000); });
+    expect(detailSpy).toHaveBeenCalledTimes(activeDetailCalls);
+    expect(trafficSpy).toHaveBeenCalledTimes(activeTrafficCalls + 1);
+    jest.clearAllTimers();
+    expect(jest.getTimerCount()).toBe(0);
+    detailSpy.mockRestore(); trafficSpy.mockRestore();
+  });
+
+  it('aborts old-device requests and prevents their late results replacing the new device', async () => {
+    const lifecycle = fakeLifecycle();
+    const oldDetail = deferred<MobileDeviceDetail>();
+    const newDetail = deferred<MobileDeviceDetail>();
+    const oldTraffic = deferred<MobileDeviceTraffic>();
+    const newTraffic = deferred<MobileDeviceTraffic>();
+    const details = new Map([['door-1', oldDetail.promise], ['door-2', newDetail.promise]]);
+    const traffic = new Map([['door-1', oldTraffic.promise], ['door-2', newTraffic.promise]]);
+    const detailSpy = jest.spyOn(mobileApi, 'deviceDetail').mockImplementation((_server, _token, deviceId) => details.get(deviceId)!);
+    const trafficSpy = jest.spyOn(mobileApi, 'deviceTraffic').mockImplementation((_server, _token, deviceId) => traffic.get(deviceId)!);
+    const requestAuthorized = async (call: (server: { baseUrl: string; insecureLan: boolean }, token: string) => Promise<unknown>) =>
+      call({ baseUrl: 'https://example.test', insecureLan: false }, 'memory-only-token');
+    useMobileMock.mockReturnValue({ ...base, requestAuthorized, sync: jest.fn() });
+    const view = await render(<MobileDeviceDetailScreen lifecycle={lifecycle.adapter} />);
+    const oldDetailCalls = detailSpy.mock.calls.length;
+    const oldTrafficCalls = trafficSpy.mock.calls.length;
+
+    mockRouteParams = { ...mockRouteParams, deviceId: 'door-2' };
+    await view.rerender(<MobileDeviceDetailScreen lifecycle={lifecycle.adapter} />);
+    expect(detailSpy.mock.calls.slice(0, oldDetailCalls).every(call => call[3]?.aborted === true)).toBe(true);
+    expect(trafficSpy.mock.calls.slice(0, oldTrafficCalls).every(call => call[4]?.aborted === true)).toBe(true);
+    expect(detailSpy.mock.calls.slice(oldDetailCalls).some(call => call[2] === 'door-2')).toBe(true);
+    expect(trafficSpy.mock.calls.slice(oldTrafficCalls).some(call => call[2] === 'door-2')).toBe(true);
+
+    await act(async () => {
+      oldDetail.resolve(detailFor('door-1', '旧设备迟到响应'));
+      oldTraffic.resolve(trafficFor('door-1'));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      newDetail.resolve(detailFor('door-2', '当前设备'));
+      newTraffic.resolve(trafficFor('door-2'));
+    });
+    expect(await screen.findByText('当前设备')).toBeTruthy();
+    expect(screen.queryByText('旧设备迟到响应')).toBeNull();
+    await act(async () => { view.unmount(); });
+    detailSpy.mockRestore(); trafficSpy.mockRestore();
   });
 });

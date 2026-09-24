@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import { useMobile, messageFor } from './MobileContext';
 import { MobileApiError, mobileApi, type MobileDeviceDetail, type MobileDeviceTraffic, type MobileTrafficWindow } from './api';
+import { nativeAppLifecycle, type AppLifecycleAdapter } from './appLifecycle';
 import { palette, ui } from './ui';
 
 const WINDOWS: { value: MobileTrafficWindow; label: string }[] = [
@@ -18,6 +19,7 @@ const bytes = (value: number): string => {
 };
 const rate = (value: number): string => `${bytes(value)}/秒`;
 const time = (value: string): string => new Date(value).toLocaleString();
+const isForeground = (state: ReturnType<AppLifecycleAdapter['currentState']>): boolean => state !== 'background' && state !== 'inactive';
 
 function Trend({ traffic }: { traffic: MobileDeviceTraffic }) {
   if (traffic.trend.length === 0) return <Text style={ui.muted}>当前范围没有可绘制的趋势点。</Text>;
@@ -52,15 +54,15 @@ function Trend({ traffic }: { traffic: MobileDeviceTraffic }) {
   </View>;
 }
 
-export default function MobileDeviceDetailScreen() {
+export default function MobileDeviceDetailScreen({ lifecycle = nativeAppLifecycle }: { lifecycle?: AppLifecycleAdapter } = {}) {
   const auth = useMobile();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const focused = useIsFocused();
   const deviceId = String(route.params?.deviceId ?? '');
-  const [foreground, setForeground] = useState(
-    AppState.currentState !== 'background' && AppState.currentState !== 'inactive',
-  );
+  // React Native may report null before its first native AppState update; preserve the
+  // foreground default in that initialization window, while explicit inactive/background pause work.
+  const [foreground, setForeground] = useState(isForeground(lifecycle.currentState()));
   const [deviceData, setDevice] = useState<MobileDeviceDetail | null>(null);
   const [trafficData, setTraffic] = useState<MobileDeviceTraffic | null>(null);
   const [window, setWindow] = useState<MobileTrafficWindow>('15m');
@@ -75,9 +77,9 @@ export default function MobileDeviceDetailScreen() {
   const scopeLossHandled = useRef(false);
 
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', state => setForeground(state === 'active'));
-    return () => subscription.remove();
-  }, []);
+    setForeground(isForeground(lifecycle.currentState()));
+    return lifecycle.subscribe(state => setForeground(state === 'active'));
+  }, [lifecycle]);
 
   useEffect(() => {
     setDevice(null); setTraffic(null); setDeviceError(null); setTrafficError(null);
