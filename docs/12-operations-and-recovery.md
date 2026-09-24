@@ -97,3 +97,40 @@ with sqlite3.connect("verified-backup.sqlite") as source:
 发布或维护后由现场责任人检查：健康 API 中数据库/schema/integrity/API 状态与 reason code；`plan --json` 的时间范围和受保护数量；备份恢复演练结果；SSE 断档客户端能否重同步；进程数是否为单 worker；故障注入下 busy/read-only/disk-full/WAL reason 是否稳定。生产磁盘满、异常进程退出和真实文件权限应在受控副本现场演练，本地测试不连接部署数据库或设备。
 
 若 plan 过量、发现活动/引用记录将被清理、备份完整性失败、源库在计划期间变化、SQLite 返回异常或责任人无法确认恢复点，停止 apply。若提交后验收失败，停写、保留故障库及 sidecar，并按双人批准的恢复流程切换到 verified backup；不要现场 VACUUM 或手工改 schema。
+
+## 首个管理员初始化
+
+### 前置条件
+
+- 由数据库负责人明确选定一个已存在、可访问的 SQLite 文件，并确认它属于目标环境。初始化 CLI 不会创建数据库或执行 migration。
+- 数据库必须通过 SQLite `integrity_check`，包含完整的 v1–v9 migration ledger，且每条 migration 的名称与 checksum 均与当前代码一致。
+- `users` 表必须为空。数据库中只要已有任意用户，CLI 就会拒绝；它不会提升、覆盖或重置现有账户。
+- 初始化前停止可能写入该文件的应用和维护进程。数据库存在 WAL、SHM 或 journal sidecar 时，CLI 会拒绝；不要手动删除 sidecar。
+- 操作前由负责人制作并验证一致性备份。此 CLI 不负责备份，也不连接 MQTT、probe 或其他服务。
+
+### 手动执行
+
+在授权的本机终端中显式指定数据库文件和自行选择的用户名：
+
+```powershell
+python backend/v3_admin_bootstrap.py `
+  --database "<已有的 v9 SQLite 文件>" `
+  --username "<自行选择的管理员用户名>"
+```
+
+CLI 会隐藏读取并要求再次确认密码。密码至少 12 个字符，最多 1024 个字符；不要把密码放入命令行参数、环境变量、脚本、工单或日志。工具不设置默认用户名或默认密码。成功时只输出 `first_admin_created` reason code；之后可使用该账户通过现有登录页面登录。
+
+初始化只在显式运行 CLI 时发生，不会由模块导入、`create_app()`、普通服务启动或 GET 请求触发。
+
+### 拒绝与失败处理
+
+CLI 只输出稳定 reason code，不输出数据库路径、密码、哈希或 SQLite 异常正文。常见拒绝码包括：
+
+- `database_file_missing`、`database_not_sqlite`：检查负责人指定的文件；CLI 不会代为创建。
+- `database_sidecar_present`：停止写入者并由负责人确认数据库状态；不要删除或直接复制 sidecar。
+- `schema_not_v9`、`schema_incomplete`、`schema_checksum_mismatch`、`integrity_check_failed`：停止初始化，核对数据库版本并按恢复流程处理。
+- `users_already_exist`：不要尝试覆盖现有用户；使用已有管理员账户管理用户。
+- `password_confirmation_mismatch`、`password_too_short`、`password_too_long`、`interactive_terminal_required`、`password_input_ended`、`bootstrap_operation_failed`：重新检查终端与运行环境；先确认数据库仍未变化，再决定是否重试。
+- `database_busy`、`database_locked`、`database_read_only`、`database_disk_full`、`database_corrupt`：停止重试，先排查写入者、权限、存储和备份状态。
+
+账户插入在 `BEGIN IMMEDIATE` 事务中进行，并在写入前再次校验 schema 与用户数。事务失败会回滚，不留下半成品账户。收到拒绝码后先保留数据库和现有 sidecar，由数据库负责人查明原因；不要直接重跑、删除文件或修改 migration。
