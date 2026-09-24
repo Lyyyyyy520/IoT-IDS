@@ -947,6 +947,13 @@ class IncidentWorkflowService:
                 "SELECT COALESCE(MAX(change_id),0) "
                 "FROM v3_mobile_notice_changes"
             ).fetchone()[0])
+            sequence_row = connection.execute(
+                "SELECT seq FROM sqlite_sequence "
+                "WHERE name='v3_mobile_notice_changes'"
+            ).fetchone()
+            cursor_high_water = max(
+                max_change, int(sequence_row[0]) if sequence_row else 0
+            )
             if after is None:
                 notices = [
                     self._mobile_notice(
@@ -975,12 +982,12 @@ class IncidentWorkflowService:
                     "notices": notices[:limit],
                     "tombstones": [],
                     "next_cursor": self._cursor(
-                        max_change, scope_version
+                        cursor_high_water, scope_version
                     ),
                     "snapshot_required": len(notices) > limit,
                 }
             change_id, cursor_scope = self._parse_cursor(after)
-            if change_id > max_change:
+            if change_id > cursor_high_water:
                 raise NoticeCursorError(
                     "notice cursor is ahead of the server"
                 )
@@ -990,7 +997,37 @@ class IncidentWorkflowService:
                     "notices": [],
                     "tombstones": [],
                     "next_cursor": self._cursor(
-                        max_change, scope_version
+                        cursor_high_water, scope_version
+                    ),
+                    "snapshot_required": True,
+                }
+            bounds = connection.execute(
+                "SELECT MIN(change_id) FROM v3_mobile_notice_changes"
+            ).fetchone()
+            minimum_change = int(bounds[0]) if bounds[0] is not None else None
+            retained_count = int(connection.execute(
+                "SELECT COUNT(*) FROM v3_mobile_notice_changes "
+                "WHERE change_id>? AND change_id<=?",
+                (change_id, cursor_high_water),
+            ).fetchone()[0])
+            cursor_row_exists = True
+            if change_id > 0 and minimum_change is not None and change_id >= minimum_change:
+                cursor_row_exists = connection.execute(
+                    "SELECT 1 FROM v3_mobile_notice_changes WHERE change_id=?",
+                    (change_id,),
+                ).fetchone() is not None
+            if (
+                (minimum_change is not None and change_id < minimum_change - 1)
+                or (minimum_change is None and change_id < cursor_high_water)
+                or not cursor_row_exists
+                or retained_count != cursor_high_water - change_id
+            ):
+                return {
+                    "mode": "delta",
+                    "notices": [],
+                    "tombstones": [],
+                    "next_cursor": self._cursor(
+                        cursor_high_water, scope_version
                     ),
                     "snapshot_required": True,
                 }
@@ -1007,7 +1044,7 @@ class IncidentWorkflowService:
                     "notices": [],
                     "tombstones": [],
                     "next_cursor": self._cursor(
-                        max_change, scope_version
+                        cursor_high_water, scope_version
                     ),
                     "snapshot_required": True,
                 }
@@ -1043,7 +1080,7 @@ class IncidentWorkflowService:
                 "notices": notices,
                 "tombstones": tombstones,
                 "next_cursor": self._cursor(
-                    max_change, scope_version
+                    cursor_high_water, scope_version
                 ),
                 "snapshot_required": False,
             }

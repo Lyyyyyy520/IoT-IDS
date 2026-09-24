@@ -16,6 +16,7 @@ from runtime_services import (
     stop_runtime_services,
 )
 from v3_database import V3_MIGRATIONS, apply_v3_migrations, connect_v3, initialize_v3_database
+from v3_db_maintenance import RetentionConfigurationError
 
 
 V1_CHECKSUM = "3fe72003fd5eb35063bd5aea3f677bc66ef0aaaa36cded58a83f46738bd26952"
@@ -148,6 +149,7 @@ def test_multiple_apps_have_independent_services_and_identical_routes(tmp_path):
         "v3_traffic",
         "v3_mobile",
         "v3_incidents",
+        "v3_system_health",
     }
 
 
@@ -349,6 +351,21 @@ def test_mqtt_does_not_start_without_database_or_complete_v3_schema(
     assert not database_path.exists() if schema_versions is None else database_path.exists()
 
 
+def test_runtime_services_refuse_read_only_database(tmp_path, monkeypatch):
+    database_path = _migrated_database(tmp_path)
+    monkeypatch.setattr("runtime_services.os.access", lambda *_args: False)
+    application = create_app(
+        _config(database_path),
+        mqtt_settings_provider=lambda: _settings(),
+        mqtt_subscriber_factory=lambda *_args: pytest.fail("must not create subscriber"),
+        service_environment={},
+    )
+
+    result = start_runtime_services(application)
+
+    assert result == {"mqtt": "failed", "reason": "database_read_only"}
+
+
 def test_failed_runtime_start_stops_partial_subscriber_thread(tmp_path):
     database_path = _migrated_database(tmp_path)
     stopped = threading.Event()
@@ -397,3 +414,63 @@ def test_migration_checksums_are_unchanged():
         V8_CHECKSUM,
     ]
     assert V3_MIGRATIONS[8].checksum == V9_CHECKSUM
+
+
+def test_multiworker_wsgi_does_not_start_per_process_mqtt_subscriber(tmp_path):
+    factory_calls = []
+    application = create_app(
+        _config(tmp_path / "missing.sqlite"),
+        mqtt_settings_provider=lambda: _settings(),
+        mqtt_subscriber_factory=lambda *_args: factory_calls.append(True),
+        service_environment={"WEB_CONCURRENCY": "4"},
+    )
+
+    result = start_runtime_services(application)
+
+    assert result == {"mqtt": "skipped", "reason": "mqtt_managed_by_single_worker"}
+    assert factory_calls == []
+
+
+def test_runtime_shutdown_waits_for_capture_worker(tmp_path):
+    application = create_app(
+        _config(tmp_path / "missing.sqlite"),
+        mqtt_settings_provider=lambda: _settings(enabled=False),
+        service_environment={},
+    )
+    stopped = threading.Event()
+    done = threading.Event()
+    worker = threading.Thread(
+        target=lambda: (stopped.wait(timeout=2), done.set()),
+        name="capture-shutdown-test-worker",
+        daemon=True,
+    )
+    worker.start()
+
+    class Capture:
+        running = True
+        thread = worker
+
+        @staticmethod
+        def stop():
+            Capture.running = False
+            stopped.set()
+
+    container = get_service_container(application)
+    container.capture_service = Capture()
+
+    stop_runtime_services(application)
+
+    assert done.is_set()
+    assert not worker.is_alive()
+    assert container.capture_service.running is False
+
+
+def test_retention_environment_is_validated_at_application_startup(tmp_path, monkeypatch):
+    database_path = tmp_path / "must-not-be-created.sqlite"
+    monkeypatch.setenv("IOT_IDS_RETENTION_AUDIT_RECORDS_DAYS", "0")
+
+    with pytest.raises(RetentionConfigurationError) as error:
+        create_app(_config(database_path))
+
+    assert error.value.code == "retention_days_out_of_range"
+    assert not database_path.exists()

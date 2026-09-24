@@ -33,6 +33,7 @@ from services.auth import (
 from api.probe import probe_bp
 from api.v3_devices import create_v3_devices_blueprint
 from api.v3_device_discovery import create_v3_device_discovery_blueprint
+from api.v3_system_health import create_v3_system_health_blueprint
 from api.v3_incidents import create_v3_incidents_blueprint
 from api.v3_mobile import create_v3_mobile_blueprint
 from api.v3_realtime import create_v3_realtime_blueprint
@@ -1110,6 +1111,8 @@ def create_app(
         V3_KEEPALIVE_INTERVAL=15.0,
     )
     application.config.update(overrides)
+    from v3_db_maintenance import RetentionSettings
+    RetentionSettings.from_environment()
     resolved_mobile_settings = (
         mobile_settings
         or application.config.get("MOBILE_SECURITY_SETTINGS")
@@ -1201,6 +1204,36 @@ def create_app(
         incident_blueprint.incident_service
     )
     application.register_blueprint(incident_blueprint)
+    application.register_blueprint(
+        create_v3_system_health_blueprint(
+            normalized_path,
+            get_service_container(application),
+            clock=application.config.get("V3_CLOCK"),
+        )
+    )
+
+    @application.after_request
+    def record_runtime_degradation(response):
+        if response.status_code >= 500:
+            path = request.path
+            if path.startswith("/api/v3/events"):
+                component = "event_log"
+            elif path.startswith("/api/v3/traffic"):
+                component = "traffic"
+            elif path.startswith("/api/v3/incidents"):
+                component = "incident"
+            elif path.startswith("/api/v3/mobile"):
+                component = "mobile"
+            elif path.startswith("/api/v3/devices/discovered"):
+                component = "discovery"
+            else:
+                component = "api"
+            container = get_service_container(application)
+            reason = "database_unavailable" if response.status_code == 503 else "request_failed"
+            container.mark_degraded(component, reason)
+            if response.status_code == 503:
+                container.mark_degraded("database", "database_unavailable")
+        return response
 
     @application.errorhandler(DatabaseUnavailableError)
     def database_unavailable(_error):

@@ -25,6 +25,7 @@ from services.incident_workflow import (
     SupportVersionConflict,
 )
 from services.mobile_access import MobileActor
+from v3_db_maintenance import RETENTION_DEFAULTS, RetentionSettings, apply_retention
 from v3_database import (
     V3_INCIDENT_WORKFLOW_INDEXES,
     V3_INCIDENT_WORKFLOW_MIGRATION,
@@ -972,3 +973,45 @@ def test_mobile_notice_writes_use_persistent_rate_limit(context):
             "WHERE action='mobile_notice_write'"
         ).fetchone()
     assert row == (120,)
+
+
+def test_pruned_mobile_notice_cursor_requires_snapshot(context, tmp_path):
+    baseline = context.incident.list_mobile_notices(
+        context.principal, view="all"
+    )
+    incident = _create(context.incident)
+    context.incident.transition_incident(
+        incident["incident_id"], target_status="acknowledged",
+        expected_incident_version=1,
+        public_progress="管理员已收到提醒并开始核查。",
+        actor=OPERATOR, request_id="retention-ack",
+    )
+    context.incident.transition_incident(
+        incident["incident_id"], target_status="false_positive",
+        expected_incident_version=2,
+        public_progress="该提醒已结束，无需进一步操作。",
+        false_positive_reason="复核后无需处置。",
+        actor=OPERATOR, request_id="retention-false-positive",
+    )
+    with sqlite3.connect(context.database_path) as connection:
+        connection.execute(
+            "UPDATE v3_mobile_notice_changes SET changed_at='2018-01-01T00:00:00Z'"
+        )
+    settings = RetentionSettings({
+        **RETENTION_DEFAULTS,
+        "mobile_notice_changes": 1,
+    })
+    backup_directory = tmp_path / "retention-backups"
+    backup_directory.mkdir()
+
+    apply_retention(
+        context.database_path, backup_directory,
+        now=datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc),
+        settings=settings, batch_limit=1,
+    )
+
+    delta = context.incident.list_mobile_notices(
+        context.principal, after=baseline["next_cursor"], view="all"
+    )
+    assert delta["snapshot_required"] is True
+    assert delta["notices"] == []
