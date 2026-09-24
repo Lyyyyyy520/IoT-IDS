@@ -73,6 +73,17 @@ function inventory(eventId: number, action: 'created' | 'updated' = 'updated') {
   };
 }
 
+function discovered(eventId: number) {
+  return {
+    event_id: eventId,
+    event_type: 'device.discovered',
+    occurred_at: '2026-09-20T02:00:01Z',
+    device_id: null,
+    state_version: 1,
+    payload: { candidate_id: 'candidate-01', status: 'pending', candidate_version: 1 },
+  };
+}
+
 function harness(options: {
   snapshots?: MonitorSnapshot[];
   failure?: MonitorApiError;
@@ -188,6 +199,17 @@ describe('MonitorStore', () => {
     await waitFor(() => expect(test.fetchSnapshot).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(test.sources).toHaveLength(2));
     expect(test.sources[1].url).toBe('/api/v3/events?after=7');
+  });
+
+  it('accepts a discovery event cursor without adding an untrusted candidate to trusted devices', async () => {
+    const test = harness();
+    test.store.start();
+    await waitFor(() => expect(test.sources).toHaveLength(1));
+    test.sources[0].source.emit('device.discovered', discovered(6), '6');
+    expect(test.store.getSnapshot().lastEventId).toBe(6);
+    expect(test.store.getSnapshot().recentEvents[0]?.event_type).toBe('device.discovered');
+    expect(test.store.getSnapshot().snapshot?.devices).toEqual(validSnapshot.devices);
+    expect(test.fetchSnapshot).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the last real snapshot stale on disconnect and schedules only one reconnect', async () => {

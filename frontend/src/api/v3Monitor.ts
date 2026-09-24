@@ -8,6 +8,7 @@ export type RealtimeEventType =
   | 'device.connection_changed'
   | 'device.telemetry_updated'
   | 'device.inventory_changed'
+  | 'device.discovered'
   | 'system.component_changed'
   | 'incident.opened'
   | 'incident.updated'
@@ -165,6 +166,19 @@ export interface DeviceInventoryChangedEvent {
   };
 }
 
+export interface DeviceDiscoveredEvent {
+  event_id: number;
+  event_type: 'device.discovered';
+  occurred_at: string;
+  device_id: null;
+  state_version: number;
+  payload: {
+    candidate_id: string;
+    status: 'pending' | 'ignored' | 'claimed' | 'conflict';
+    candidate_version: number;
+  };
+}
+
 export type IncidentEventType =
   | 'incident.opened'
   | 'incident.updated'
@@ -194,6 +208,7 @@ export type MonitorRealtimeEvent =
   | DeviceConnectionChangedEvent
   | DeviceTelemetryUpdatedEvent
   | DeviceInventoryChangedEvent
+  | DeviceDiscoveredEvent
   | SystemComponentChangedEvent;
 
 export type MonitorStreamEvent =
@@ -581,6 +596,22 @@ export function parseMonitorEvent(eventType: RealtimeEventType, data: string): M
         ),
         device_id: text(payload.device_id, 'payload.device_id'),
         profile_version: integer(payload.profile_version, 'payload.profile_version', 1),
+      },
+    };
+  }
+
+  if (eventType === 'device.discovered') {
+    if (envelope.device_id !== null) {
+      throw new MonitorApiError('invalid_response', '设备发现事件不得携带可信 device_id');
+    }
+    return {
+      ...common,
+      event_type: eventType,
+      device_id: null,
+      payload: {
+        candidate_id: text(payload.candidate_id, 'payload.candidate_id'),
+        status: oneOf(payload.status, ['pending', 'ignored', 'claimed', 'conflict'] as const, 'payload.status'),
+        candidate_version: integer(payload.candidate_version, 'payload.candidate_version', 1),
       },
     };
   }

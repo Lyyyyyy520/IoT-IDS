@@ -45,6 +45,7 @@ interface VisibilitySource {
 }
 
 interface MonitorStoreOptions {
+  enabled?: boolean;
   fetchSnapshot?: (signal?: AbortSignal) => Promise<MonitorSnapshot>;
   createEventSource?: (url: string) => EventSourceLike;
   now?: () => Date;
@@ -72,6 +73,7 @@ const EVENT_NAMES: RealtimeEventType[] = [
   'device.connection_changed',
   'device.telemetry_updated',
   'device.inventory_changed',
+  'device.discovered',
   'system.component_changed',
   'incident.opened',
   'incident.updated',
@@ -273,6 +275,11 @@ export class MonitorStore {
       return;
     }
 
+    if (event.event_type === 'device.discovered') {
+      this.acceptEvent(event, snapshot);
+      return;
+    }
+
     if (
       event.event_type === 'incident.opened'
       || event.event_type === 'incident.updated'
@@ -465,11 +472,13 @@ export class MonitorStore {
 
 export function useMonitorStore(options?: MonitorStoreOptions) {
   const store = useMemo(() => new MonitorStore(options), []);
+  const enabled = options?.enabled ?? true;
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   useEffect(() => {
+    if (!enabled) return undefined;
     store.start();
     return store.stop;
-  }, [store]);
+  }, [enabled, store]);
   return {
     ...state,
     resync: store.resync,

@@ -219,9 +219,9 @@ def test_v6_v7_migrations_are_additive_idempotent_and_keep_prior_checksums(tmp_p
         }
     finally:
         connection.close()
-    assert first["applied_versions"] == [6, 7, 8]
+    assert first["applied_versions"] == [6, 7, 8, 9]
     assert second["applied_versions"] == []
-    assert second["skipped_versions"] == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert second["skipped_versions"] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
     assert V3_MOBILE_ACCESS_TABLES <= objects.keys()
     assert V3_MOBILE_ACCESS_INDEXES <= objects.keys()
     assert "access_token" not in session_columns
@@ -1274,4 +1274,4 @@ def test_mobile_device_read_rate_limit_and_missing_database_fail_closed(
         assert response.status_code == 503
         assert response.get_json()["error"]["request_id"]
     assert not missing.exists()
-    assert [item.version for item in V3_MIGRATIONS] == list(range(1, 9))
+    assert [item.version for item in V3_MIGRATIONS] == list(range(1, 10))

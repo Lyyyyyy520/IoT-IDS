@@ -1,6 +1,7 @@
 """Pure MQTT heartbeat validation and persistence, without a network client."""
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from hashlib import sha256
 import ipaddress
 import json
 import math
@@ -70,6 +71,7 @@ class IngestionResult:
     sequence: int | None = None
     observation_id: int | None = None
     state_version: int | None = None
+    candidate_id: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -351,9 +353,11 @@ class MqttHeartbeatIngestor:
         self,
         state_service: DeviceStateService,
         validator: MqttHeartbeatValidator | None = None,
+        discovery_service=None,
     ):
         self.state_service = state_service
         self.validator = validator or MqttHeartbeatValidator()
+        self.discovery_service = discovery_service
 
     @staticmethod
     def _rejected(
@@ -393,6 +397,53 @@ class MqttHeartbeatIngestor:
             ).fetchone()
             if not profile:
                 connection.rollback()
+                if self.discovery_service is not None:
+                    try:
+                        metadata = {
+                            "firmware_version": heartbeat.firmware_version,
+                            "sequence": heartbeat.sequence,
+                            "boot_id_digest": sha256(heartbeat.boot_id.encode("ascii")).hexdigest()[:16],
+                        }
+                        device_type_hint = heartbeat.telemetry.get("device_type")
+                        if isinstance(device_type_hint, str) and re.fullmatch(
+                            r"[a-z0-9][a-z0-9_-]{0,63}", device_type_hint
+                        ):
+                            metadata["device_type_hint"] = device_type_hint
+                        discovery = self.discovery_service.observe(
+                            source="mqtt_unknown",
+                            mac_address=heartbeat.mac_address,
+                            ip_address=heartbeat.ip_address,
+                            proposed_device_id=heartbeat.device_id,
+                            observed_at=heartbeat.device_time or received,
+                            received_at=received,
+                            deduplication_key=f"{heartbeat.boot_id}:{heartbeat.sequence}",
+                            sanitized_metadata=metadata,
+                        )
+                        if discovery["code"] == "candidate_capacity_reached":
+                            return self._rejected(
+                                "unknown_device_discovery_degraded",
+                                "unknown device candidate capacity is unavailable",
+                                heartbeat,
+                            )
+                        return IngestionResult(
+                            accepted=False,
+                            code="unknown_device_discovered",
+                            message="device is quarantined for administrator verification",
+                            device_id=heartbeat.device_id,
+                            boot_id=heartbeat.boot_id,
+                            sequence=heartbeat.sequence,
+                            candidate_id=discovery.get("candidate_id"),
+                        )
+                    except Exception:
+                        try:
+                            self.discovery_service.mark_degraded("discovery_storage_error")
+                        except Exception:
+                            pass
+                        return self._rejected(
+                            "unknown_device_discovery_unavailable",
+                            "unknown device evidence could not be stored",
+                            heartbeat,
+                        )
                 return self._rejected(
                     "unknown_device",
                     "device_id is not registered; no trusted device was created",

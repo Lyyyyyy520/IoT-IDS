@@ -1,11 +1,14 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import DeviceDetailPanel from '../../features/devices/DeviceDetailPanel';
 import DeviceDialogs, { type DeviceDialog } from '../../features/devices/DeviceDialogs';
 import DeviceListPanel from '../../features/devices/DeviceListPanel';
+import DiscoveryPanel from '../../features/devices/DiscoveryPanel';
 import { deviceErrorMessage } from '../../features/devices/deviceUi';
+import { useDiscoveryWorkspace } from '../../features/devices/useDiscoveryWorkspace';
 import { useDeviceWorkspace } from '../../features/devices/useDeviceWorkspace';
+import { useMonitorStore } from '../../features/monitor/monitorStore';
 import type {
   CreateDeviceInput,
   OperationMode,
@@ -18,11 +21,14 @@ type DetailTab = 'overview' | 'traffic' | 'manage';
 
 export default function DevicesPage() {
   const { isAdmin, user } = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedDeviceId = searchParams.get('device_id');
   const [dialog, setDialog] = useState<DeviceDialog>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>('traffic');
+  const [workspaceTab, setWorkspaceTab] = useState<'trusted' | 'discovery'>('trusted');
   const [notice, setNotice] = useState<{ kind: 'success' | 'warning'; message: string } | null>(null);
+  const lastDiscoveryEventId = useRef<number | null>(null);
 
   const updateQuerySelection = useCallback((deviceId: string | null) => {
     setSearchParams((current) => {
@@ -46,6 +52,17 @@ export default function DevicesPage() {
     onSelectionChange: updateQuerySelection,
     onInvalidSelection: clearInvalidSelection,
   });
+  const discovery = useDiscoveryWorkspace({ active: workspaceTab === 'discovery' });
+  const monitor = useMonitorStore({ enabled: workspaceTab === 'discovery' });
+
+  useEffect(() => {
+    const event = monitor.recentEvents[0];
+    if (workspaceTab !== 'discovery' || event?.event_type !== 'device.discovered'
+      || lastDiscoveryEventId.current === event.event_id) return;
+    lastDiscoveryEventId.current = event.event_id;
+    const timer = window.setTimeout(() => { void discovery.refreshList(); }, 350);
+    return () => window.clearTimeout(timer);
+  }, [discovery.refreshList, monitor.recentEvents, workspaceTab]);
 
   useEffect(() => {
     if (workspace.detail?.device_id) setDetailTab('traffic');
@@ -116,7 +133,7 @@ export default function DevicesPage() {
         <div className="devices-page-actions">
           <span className="workspace-role">{isAdmin ? '管理员 · 可写' : '值守人员 · 只读'}</span>
           <span className="workspace-user">{user?.username}</span>
-          {isAdmin && (
+          {isAdmin && workspaceTab === 'trusted' && (
             <button type="button" className="devices-button primary" onClick={() => setDialog('create')}>
               新增设备档案
             </button>
@@ -134,7 +151,22 @@ export default function DevicesPage() {
         <div className="devices-notice warning" role="status">{workspace.selectionNotice}</div>
       )}
 
-      <div className="devices-grid">
+      <nav className="devices-workspace-tabs" aria-label="设备工作区">
+        <button type="button" aria-current={workspaceTab === 'trusted' ? 'page' : undefined}
+          className={workspaceTab === 'trusted' ? 'active' : ''} onClick={() => setWorkspaceTab('trusted')}>可信设备</button>
+        <button type="button" aria-current={workspaceTab === 'discovery' ? 'page' : undefined}
+          className={workspaceTab === 'discovery' ? 'active' : ''} onClick={() => setWorkspaceTab('discovery')}>待确认设备</button>
+      </nav>
+
+      {workspaceTab === 'discovery' ? (
+        <DiscoveryPanel workspace={discovery} isAdmin={isAdmin} onClaimed={(deviceId, message) => {
+          setNotice({ kind: 'warning', message: `已认领并建立 unknown 档案。${message}` });
+          setWorkspaceTab('trusted');
+          updateQuerySelection(deviceId);
+          void workspace.selectDevice(deviceId);
+          navigate(`/devices?device_id=${encodeURIComponent(deviceId)}`);
+        }} />
+      ) : <div className="devices-grid">
         <DeviceListPanel
           filters={workspace.filters}
           onFilters={workspace.patchFilters}
@@ -182,7 +214,7 @@ export default function DevicesPage() {
             </Suspense>
           ) : null}
         />
-      </div>
+      </div>}
 
       {isAdmin && (
         <DeviceDialogs

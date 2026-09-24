@@ -243,8 +243,8 @@ def test_v8_migration_is_additive_idempotent_and_freezes_v1_to_v7(tmp_path):
     connection = connect_v3(database_path)
     try:
         first = apply_v3_migrations(connection, V3_MIGRATIONS[:7])
-        upgrade = apply_v3_migrations(connection)
-        repeated = apply_v3_migrations(connection)
+        upgrade = apply_v3_migrations(connection, V3_MIGRATIONS[:8])
+        repeated = apply_v3_migrations(connection, V3_MIGRATIONS[:8])
         objects = {
             row[0] for row in connection.execute(
                 "SELECT name FROM sqlite_master "

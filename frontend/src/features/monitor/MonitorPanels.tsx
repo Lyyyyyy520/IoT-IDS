@@ -186,6 +186,9 @@ function eventTitle(event: MonitorRealtimeEvent): string {
   if (event.event_type === 'device.inventory_changed') {
     return `${event.payload.device_id}：设备清单 ${event.payload.action}`;
   }
+  if (event.event_type === 'device.discovered') {
+    return '发现了待人工核验设备';
+  }
   return `${event.payload.component_id}：${READINESS_LABELS[event.payload.readiness]}`;
 }
 

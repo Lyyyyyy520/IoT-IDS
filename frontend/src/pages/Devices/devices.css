@@ -27,6 +27,10 @@
 .devices-page-header p:last-child { color: #78919e; font-size: 12px; }
 .devices-eyebrow { color: #4eb4bd; font: 700 9px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .14em; }
 .devices-page-actions { display: flex; align-items: center; gap: 10px; }
+.devices-workspace-tabs { flex: none; display: flex; gap: 5px; border-bottom: 1px solid #254454; }
+.devices-workspace-tabs button { padding: 8px 13px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #78919d; cursor: pointer; font: inherit; font-size: 11px; }
+.devices-workspace-tabs button.active { border-bottom-color: #50bdc6; color: #d8f4f5; }
+.devices-workspace-tabs button:focus-visible { outline: 2px solid #6fd2dc; outline-offset: 2px; }
 .workspace-role { padding: 5px 9px; border: 1px solid #326270; border-radius: 12px; color: #8bd4da; font-size: 11px; }
 .workspace-user { color: #718b99; font-size: 11px; }
 

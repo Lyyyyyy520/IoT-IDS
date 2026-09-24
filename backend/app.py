@@ -32,6 +32,7 @@ from services.auth import (
 # Register probe blueprint
 from api.probe import probe_bp
 from api.v3_devices import create_v3_devices_blueprint
+from api.v3_device_discovery import create_v3_device_discovery_blueprint
 from api.v3_incidents import create_v3_incidents_blueprint
 from api.v3_mobile import create_v3_mobile_blueprint
 from api.v3_realtime import create_v3_realtime_blueprint
@@ -1153,6 +1154,12 @@ def create_app(
             clock=application.config.get("V3_CLOCK"),
         )
     )
+    discovery_blueprint = create_v3_device_discovery_blueprint(
+        normalized_path,
+        clock=application.config.get("V3_CLOCK"),
+    )
+    application.extensions["iot_ids_device_discovery"] = discovery_blueprint.discovery_service
+    application.register_blueprint(discovery_blueprint)
     application.register_blueprint(
         create_v3_realtime_blueprint(
             normalized_path,

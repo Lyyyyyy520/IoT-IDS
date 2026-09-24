@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeviceApiError } from '../../api/v3Devices';
@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   role: 'admin',
   workspace: null as any,
   options: null as any,
+  discovery: null as any,
+  monitor: { recentEvents: [] as any[] },
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -23,6 +25,12 @@ vi.mock('../../features/devices/useDeviceWorkspace', () => ({
     state.options = options;
     return state.workspace;
   },
+}));
+vi.mock('../../features/devices/useDiscoveryWorkspace', () => ({
+  useDiscoveryWorkspace: () => state.discovery,
+}));
+vi.mock('../../features/monitor/monitorStore', () => ({
+  useMonitorStore: () => state.monitor,
 }));
 vi.mock('../../features/traffic/DeviceTrafficPanel', () => ({
   default: () => <div>设备流量分析测试面板</div>,
@@ -80,6 +88,21 @@ function workspace(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function discoveryWorkspace(overrides: Record<string, unknown> = {}) {
+  return {
+    filters: { search: '', status: 'all', source: 'all', conflict: 'all' },
+    patchFilters: vi.fn(), clearFilters: vi.fn(), items: [], total: 0, hasMore: false,
+    loading: false, error: null, lastUpdatedAt: '2026-09-20T02:00:00Z',
+    selectedId: null, detail: null, detailLoading: false, detailError: null, actionPending: false,
+    refreshList: vi.fn().mockResolvedValue(undefined), loadMore: vi.fn(),
+    selectCandidate: vi.fn(), claimCandidate: vi.fn().mockResolvedValue({
+      device: { device_id: 'claimed-01' }, credential_provisioning_required: true,
+      provisioning_message: '需配置 MQTT 凭据和 ACL。',
+    }), ignoreCandidate: vi.fn(), restoreCandidate: vi.fn(),
+    ...overrides,
+  };
+}
+
 function renderPage(initialEntry = '/devices') {
   return render(
     <MemoryRouter
@@ -99,11 +122,13 @@ beforeEach(() => {
   state.role = 'admin';
   state.options = null;
   state.workspace = workspace();
+  state.discovery = discoveryWorkspace();
+  state.monitor = { recentEvents: [] };
 });
 
 describe('DevicesPage permissions and server-backed interactions', () => {
   it('shows write and danger operations to admin, but keeps operator strictly read-only', async () => {
-    const rendered = renderPage();
+    const adminPage = renderPage();
     await screen.findByText('设备流量分析测试面板');
     openManage();
     expect(screen.getByRole('button', { name: '新增设备档案' })).toBeInTheDocument();
@@ -111,15 +136,16 @@ describe('DevicesPage permissions and server-backed interactions', () => {
     expect(screen.getByRole('button', { name: '退役设备' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /危险操作/ })).toBeInTheDocument();
 
-    rendered.unmount();
+    adminPage.unmount();
     state.role = 'operator';
-    renderPage();
+    const operatorPage = renderPage();
     await screen.findByText('设备流量分析测试面板');
     expect(screen.getByText('值守人员 · 只读')).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: '管理' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '新增设备档案' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '编辑档案' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /危险操作/ })).not.toBeInTheDocument();
+    operatorPage.unmount();
   });
 
   it('passes the query device_id into the workspace for automatic selection', () => {
@@ -299,5 +325,129 @@ describe('DevicesPage permissions and server-backed interactions', () => {
     renderPage();
     expect(screen.getByRole('alert')).toHaveTextContent('设备数据库或管理服务尚未准备');
     expect(screen.getByRole('alert')).toHaveTextContent('req-503');
+  });
+
+  it('shows an honest empty discovery state without mock candidates', () => {
+    state.discovery = discoveryWorkspace();
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '待确认设备' }));
+    expect(screen.getByText('当前没有待确认候选')).toBeInTheDocument();
+    expect(screen.queryByText('candidate-demo')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '新增设备档案' })).not.toBeInTheDocument();
+  });
+
+  it('keeps discovery operations admin-only while operators can inspect the candidate queue', () => {
+    state.discovery = discoveryWorkspace({
+      selectedId: 'candidate-01',
+      detail: {
+        candidate_id: 'candidate-01', proposed_device_id: 'suggested-01', status: 'pending',
+        conflict: false, conflict_reason: null, first_seen_at: '2026-09-20T01:00:00Z',
+        last_seen_at: '2026-09-20T02:00:00Z', source_count: 1, observation_count: 2,
+        claimed_device_id: null, claimed_at: null, ignored_at: null, ignored_reason: null,
+        candidate_version: 1, updated_at: '2026-09-20T02:00:00Z', sources: ['arp'],
+        identity_kind: 'mac', mac_address: 'AA:BB:CC:DD:EE:01', latest_ip: '192.0.2.1',
+        observations: [],
+      },
+    });
+    const rendered = renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '待确认设备' }));
+    expect(screen.getByText('规范化 MAC')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '确认认领候选' })).toBeInTheDocument();
+
+    rendered.unmount();
+    state.role = 'operator';
+    state.discovery = discoveryWorkspace({
+      selectedId: 'candidate-01',
+      detail: {
+        candidate_id: 'candidate-01', proposed_device_id: 'suggested-01', status: 'pending',
+        conflict: false, conflict_reason: null, first_seen_at: '2026-09-20T01:00:00Z',
+        last_seen_at: '2026-09-20T02:00:00Z', source_count: 1, observation_count: 2,
+        claimed_device_id: null, claimed_at: null, ignored_at: null, ignored_reason: null,
+        candidate_version: 1, updated_at: '2026-09-20T02:00:00Z', sources: ['arp'], observations: [],
+      },
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '待确认设备' }));
+    expect(screen.queryByRole('button', { name: '确认认领候选' })).not.toBeInTheDocument();
+    expect(screen.queryByText('AA:BB:CC:DD:EE:01')).not.toBeInTheDocument();
+    expect(screen.getByText('operator · 只读')).toBeInTheDocument();
+  });
+
+  it('shows proposed device IDs only as suggestions and preserves an unresolved claim draft', async () => {
+    state.discovery = discoveryWorkspace({
+      selectedId: 'candidate-01',
+      detail: {
+        candidate_id: 'candidate-01', proposed_device_id: 'suggested-01', status: 'pending',
+        conflict: false, conflict_reason: null, first_seen_at: '2026-09-20T01:00:00Z',
+        last_seen_at: '2026-09-20T02:00:00Z', source_count: 1, observation_count: 2,
+        claimed_device_id: null, claimed_at: null, ignored_at: null, ignored_reason: null,
+        candidate_version: 1, updated_at: '2026-09-20T02:00:00Z', sources: ['arp'],
+        identity_kind: 'mac', mac_address: 'AA:BB:CC:DD:EE:01', latest_ip: '192.0.2.1', observations: [],
+      },
+    });
+    state.discovery.claimCandidate.mockRejectedValue(new DeviceApiError('conflict', '候选版本冲突', { code: 'candidate_version_conflict' }));
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '待确认设备' }));
+    const idInput = screen.getByRole('textbox', { name: /device_id/ });
+    expect(idInput).toHaveValue('');
+    expect(screen.getByText(/suggested-01/)).toBeInTheDocument();
+    fireEvent.change(idInput, { target: { value: 'verified-by-admin' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '显示名称' }), { target: { value: '已核验设备' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '设备类型' }), { target: { value: 'sensor' } });
+    fireEvent.click(screen.getByRole('button', { name: '确认认领候选' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('候选版本或身份已冲突');
+    expect(idInput).toHaveValue('verified-by-admin');
+    expect(state.discovery.claimCandidate).toHaveBeenCalledWith(expect.objectContaining({
+      expected_candidate_version: 1, device_id: 'verified-by-admin',
+    }));
+  });
+
+  it('requires an ignore reason and offers explicit restore for ignored candidates', async () => {
+    state.discovery = discoveryWorkspace({
+      selectedId: 'candidate-01',
+      detail: {
+        candidate_id: 'candidate-01', proposed_device_id: null, status: 'pending', conflict: false,
+        conflict_reason: null, first_seen_at: '2026-09-20T01:00:00Z', last_seen_at: '2026-09-20T02:00:00Z',
+        source_count: 1, observation_count: 1, claimed_device_id: null, claimed_at: null,
+        ignored_at: null, ignored_reason: null, candidate_version: 3, updated_at: '2026-09-20T02:00:00Z',
+        sources: ['arp'], identity_kind: 'mac', mac_address: 'AA:BB:CC:DD:EE:01', latest_ip: null, observations: [],
+      },
+    });
+    const ignoredPage = renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '待确认设备' }));
+    const ignore = screen.getByRole('button', { name: '保留证据并忽略' });
+    expect(ignore).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('忽略原因'), { target: { value: '现场确认属于访客设备' } });
+    fireEvent.click(ignore);
+    await waitFor(() => expect(state.discovery.ignoreCandidate).toHaveBeenCalledWith('现场确认属于访客设备'));
+    ignoredPage.unmount();
+
+    state.discovery = discoveryWorkspace({
+      selectedId: 'candidate-02', detail: {
+        candidate_id: 'candidate-02', proposed_device_id: null, status: 'ignored', conflict: false,
+        conflict_reason: null, first_seen_at: '2026-09-20T01:00:00Z', last_seen_at: '2026-09-20T02:00:00Z',
+        source_count: 1, observation_count: 1, claimed_device_id: null, claimed_at: null,
+        ignored_at: '2026-09-20T02:00:00Z', ignored_reason: '人工确认', candidate_version: 4,
+        updated_at: '2026-09-20T02:00:00Z', sources: ['arp'], observations: [],
+      },
+    });
+    const restoredPage = renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '待确认设备' }));
+    fireEvent.click(screen.getByRole('button', { name: '恢复候选' }));
+    await waitFor(() => expect(state.discovery.restoreCandidate).toHaveBeenCalled());
+    restoredPage.unmount();
+  });
+
+  it('debounces a device.discovered SSE event into candidate list refresh', async () => {
+    vi.useFakeTimers();
+    const refreshList = vi.fn().mockResolvedValue(undefined);
+    state.discovery = discoveryWorkspace({ refreshList });
+    const rendered = renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '待确认设备' }));
+    state.monitor = { recentEvents: [{ event_id: 12, event_type: 'device.discovered' }] };
+    rendered.rerender(<MemoryRouter initialEntries={['/devices']}><DevicesPage /></MemoryRouter>);
+    await act(async () => { vi.advanceTimersByTime(350); });
+    expect(refreshList).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 });

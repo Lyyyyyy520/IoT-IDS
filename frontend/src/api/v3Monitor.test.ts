@@ -72,6 +72,26 @@ describe('v3 monitor runtime contracts', () => {
     });
   });
 
+  it('parses discovery events without exposing candidate identity evidence', () => {
+    const event = parseMonitorEvent('device.discovered', JSON.stringify({
+      event_id: 8,
+      event_type: 'device.discovered',
+      occurred_at: '2026-09-20T02:00:01Z',
+      device_id: null,
+      state_version: 1,
+      payload: {
+        candidate_id: 'candidate-01', status: 'pending', candidate_version: 1,
+        mac_address: 'AA:BB:CC:DD:EE:FF', ip_address: '192.0.2.9',
+      },
+    }));
+    expect(event).toMatchObject({
+      event_type: 'device.discovered', device_id: null,
+      payload: { candidate_id: 'candidate-01', status: 'pending', candidate_version: 1 },
+    });
+    expect(JSON.stringify(event)).not.toContain('AA:BB:CC:DD:EE:FF');
+    expect(JSON.stringify(event)).not.toContain('192.0.2.9');
+  });
+
   it('parses incident capability data and a redacted incident SSE summary', () => {
     const snapshot = parseMonitorSnapshot({
       ...validSnapshot,

@@ -110,9 +110,9 @@ def test_v1_v2_v3_checksums_stay_frozen_and_v4_upgrades_idempotently(tmp_path):
         V3_CHECKSUM,
     ]
     assert V3_DEVICE_LIFECYCLE_MIGRATION.checksum == V4_CHECKSUM
-    assert first["applied_versions"] == [4, 5, 6, 7, 8]
+    assert first["applied_versions"] == [4, 5, 6, 7, 8, 9]
     assert repeated["applied_versions"] == []
-    assert repeated["skipped_versions"] == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert repeated["skipped_versions"] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
     assert tuple(migrated) == ("normal", "unclassified", 1)
     assert asset_count == 1
     assert profile_count == 1

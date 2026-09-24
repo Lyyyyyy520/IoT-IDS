@@ -349,6 +349,40 @@ class DeviceManagementService:
         area_id: str | None = None,
         importance: str = DeviceImportance.NORMAL.value,
     ) -> dict:
+        with self._connection(write=True) as connection:
+            return self.create_device_in_transaction(
+                connection,
+                device_id=device_id,
+                mac=mac,
+                display_name=display_name,
+                device_type=device_type,
+                profile_source=profile_source,
+                actor=actor,
+                request_id=request_id,
+                area_id=area_id,
+                importance=importance,
+            )
+
+    def create_device_in_transaction(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        device_id: str,
+        mac: str,
+        display_name: str,
+        device_type: str,
+        profile_source: str,
+        actor: DeviceActor,
+        request_id: str,
+        area_id: str | None = None,
+        importance: str = DeviceImportance.NORMAL.value,
+    ) -> dict:
+        """Create a trusted device inside a caller-owned transaction.
+
+        The helper deliberately leaves commit/rollback to its caller so compound
+        operations such as an administrator claiming a discovery candidate can
+        atomically create state, audit and realtime inventory records.
+        """
         request_id = self._validate_write_context(actor, request_id)
         device_id = _device_id(device_id)
         normalized_mac = _normalize_mac(mac)
@@ -363,60 +397,59 @@ class DeviceManagementService:
         )
         occurred_at = self._now()
         now = _iso(occurred_at)
-        with self._connection(write=True) as connection:
-            if connection.execute(
-                "SELECT 1 FROM v3_device_profiles WHERE device_id = ?", (device_id,)
-            ).fetchone():
-                raise DeviceIdConflictError("device_id is already registered")
-            if connection.execute(
-                "SELECT 1 FROM v3_device_profiles "
-                "WHERE identity_kind = 'mac' AND identity_value = ?",
-                (normalized_mac,),
-            ).fetchone():
-                raise DeviceIdentityConflictError("MAC identity is already registered")
-            try:
-                connection.execute(
-                    "INSERT INTO v3_device_profiles "
-                    "(device_id, identity_kind, identity_value, display_name, "
-                    "device_type, area_id, operation_mode, created_at, updated_at, "
-                    "importance, profile_source, profile_version, retired_at, "
-                    "retirement_reason) VALUES (?, 'mac', ?, ?, ?, ?, 'active', "
-                    "?, ?, ?, ?, 1, NULL, NULL)",
-                    (
-                        device_id,
-                        normalized_mac,
-                        normalized_name,
-                        normalized_type,
-                        normalized_area,
-                        now,
-                        now,
-                        normalized_importance,
-                        normalized_source,
-                    ),
-                )
-            except sqlite3.IntegrityError as exc:
-                if "device_id" in str(exc):
-                    raise DeviceIdConflictError("device_id is already registered") from exc
-                raise DeviceIdentityConflictError("MAC identity is already registered") from exc
+        if connection.execute(
+            "SELECT 1 FROM v3_device_profiles WHERE device_id = ?", (device_id,)
+        ).fetchone():
+            raise DeviceIdConflictError("device_id is already registered")
+        if connection.execute(
+            "SELECT 1 FROM v3_device_profiles "
+            "WHERE identity_kind = 'mac' AND identity_value = ?",
+            (normalized_mac,),
+        ).fetchone():
+            raise DeviceIdentityConflictError("MAC identity is already registered")
+        try:
             connection.execute(
-                "INSERT INTO v3_device_current_state "
-                "(device_id, connection_status, state_version, updated_at) "
-                "VALUES (?, 'unknown', 0, ?)",
-                (device_id, now),
+                "INSERT INTO v3_device_profiles "
+                "(device_id, identity_kind, identity_value, display_name, "
+                "device_type, area_id, operation_mode, created_at, updated_at, "
+                "importance, profile_source, profile_version, retired_at, "
+                "retirement_reason) VALUES (?, 'mac', ?, ?, ?, ?, 'active', "
+                "?, ?, ?, ?, 1, NULL, NULL)",
+                (
+                    device_id,
+                    normalized_mac,
+                    normalized_name,
+                    normalized_type,
+                    normalized_area,
+                    now,
+                    now,
+                    normalized_importance,
+                    normalized_source,
+                ),
             )
-            after = self._profile_snapshot(self._profile_row(connection, device_id))
-            self._record_change(
-                connection,
-                device_id=device_id,
-                action="created",
-                actor=actor,
-                request_id=request_id,
-                occurred_at=occurred_at,
-                before=None,
-                after=after,
-                profile_version=1,
-            )
-            return self._detail(connection, device_id)
+        except sqlite3.IntegrityError as exc:
+            if "device_id" in str(exc):
+                raise DeviceIdConflictError("device_id is already registered") from exc
+            raise DeviceIdentityConflictError("MAC identity is already registered") from exc
+        connection.execute(
+            "INSERT INTO v3_device_current_state "
+            "(device_id, connection_status, state_version, updated_at) "
+            "VALUES (?, 'unknown', 0, ?)",
+            (device_id, now),
+        )
+        after = self._profile_snapshot(self._profile_row(connection, device_id))
+        self._record_change(
+            connection,
+            device_id=device_id,
+            action="created",
+            actor=actor,
+            request_id=request_id,
+            occurred_at=occurred_at,
+            before=None,
+            after=after,
+            profile_version=1,
+        )
+        return self._detail(connection, device_id)
 
     def update_profile(
         self,
@@ -696,6 +729,11 @@ class DeviceManagementService:
                 "WHERE device_id = ?",
                 (device_id,),
             ) if table_exists("v3_help_requests") else 0,
+            "discovery_candidates": count(
+                "SELECT COUNT(*) FROM v3_discovered_device_candidates "
+                "WHERE claimed_device_id = ?",
+                (device_id,),
+            ) if table_exists("v3_discovered_device_candidates") else 0,
             "future_references": {},
         }
         tables = [
@@ -734,6 +772,7 @@ class DeviceManagementService:
                 "traffic_peer_minutes",
                 "incident_devices",
                 "help_requests",
+                "discovery_candidates",
             )
             if references[key] > 0
         ]

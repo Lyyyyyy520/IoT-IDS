@@ -789,6 +789,96 @@ V3_INCIDENT_WORKFLOW_MIGRATION = SchemaMigration(
     statements=V3_INCIDENT_WORKFLOW_STATEMENTS,
 )
 
+V3_DEVICE_DISCOVERY_STATEMENTS = (
+    """
+    CREATE TABLE v3_discovered_device_candidates (
+        candidate_id TEXT PRIMARY KEY,
+        identity_kind TEXT NOT NULL CHECK (identity_kind = 'mac'),
+        identity_value TEXT NOT NULL,
+        proposed_device_id TEXT,
+        latest_ip TEXT,
+        status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'ignored', 'claimed', 'conflict')),
+        conflict_reason TEXT
+            CHECK (conflict_reason IS NULL OR conflict_reason IN (
+                'mac_already_bound', 'multiple_proposed_device_ids', 'deduplication_key_reused'
+            )),
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        source_count INTEGER NOT NULL DEFAULT 0 CHECK (source_count >= 0),
+        observation_count INTEGER NOT NULL DEFAULT 0 CHECK (observation_count >= 0),
+        claimed_device_id TEXT,
+        claimed_at TEXT,
+        ignored_at TEXT,
+        ignored_reason TEXT,
+        candidate_version INTEGER NOT NULL DEFAULT 1 CHECK (candidate_version > 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (identity_kind, identity_value),
+        FOREIGN KEY (claimed_device_id)
+            REFERENCES v3_device_profiles(device_id)
+    )
+    """.strip(),
+    """
+    CREATE TABLE v3_discovery_observations (
+        observation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        candidate_id TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN (
+            'mqtt_unknown', 'dhcp', 'arp', 'probe', 'other'
+        )),
+        observed_at TEXT NOT NULL,
+        received_at TEXT NOT NULL,
+        proposed_device_id TEXT,
+        ip_address TEXT,
+        evidence_hash TEXT NOT NULL CHECK (length(evidence_hash) = 64),
+        sanitized_metadata_json TEXT NOT NULL,
+        deduplication_key TEXT NOT NULL CHECK (length(deduplication_key) = 64),
+        UNIQUE (candidate_id, deduplication_key),
+        FOREIGN KEY (candidate_id)
+            REFERENCES v3_discovered_device_candidates(candidate_id)
+    )
+    """.strip(),
+    """
+    CREATE TABLE v3_discovery_actions (
+        action_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        candidate_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('claimed', 'ignored', 'restored')),
+        actor_user_id INTEGER NOT NULL,
+        actor_username TEXT NOT NULL,
+        actor_role TEXT NOT NULL CHECK (actor_role IN ('admin', 'operator', 'user')),
+        occurred_at TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        before_json TEXT,
+        after_json TEXT,
+        reason TEXT,
+        FOREIGN KEY (candidate_id)
+            REFERENCES v3_discovered_device_candidates(candidate_id)
+    )
+    """.strip(),
+    "CREATE INDEX idx_v3_discovery_candidates_status_seen "
+    "ON v3_discovered_device_candidates(status, last_seen_at DESC, candidate_id)",
+    "CREATE INDEX idx_v3_discovery_candidates_first_seen "
+    "ON v3_discovered_device_candidates(first_seen_at, candidate_id)",
+    "CREATE INDEX idx_v3_discovery_candidates_identity "
+    "ON v3_discovered_device_candidates(identity_kind, identity_value)",
+    "CREATE INDEX idx_v3_discovery_candidates_claimed_device "
+    "ON v3_discovered_device_candidates(claimed_device_id)",
+    "CREATE INDEX idx_v3_discovery_observations_candidate_time "
+    "ON v3_discovery_observations(candidate_id, received_at DESC, observation_id)",
+    "CREATE INDEX idx_v3_discovery_observations_source_time "
+    "ON v3_discovery_observations(source, received_at DESC, candidate_id)",
+    "CREATE UNIQUE INDEX idx_v3_discovery_observations_dedup "
+    "ON v3_discovery_observations(candidate_id, deduplication_key)",
+    "CREATE INDEX idx_v3_discovery_actions_candidate "
+    "ON v3_discovery_actions(candidate_id, action_id)",
+)
+
+V3_DEVICE_DISCOVERY_MIGRATION = SchemaMigration(
+    version=9,
+    name="unknown_device_discovery",
+    statements=V3_DEVICE_DISCOVERY_STATEMENTS,
+)
+
 V3_MIGRATIONS = (
     V3_DEVICE_STATE_MIGRATION,
     V3_MQTT_HEARTBEAT_MIGRATION,
@@ -798,6 +888,7 @@ V3_MIGRATIONS = (
     V3_MOBILE_ACCESS_MIGRATION,
     V3_MOBILE_USER_ADMIN_MIGRATION,
     V3_INCIDENT_WORKFLOW_MIGRATION,
+    V3_DEVICE_DISCOVERY_MIGRATION,
 )
 
 V3_DEVICE_STATE_TABLES = frozenset(
@@ -938,6 +1029,27 @@ V3_INCIDENT_WORKFLOW_INDEXES = frozenset(
     }
 )
 
+V3_DEVICE_DISCOVERY_TABLES = frozenset(
+    {
+        "v3_discovered_device_candidates",
+        "v3_discovery_observations",
+        "v3_discovery_actions",
+    }
+)
+
+V3_DEVICE_DISCOVERY_INDEXES = frozenset(
+    {
+        "idx_v3_discovery_candidates_status_seen",
+        "idx_v3_discovery_candidates_first_seen",
+        "idx_v3_discovery_candidates_identity",
+        "idx_v3_discovery_candidates_claimed_device",
+        "idx_v3_discovery_observations_candidate_time",
+        "idx_v3_discovery_observations_source_time",
+        "idx_v3_discovery_observations_dedup",
+        "idx_v3_discovery_actions_candidate",
+    }
+)
+
 V3_EXPECTED_OBJECTS = {
     MIGRATION_TABLE: "table",
     **{name: "table" for name in V3_DEVICE_STATE_TABLES},
@@ -956,6 +1068,8 @@ V3_EXPECTED_OBJECTS = {
     **{name: "index" for name in V3_MOBILE_USER_ADMIN_INDEXES},
     **{name: "table" for name in V3_INCIDENT_WORKFLOW_TABLES},
     **{name: "index" for name in V3_INCIDENT_WORKFLOW_INDEXES},
+    **{name: "table" for name in V3_DEVICE_DISCOVERY_TABLES},
+    **{name: "index" for name in V3_DEVICE_DISCOVERY_INDEXES},
 }
 
 V3_EXPECTED_OBJECT_VERSIONS = {
@@ -976,6 +1090,8 @@ V3_EXPECTED_OBJECT_VERSIONS = {
     **{name: 7 for name in V3_MOBILE_USER_ADMIN_INDEXES},
     **{name: 8 for name in V3_INCIDENT_WORKFLOW_TABLES},
     **{name: 8 for name in V3_INCIDENT_WORKFLOW_INDEXES},
+    **{name: 9 for name in V3_DEVICE_DISCOVERY_TABLES},
+    **{name: 9 for name in V3_DEVICE_DISCOVERY_INDEXES},
 }
 
 

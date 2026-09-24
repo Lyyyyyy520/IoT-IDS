@@ -107,9 +107,15 @@ def _default_mqtt_factory(
     environment: Mapping[str, str],
 ):
     from services.mqtt_subscriber import ManagedMqttHeartbeatSubscriber
+    from services.device_discovery import DeviceDiscoveryService
+    from services.mqtt_ingestion import MqttHeartbeatIngestor
 
     return ManagedMqttHeartbeatSubscriber(
         state_service,
+        ingestor=MqttHeartbeatIngestor(
+            state_service,
+            discovery_service=DeviceDiscoveryService(state_service.database_path),
+        ),
         settings_provider=lambda: settings,
         environment=environment,
     )

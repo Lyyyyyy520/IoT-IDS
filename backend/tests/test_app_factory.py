@@ -26,6 +26,7 @@ V5_CHECKSUM = "77e7011d94ef2b3a7022013fbef0c2e68f70f1ca9ead58446dd3d4bde78c74c6"
 V6_CHECKSUM = "f1ce25c5393381750c7582eb7dc783c7625db80a0dad483c1e46cf1b7521b61d"
 V7_CHECKSUM = "5e8e572496607b58d0ccf93be0bcd1deaaa7d3935f93cef54cccd35e905b3623"
 V8_CHECKSUM = "b87d02359023eafef439bbf04ce0f9c4929e73bd03a08f3dff955c7f1306d3ac"
+V9_CHECKSUM = "cbd47c1e4e2807b770b7de3e5e532ef40af34d931bf417565f62254e57e363f2"
 
 
 def _settings(enabled=True):
@@ -141,12 +142,13 @@ def test_multiple_apps_have_independent_services_and_identical_routes(tmp_path):
     assert set(first.blueprints) == {
         "legacy_api",
         "probe",
-            "v3_devices",
-            "v3_realtime",
-            "v3_traffic",
-            "v3_mobile",
-            "v3_incidents",
-        }
+        "v3_devices",
+        "v3_device_discovery",
+        "v3_realtime",
+        "v3_traffic",
+        "v3_mobile",
+        "v3_incidents",
+    }
 
 
 def test_missing_database_health_and_all_database_routes_fail_closed(tmp_path):
@@ -190,6 +192,7 @@ def test_migrated_database_exposes_registered_v3_routes(tmp_path, role):
     monitor = client.get("/api/v3/monitor")
     events = client.get("/api/v3/events?after=0", buffered=True)
     devices = client.get("/api/v3/devices")
+    discovered = client.get("/api/v3/devices/discovered")
 
     assert health.get_json()["status"] == "ok"
     assert health.get_json()["database"]["v3_schema_ready"] is True
@@ -199,6 +202,8 @@ def test_migrated_database_exposes_registered_v3_routes(tmp_path, role):
     assert events.mimetype == "text/event-stream"
     assert devices.status_code == 200
     assert devices.get_json()["items"] == []
+    assert discovered.status_code == 200
+    assert discovered.get_json()["items"] == []
 
 
 @pytest.mark.parametrize(
@@ -214,6 +219,7 @@ def test_registered_v3_routes_preserve_restricted_roles(tmp_path, role, expected
     assert client.get("/api/v3/monitor").status_code == expected
     assert client.get("/api/v3/events?after=0").status_code == expected
     assert client.get("/api/v3/devices").status_code == expected
+    assert client.get("/api/v3/devices/discovered").status_code == expected
 
 
 def test_legacy_and_probe_routes_remain_registered(tmp_path):
@@ -230,6 +236,8 @@ def test_legacy_and_probe_routes_remain_registered(tmp_path):
     assert "/api/v3/events" in rules
     assert "/api/v3/devices" in rules
     assert "/api/v3/devices/<device_id>" in rules
+    assert "/api/v3/devices/discovered" in rules
+    assert "/api/v3/devices/discovered/<candidate_id>" in rules
 
 
 def test_create_app_does_not_create_default_account(tmp_path, monkeypatch):
@@ -378,7 +386,7 @@ def test_failed_runtime_start_stops_partial_subscriber_thread(tmp_path):
 
 
 def test_migration_checksums_are_unchanged():
-    assert [migration.checksum for migration in V3_MIGRATIONS] == [
+    assert [migration.checksum for migration in V3_MIGRATIONS[:8]] == [
         V1_CHECKSUM,
         V2_CHECKSUM,
         V3_CHECKSUM,
@@ -388,3 +396,4 @@ def test_migration_checksums_are_unchanged():
         V7_CHECKSUM,
         V8_CHECKSUM,
     ]
+    assert V3_MIGRATIONS[8].checksum == V9_CHECKSUM
