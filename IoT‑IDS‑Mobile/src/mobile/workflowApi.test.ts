@@ -1,4 +1,5 @@
-import { mobileApi, MobileApiError, parseHelpRequest, parseNotice, parseNoticeCollection, parseSupportContact } from './api';
+import { mobileApi, MobileApiError, parseHelpRequest, parseNotice, parseNoticeCollection, parseSupportContact,
+  parseMobileDeviceDetail, parseMobileDeviceTraffic } from './api';
 import { safeEmailUrl, safePhoneUrl } from './supportContactUtils';
 
 const config = { baseUrl: 'https://mobile.example.test', insecureLan: false };
@@ -61,4 +62,74 @@ it('allows only validated telephone and email URLs', () => {
   expect(safePhoneUrl('javascript:alert(1)')).toBeNull();
   expect(safeEmailUrl('help@example.test')).toBe('mailto:help@example.test');
   expect(safeEmailUrl('javascript:alert@example.test\r\n')).toBeNull();
+});
+
+const deviceDetail = {
+  device_id: 'door-1', display_name: '门口设备', device_type: 'sensor', area_id: 'home',
+  connection_status: 'unknown', operation_mode: 'maintenance', retired: false, retired_at: null,
+  last_updated_at: '2026-09-24T01:00:00Z', last_seen_at: null, availability_status: 'maintenance',
+  status_text: { connection: '尚无可用的连接记录', operation: '维护模式' }, availability_text: '设备处于维护模式',
+  security_capability: { available: true, reason: null, active_notice_count: 0, recent_notices: [],
+    gnn: { available: false, reason: 'gnn_capability_unavailable' } },
+  traffic_capability: { available: true, reason: null },
+};
+const emptyTraffic = {
+  device_id: 'door-1', window: '15m', query_window: { from: '2026-09-24T00:45:00Z', to: '2026-09-24T01:00:00Z' },
+  generated_at: '2026-09-24T01:00:00Z', is_historical: false,
+  availability: { status: 'no_samples', available: false, reason: 'no_samples' },
+  freshness: { status: 'unavailable', latest_sample_at: null },
+  current_rate: { status: 'warming_up', label: '正在积累数据', window_seconds: 120, as_of: '2026-09-24T01:00:00Z',
+    uploaded_bytes_per_second: null, downloaded_bytes_per_second: null, uploaded_packets_per_second: null, downloaded_packets_per_second: null },
+  summary: null, trend_resolution_seconds: 60, trend: [], protocols: [],
+  data_quality: { complete: null, message: '统计可能不完整。' },
+};
+
+it('accepts only the scoped mobile device allowlist and keeps connection/mode separate', () => {
+  expect(parseMobileDeviceDetail(deviceDetail)).toMatchObject({
+    connection_status: 'unknown', operation_mode: 'maintenance', retired: false,
+  });
+  expect(() => parseMobileDeviceDetail({ ...deviceDetail, mac: 'AA:BB:CC:DD:EE:FF' })).toThrow();
+  expect(() => parseMobileDeviceDetail({ ...deviceDetail, security_capability: { ...deviceDetail.security_capability, score: 0.8 } })).toThrow();
+});
+
+it('distinguishes no samples from a warming rate and rejects admin traffic fields', () => {
+  expect(parseMobileDeviceTraffic(emptyTraffic)).toMatchObject({
+    availability: { status: 'no_samples', available: false }, summary: null,
+    current_rate: { status: 'warming_up', uploaded_bytes_per_second: null },
+  });
+  expect(() => parseMobileDeviceTraffic({ ...emptyTraffic, peers: [] })).toThrow();
+});
+
+it('accepts a real zero counter but rejects contradictory no-sample and warming payloads', () => {
+  const observedZero = {
+    ...emptyTraffic,
+    availability: { status: 'available', available: true, reason: null },
+    freshness: { status: 'fresh', latest_sample_at: '2026-09-24T00:59:00Z' },
+    current_rate: { status: 'available', label: '实时数据可用', window_seconds: 60,
+      as_of: '2026-09-24T01:00:00Z', uploaded_bytes_per_second: 0,
+      downloaded_bytes_per_second: 0, uploaded_packets_per_second: 0,
+      downloaded_packets_per_second: 0 },
+    summary: { uploaded_bytes: 0, downloaded_bytes: 0, uploaded_packets: 0, downloaded_packets: 0 },
+    trend: [{ bucket_start: '2026-09-24T00:59:00Z', uploaded_bytes: 0, downloaded_bytes: 0,
+      uploaded_packets: 0, downloaded_packets: 0 }],
+  };
+  expect(parseMobileDeviceTraffic(observedZero).summary?.uploaded_bytes).toBe(0);
+  expect(() => parseMobileDeviceTraffic({ ...observedZero,
+    availability: { status: 'no_samples', available: false, reason: 'no_samples' } })).toThrow();
+  expect(() => parseMobileDeviceTraffic({ ...emptyTraffic,
+    current_rate: { ...emptyTraffic.current_rate, uploaded_bytes_per_second: 1 } })).toThrow();
+});
+
+it('encodes mobile device IDs and fixed traffic windows and forwards AbortSignal', async () => {
+  const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => deviceDetail });
+  global.fetch = fetchMock as typeof fetch;
+  const abort = new AbortController();
+  await mobileApi.deviceDetail(config, 'memory-token', 'door/1', abort.signal);
+  expect(fetchMock.mock.calls[0][0]).toContain('/api/v3/mobile/devices/door%2F1');
+  expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBe(abort.signal);
+  expect((fetchMock.mock.calls[0][1] as RequestInit).credentials).toBe('omit');
+
+  fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => emptyTraffic });
+  await mobileApi.deviceTraffic(config, 'memory-token', 'door-1', '24h', abort.signal);
+  expect(fetchMock.mock.calls[1][0]).toBe('https://mobile.example.test/api/v3/mobile/devices/door-1/traffic?window=24h');
 });

@@ -850,6 +850,39 @@ class MobileAccessService:
             (action, self._rate_bucket(action, identity)),
         )
 
+    def consume_scoped_read_limit(
+        self,
+        principal: MobilePrincipal,
+        *,
+        action: str,
+        limit: int,
+    ) -> None:
+        """Apply a persistent per-mobile-session limit to scoped read APIs."""
+        action = _text(action, "action", maximum=64)
+        if not action.startswith("mobile_device_"):
+            raise MobileAccessError("invalid mobile read limit action")
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise MobileAccessError("mobile read limit is invalid")
+        connection = self._connect()
+        now = self._now()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            allowed = self._consume_rate_limit(
+                connection,
+                action=action,
+                identity=principal.session_id,
+                limit=limit,
+                now=now,
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        if not allowed:
+            raise MobileRateLimited("too many mobile device read requests")
+
     def claim_pairing(
         self,
         pairing_code,

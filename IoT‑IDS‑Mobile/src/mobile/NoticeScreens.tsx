@@ -148,7 +148,13 @@ export function NoticeDetailScreen() {
       <Severity notice={notice} />
       <View style={ui.card}>
         <Text style={ui.body}>{notice.user_summary}</Text>
-        <Text style={ui.muted}>相关设备：{notice.affected_devices.map(item => `${item.display_name}（${item.device_type}）`).join('、') || '未指定'}</Text>
+        <Text style={ui.label}>相关设备</Text>
+        {notice.affected_devices.length === 0 ? <Text style={ui.muted}>未指定</Text> : notice.affected_devices.map(item =>
+          <TouchableOpacity key={item.device_id} accessibilityRole="button"
+            accessibilityLabel={`查看受影响设备：${item.display_name}`}
+            style={ui.secondaryButton} onPress={() => navigation.navigate('设备详情', { deviceId: item.device_id })}>
+            <Text style={ui.secondaryText}>{item.display_name}（{item.device_type}）</Text>
+          </TouchableOpacity>)}
         <Text style={ui.muted}>发现时间：{new Date(notice.first_seen_at).toLocaleString()}</Text>
         <Text style={ui.muted}>最近更新：{new Date(notice.updated_at).toLocaleString()}</Text>
         <Text style={ui.label}>处理状态：{statusLabels[notice.status]}</Text>

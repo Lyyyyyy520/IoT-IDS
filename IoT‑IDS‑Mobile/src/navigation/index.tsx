@@ -11,6 +11,7 @@ import DevicesScreen from '../mobile/DevicesScreen';
 import SettingsScreen from '../mobile/SettingsScreen';
 import NoticeListScreen, { NoticeDetailScreen } from '../mobile/NoticeScreens';
 import { HelpDetailScreen, HelpListScreen, SubmitHelpScreen } from '../mobile/HelpScreens';
+import MobileDeviceDetailScreen from '../mobile/MobileDeviceDetailScreen';
 import { palette, ui } from '../mobile/ui';
 
 const Tab = createBottomTabNavigator();
@@ -54,6 +55,7 @@ export default function RootNavigator() {
     <Stack.Navigator screenOptions={{ headerStyle: { backgroundColor: palette.card }, headerTintColor: palette.text }}>
       <Stack.Screen name="主界面" component={MainTabs} options={{ headerShown: false }} />
       <Stack.Screen name="提醒详情" component={NoticeDetailScreen} options={{ title: '提醒详情' }} />
+      <Stack.Screen name="设备详情" component={MobileDeviceDetailScreen} options={{ title: '设备详情' }} />
       <Stack.Screen name="提交求助" component={SubmitHelpScreen} options={{ title: '联系管理员' }} />
       <Stack.Screen name="我的求助" component={HelpListScreen} options={{ title: '我的求助' }} />
       <Stack.Screen name="求助详情" component={HelpDetailScreen} options={{ title: '求助详情' }} />

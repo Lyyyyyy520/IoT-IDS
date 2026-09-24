@@ -1165,9 +1165,10 @@ def create_app(
             max_idle_cycles=application.config.get("V3_MAX_IDLE_CYCLES"),
         )
     )
+    traffic_service = get_service_container(application).get_traffic_service()
     application.register_blueprint(
         create_v3_traffic_blueprint(
-            get_service_container(application).get_traffic_service(),
+            traffic_service,
             clock=application.config.get("V3_CLOCK"),
         )
     )
@@ -1176,6 +1177,7 @@ def create_app(
         resolved_mobile_settings,
         clock=application.config.get("V3_CLOCK"),
         fault_injector=application.config.get("MOBILE_FAULT_INJECTOR"),
+        traffic_service=traffic_service,
     )
     application.extensions["iot_ids_mobile_access"] = mobile_blueprint.mobile_service
     application.register_blueprint(mobile_blueprint)

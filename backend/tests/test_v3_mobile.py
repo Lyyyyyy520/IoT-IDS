@@ -7,9 +7,11 @@ from types import SimpleNamespace
 import pytest
 from werkzeug.security import check_password_hash
 
-from app import create_app
+from app import create_app, get_service_container
 from config import MobileSecuritySettings
 from database import init_db
+from services.device_traffic import TrafficSample
+from services.incident_workflow import IncidentActor
 from services.mobile_access import (
     MobileAccessService,
     MobileActor,
@@ -1047,3 +1049,229 @@ def test_mobile_user_patch_requires_csrf_and_audit_contains_no_secrets(
     assert [row[0] for row in audits] == [
         "mobile_user_created", "mobile_user_updated"
     ]
+
+
+def _device_pair(context, scope):
+    _set_scopes(context, [scope])
+    _started, claimed = _pair(context, client_suffix=f"device-{scope['scope_kind']}")
+    return claimed
+
+
+def _mobile_get(context, path, token):
+    return context.client.get(path, headers=_bearer(token))
+
+
+def test_mobile_device_detail_is_allowlisted_dynamic_and_scope_hidden_is_not_found(
+    mobile_context,
+):
+    claimed = _device_pair(mobile_context, {
+        "scope_kind": "device", "scope_value": "camera-01",
+    })
+    path = "/api/v3/mobile/devices/camera-01"
+    response = _mobile_get(mobile_context, path, claimed["access_token"])
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    body = response.get_json()
+    assert body["device_id"] == "camera-01"
+    assert body["connection_status"] == "online"
+    assert body["operation_mode"] == "active"
+    assert body["last_seen_at"] == "2026-09-21T03:59:51Z"
+    assert body["status_text"]["connection"] == "设备最近有连接记录"
+    denied = _mobile_get(mobile_context, "/api/v3/mobile/devices/lock-01", claimed["access_token"])
+    missing = _mobile_get(mobile_context, "/api/v3/mobile/devices/not-real", claimed["access_token"])
+    assert denied.status_code == missing.status_code == 404
+    assert denied.get_json()["error"]["code"] == missing.get_json()["error"]["code"] == "mobile_device_unavailable"
+    assert denied.get_json()["error"]["message"] == missing.get_json()["error"]["message"]
+    assert denied.get_json()["error"]["request_id"]
+    forbidden_fields = {
+        "mac", "identity_kind", "identity_value", "ip_address", "last_ip",
+        "peer_ip", "peer_device_id", "port", "graph_id", "gnn_score",
+        "state_version", "profile_version", "admin_summary", "internal_reason",
+    }
+    assert forbidden_fields.isdisjoint(body)
+    assert "gnn" in body["security_capability"]
+    assert body["security_capability"]["gnn"] == {
+        "available": False, "reason": "gnn_capability_unavailable",
+    }
+    assert "mac" not in repr(body).lower()
+    assert "192.0.2." not in repr(body)
+
+
+def test_mobile_device_area_scope_is_dynamic_and_revocation_takes_effect_immediately(
+    mobile_context,
+):
+    claimed = _device_pair(mobile_context, {
+        "scope_kind": "area", "scope_value": "area-a",
+    })
+    path = "/api/v3/mobile/devices/camera-01"
+    assert _mobile_get(mobile_context, path, claimed["access_token"]).status_code == 200
+    with sqlite3.connect(mobile_context.database_path) as connection:
+        connection.execute(
+            "UPDATE v3_device_profiles SET area_id='area-moved' WHERE device_id='camera-01'"
+        )
+    moved = _mobile_get(mobile_context, path, claimed["access_token"])
+    assert moved.status_code == 404
+    _set_scopes(mobile_context, [], expected=1)
+    revoked = _mobile_get(mobile_context, path, claimed["access_token"])
+    assert revoked.status_code == 404
+    assert revoked.get_json()["error"]["code"] == "mobile_device_unavailable"
+
+
+def test_mobile_device_details_never_grant_global_admin_or_cookie_access(mobile_context):
+    claimed = _device_pair(mobile_context, {
+        "scope_kind": "device", "scope_value": "camera-01",
+    })
+    token = claimed["access_token"]
+    for path in (
+        "/api/v3/devices/camera-01",
+        "/api/v3/devices/camera-01/traffic",
+        "/api/v3/devices/camera-01/peers",
+        "/api/v3/monitor",
+    ):
+        response = _mobile_get(mobile_context, path, token)
+        assert response.status_code == 401, path
+    cookie_only = mobile_context.app.test_client()
+    _login(cookie_only)
+    response = cookie_only.get("/api/v3/mobile/devices/camera-01")
+    assert response.status_code == 401
+
+
+def test_mobile_device_notice_summary_includes_only_current_visible_affected_incident(
+    mobile_context,
+):
+    claimed = _device_pair(mobile_context, {
+        "scope_kind": "device", "scope_value": "camera-01",
+    })
+    incident = mobile_context.app.extensions["iot_ids_incident_workflow"]
+    created = incident.create_incident(
+        incident_type="device_anomaly", severity="high", source="manual",
+        admin_title="管理端标题不得返回", admin_summary="管理端详情不得返回",
+        user_title="设备需要留意", user_summary="管理员正在核查设备情况。",
+        devices=[
+            {"device_id": "camera-01", "incident_role": "affected", "user_visible": True},
+            {"device_id": "lock-01", "incident_role": "suspected_source", "user_visible": False},
+        ],
+        publish_to_mobile=True, first_seen_at=mobile_context.clock.value,
+        actor=IncidentActor(1, "admin-test", "admin"), request_id="mobile-detail-incident",
+    )
+    response = _mobile_get(
+        mobile_context, "/api/v3/mobile/devices/camera-01", claimed["access_token"]
+    )
+    assert response.status_code == 200
+    summary = response.get_json()["security_capability"]
+    assert summary["available"] is True
+    assert summary["active_notice_count"] == 1
+    assert summary["recent_notices"] == [{
+        "incident_id": created["incident_id"], "user_title": "设备需要留意",
+        "severity": "high", "status": "open",
+        "updated_at": created["updated_at"], "read": False, "acknowledged": False,
+    }]
+    serialized = repr(response.get_json()).lower()
+    assert "管理端标题" not in serialized
+    assert "lock-01" not in serialized
+    assert "admin_summary" not in serialized
+
+
+def test_mobile_traffic_has_fixed_windows_no_samples_true_zero_stale_and_no_peer_fields(
+    mobile_context,
+):
+    claimed = _device_pair(mobile_context, {
+        "scope_kind": "device", "scope_value": "camera-01",
+    })
+    base = "/api/v3/mobile/devices/camera-01/traffic"
+    empty = _mobile_get(mobile_context, base + "?window=15m", claimed["access_token"])
+    assert empty.status_code == 200
+    empty_body = empty.get_json()
+    assert empty_body["availability"] == {
+        "status": "no_samples", "available": False, "reason": "no_samples",
+    }
+    assert empty_body["summary"] is None
+    assert empty_body["current_rate"]["status"] == "warming_up"
+    assert empty_body["current_rate"]["uploaded_bytes_per_second"] is None
+    for window, duration in (("15m", 900), ("1h", 3600), ("24h", 86400)):
+        response = _mobile_get(mobile_context, f"{base}?window={window}", claimed["access_token"])
+        assert response.status_code == 200
+        bounds = response.get_json()["query_window"]
+        assert (datetime.fromisoformat(bounds["to"].replace("Z", "+00:00")) -
+                datetime.fromisoformat(bounds["from"].replace("Z", "+00:00"))).total_seconds() == duration
+    invalid = _mobile_get(mobile_context, base + "?window=7d", claimed["access_token"])
+    assert invalid.status_code == 400
+    assert invalid.get_json()["error"]["code"] == "invalid_mobile_traffic_window"
+    extra = _mobile_get(mobile_context, base + "?window=15m&peer=all", claimed["access_token"])
+    assert extra.status_code == 400
+
+    sample_at = mobile_context.clock.value - timedelta(minutes=3)
+    bucket = sample_at.replace(second=0, microsecond=0).isoformat().replace("+00:00", "Z")
+    occurred = sample_at.isoformat().replace("+00:00", "Z")
+    with sqlite3.connect(mobile_context.database_path) as connection:
+        connection.execute(
+            "INSERT INTO v3_device_traffic_minutes "
+            "(device_id,bucket_start,tx_bytes,rx_bytes,tx_packets,rx_packets,tx_flow_count,"
+            "rx_flow_count,first_sample_at,last_sample_at,updated_at) "
+            "VALUES (?,?,0,512,1,1,0,0,?,?,?)",
+            ("camera-01", bucket, occurred, occurred, occurred),
+        )
+        connection.executemany(
+            "INSERT INTO v3_device_traffic_protocol_minutes "
+            "(device_id,bucket_start,direction,protocol,bytes,packets,flow_count,"
+            "first_sample_at,last_sample_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [
+                ("camera-01", bucket, "tx", "TCP", 0, 1, 0, occurred, occurred, occurred),
+                ("camera-01", bucket, "rx", "UDP", 512, 1, 0, occurred, occurred, occurred),
+            ],
+        )
+    service = get_service_container(mobile_context.app).get_traffic_service()
+    zero = TrafficSample(
+        source_id="test-zero", sample_id="zero-sample", occurred_at=mobile_context.clock.value,
+        received_at=mobile_context.clock.value, src_ip="192.0.2.10", dst_ip="203.0.113.7",
+        network_protocol="TCP", application_protocol=None, application_protocol_inferred=False,
+        src_port=None, dst_port=None, bytes=0, packets=1, flow_count=0,
+    )
+    service.realtime_window.add("camera-01", "tx", zero)
+    populated = _mobile_get(mobile_context, base + "?window=15m", claimed["access_token"])
+    assert populated.status_code == 200
+    body = populated.get_json()
+    assert body["availability"]["available"] is True
+    assert body["freshness"]["status"] == "stale"
+    assert body["summary"]["uploaded_bytes"] == 0
+    assert body["summary"]["downloaded_bytes"] == 512
+    assert body["current_rate"]["status"] == "available"
+    assert body["current_rate"]["uploaded_bytes_per_second"] == 0
+    assert {item["category"] for item in body["protocols"]} == {"tcp", "udp"}
+    assert "peer" not in repr(body).lower()
+    assert "192.0.2." not in repr(body)
+    assert "203.0.113." not in repr(body)
+
+
+def test_mobile_device_read_rate_limit_and_missing_database_fail_closed(
+    mobile_context, tmp_path,
+):
+    claimed = _device_pair(mobile_context, {
+        "scope_kind": "device", "scope_value": "camera-01",
+    })
+    principal = mobile_context.service.authenticate_access(claimed["access_token"])
+    for _ in range(120):
+        mobile_context.service.consume_scoped_read_limit(
+            principal, action="mobile_device_detail", limit=120,
+        )
+    limited = _mobile_get(
+        mobile_context, "/api/v3/mobile/devices/camera-01", claimed["access_token"]
+    )
+    assert limited.status_code == 429
+    assert limited.get_json()["error"]["code"] == "mobile_rate_limited"
+
+    missing = tmp_path / "mobile-device-missing.sqlite"
+    app = create_app({
+        "TESTING": True, "SECRET_KEY": "mobile-device-missing-secret",
+        "DATABASE_PATH": str(missing), "V3_CLOCK": mobile_context.clock,
+    }, mobile_settings=mobile_context.settings)
+    client = app.test_client()
+    for suffix in ("", "/traffic"):
+        response = client.get(
+            f"/api/v3/mobile/devices/camera-01{suffix}",
+            headers=_bearer(claimed["access_token"]),
+        )
+        assert response.status_code == 503
+        assert response.get_json()["error"]["request_id"]
+    assert not missing.exists()
+    assert [item.version for item in V3_MIGRATIONS] == list(range(1, 9))

@@ -57,12 +57,15 @@ export default function HomeScreen() {
     <Text style={ui.cardTitle}>设备简表</Text>
     {!auth.overview ? <Text style={ui.muted}>尚未获取授权设备数据</Text> : devices.length === 0 ?
       <Text style={ui.muted}>管理员尚未授权设备</Text> : devices.map(device =>
-      <View key={device.device_id} style={ui.card}>
+      <TouchableOpacity key={device.device_id} accessibilityRole="button"
+        accessibilityLabel={`查看设备：${device.display_name}`}
+        style={ui.card} onPress={() => navigation.navigate('设备详情', { deviceId: device.device_id })}>
         <Text style={ui.cardTitle}>{device.display_name}</Text>
         <Text style={[ui.body, { color: device.connection_status === 'online' ? palette.green : palette.text }]}>
           连接：{statusText[device.connection_status]}
         </Text>
         <Text style={ui.muted}>运行模式：{device.operation_mode}{device.retired ? ' · 已退役' : ''}</Text>
-      </View>)}
+        <Text style={ui.secondaryText}>查看设备详情</Text>
+      </TouchableOpacity>)}
   </ScrollView>;
 }

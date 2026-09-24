@@ -18,11 +18,19 @@ from flask import Blueprint, current_app, g, jsonify, request, session
 from config import MobileSecuritySettings
 from contracts import Role
 from services.auth import effective_role
+from services.device_traffic import DeviceTrafficService
 from services.mobile_access import (
     MobileAccessError,
     MobileAccessService,
     MobileActor,
     MobileAuthenticationError,
+    MobileRateLimited,
+)
+from services.mobile_device import (
+    MobileDeviceReadService,
+    MobileDeviceTrafficUnavailable,
+    MobileDeviceTrafficWindowError,
+    MobileDeviceUnavailable,
 )
 
 
@@ -128,13 +136,20 @@ def create_v3_mobile_blueprint(
     *,
     clock: Callable | None = None,
     fault_injector: Callable[[str], None] | None = None,
+    traffic_service: DeviceTrafficService | None = None,
 ) -> Blueprint:
     """Create side-effect-free mobile routes with injectable service dependencies."""
     service = MobileAccessService(
         database_path, settings, clock=clock, fault_injector=fault_injector
     )
+    device_service = MobileDeviceReadService(
+        service,
+        traffic_service or DeviceTrafficService(database_path, clock=clock),
+        clock=clock,
+    )
     blueprint = Blueprint("v3_mobile", __name__)
     blueprint.mobile_service = service
+    blueprint.mobile_device_service = device_service
     if settings.allow_insecure_http:
         LOGGER.warning(
             "mobile_insecure_http_enabled environment=%s loopback_or_test_only=true",
@@ -205,6 +220,24 @@ def create_v3_mobile_blueprint(
             return _error(exc.code, message, exc.status)
         except sqlite3.Error:
             return _error("mobile_store_unavailable", "移动会话存储暂时不可用", 503)
+
+    def handle_mobile_device_read(callable_):
+        try:
+            return jsonify(callable_())
+        except ApiInputError as exc:
+            return _error(exc.code, str(exc), exc.status)
+        except MobileDeviceUnavailable as exc:
+            return _error(exc.code, "设备不可用或不在当前授权范围", 404)
+        except MobileDeviceTrafficWindowError as exc:
+            return _error(exc.code, str(exc), 400)
+        except MobileDeviceTrafficUnavailable as exc:
+            return _error(exc.code, "流量服务暂时不可用", 503)
+        except MobileRateLimited:
+            return _error("mobile_rate_limited", "请求过于频繁，请稍后再试", 429)
+        except MobileAccessError as exc:
+            return _error(exc.code, "移动服务暂时不可用", exc.status)
+        except sqlite3.Error:
+            return _error("mobile_store_unavailable", "移动服务暂时不可用", 503)
 
     def one(name: str) -> str | None:
         values = request.args.getlist(name)
@@ -380,6 +413,39 @@ def create_v3_mobile_blueprint(
     @mobile
     def mobile_overview():
         return handle(lambda: jsonify(service.overview(g.mobile_principal)))
+
+    @blueprint.get("/api/v3/mobile/devices/<device_id>")
+    @secure
+    @mobile
+    def mobile_device_detail(device_id: str):
+        def execute():
+            if request.args:
+                raise ApiInputError("unknown_query_parameters", "设备详情不接受查询参数")
+            service.consume_scoped_read_limit(
+                g.mobile_principal,
+                action="mobile_device_detail",
+                limit=120,
+            )
+            return device_service.detail(g.mobile_principal, device_id)
+
+        return handle_mobile_device_read(execute)
+
+    @blueprint.get("/api/v3/mobile/devices/<device_id>/traffic")
+    @secure
+    @mobile
+    def mobile_device_traffic(device_id: str):
+        def execute():
+            if set(request.args) - {"window"} or len(request.args.getlist("window")) > 1:
+                raise ApiInputError("invalid_query", "仅支持 window=15m、1h 或 24h")
+            window = request.args.get("window", "15m")
+            service.consume_scoped_read_limit(
+                g.mobile_principal,
+                action="mobile_device_traffic",
+                limit=60,
+            )
+            return device_service.traffic(g.mobile_principal, device_id, window)
+
+        return handle_mobile_device_read(execute)
 
     @blueprint.get("/api/v3/mobile-sessions")
     @admin(write=False)

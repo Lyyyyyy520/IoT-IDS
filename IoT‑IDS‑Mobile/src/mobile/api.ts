@@ -19,6 +19,47 @@ export type MobileDevice = {
   retired: boolean; retired_at: string | null; last_updated_at: string | null;
   availability_status: 'available' | 'delayed' | 'unavailable' | 'unknown' | 'maintenance' | 'disabled' | 'retired';
 };
+export type MobileDeviceNoticeSummary = {
+  incident_id: string; user_title: string;
+  severity: 'info' | 'low' | 'medium' | 'high' | 'critical';
+  status: 'open' | 'acknowledged' | 'recovering'; updated_at: string;
+  read: boolean; acknowledged: boolean;
+};
+export type MobileDeviceDetail = {
+  device_id: string; display_name: string; device_type: string; area_id: string | null;
+  connection_status: 'online' | 'stale' | 'offline' | 'unknown';
+  operation_mode: 'active' | 'maintenance' | 'disabled'; retired: boolean;
+  retired_at: string | null; last_updated_at: string | null; last_seen_at: string | null;
+  availability_status: 'available' | 'delayed' | 'unavailable' | 'unknown' | 'maintenance' | 'disabled' | 'retired';
+  status_text: { connection: string; operation: string }; availability_text: string;
+  security_capability: {
+    available: boolean; reason: string | null; active_notice_count: number | null;
+    recent_notices: MobileDeviceNoticeSummary[];
+    gnn: { available: false; reason: string };
+  };
+  traffic_capability: { available: boolean; reason: string | null };
+};
+export type MobileTrafficWindow = '15m' | '1h' | '24h';
+export type MobileTrafficPoint = {
+  bucket_start: string; uploaded_bytes: number; downloaded_bytes: number;
+  uploaded_packets: number; downloaded_packets: number;
+};
+export type MobileDeviceTraffic = {
+  device_id: string; window: MobileTrafficWindow;
+  query_window: { from: string; to: string }; generated_at: string; is_historical: boolean;
+  availability: { status: 'available' | 'no_samples'; available: boolean; reason: string | null };
+  freshness: { status: 'fresh' | 'stale' | 'unavailable'; latest_sample_at: string | null };
+  current_rate: {
+    status: 'available' | 'warming_up'; label: string; window_seconds: number | null;
+    as_of: string | null; uploaded_bytes_per_second: number | null;
+    downloaded_bytes_per_second: number | null; uploaded_packets_per_second: number | null;
+    downloaded_packets_per_second: number | null;
+  };
+  summary: { uploaded_bytes: number; downloaded_bytes: number; uploaded_packets: number; downloaded_packets: number } | null;
+  trend_resolution_seconds: number; trend: MobileTrafficPoint[];
+  protocols: { category: 'tcp' | 'udp' | 'network_diagnostics' | 'other'; label: string; bytes: number; packets: number; share_percent: number }[];
+  data_quality: { complete: null; message: string };
+};
 export type Overview = {
   generated_at: string; user: { user_id: number; username: string };
   devices: MobileDevice[]; security_capability: SecurityCapability;
@@ -205,6 +246,114 @@ export function parseHelpRequestList(value: unknown): { items: MobileHelpRequest
   return { items: x.items.map(parseHelpRequest) };
 }
 
+const finiteNonnegative = (value: unknown): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new Error('number');
+  return value;
+};
+const parseDeviceNoticeSummary = (value: unknown): MobileDeviceNoticeSummary => {
+  const x = obj(value); onlyKeys(x, ['incident_id', 'user_title', 'severity', 'status', 'updated_at', 'read', 'acknowledged']);
+  if (typeof x.read !== 'boolean' || typeof x.acknowledged !== 'boolean') throw new Error('notice state');
+  return { incident_id: nonempty(x.incident_id), user_title: str(x.user_title),
+    severity: oneOf(x.severity, ['info', 'low', 'medium', 'high', 'critical']),
+    status: oneOf(x.status, ['open', 'acknowledged', 'recovering']), updated_at: iso(x.updated_at),
+    read: x.read, acknowledged: x.acknowledged };
+};
+export function parseMobileDeviceDetail(value: unknown): MobileDeviceDetail {
+  const x = obj(value);
+  onlyKeys(x, ['device_id', 'display_name', 'device_type', 'area_id', 'connection_status', 'operation_mode',
+    'retired', 'retired_at', 'last_updated_at', 'last_seen_at', 'availability_status', 'status_text',
+    'availability_text', 'security_capability', 'traffic_capability']);
+  if (typeof x.retired !== 'boolean') throw new Error('retired');
+  const status = obj(x.status_text); onlyKeys(status, ['connection', 'operation']);
+  const security = obj(x.security_capability);
+  onlyKeys(security, ['available', 'reason', 'active_notice_count', 'recent_notices', 'gnn']);
+  const gnn = obj(security.gnn); onlyKeys(gnn, ['available', 'reason']);
+  if (gnn.available !== false || typeof security.available !== 'boolean' || !Array.isArray(security.recent_notices)) throw new Error('security capability');
+  const count = security.active_notice_count === null ? null : int(security.active_notice_count);
+  if (security.available && count === null) throw new Error('active notice count');
+  const traffic = obj(x.traffic_capability); onlyKeys(traffic, ['available', 'reason']);
+  if (typeof traffic.available !== 'boolean') throw new Error('traffic capability');
+  return {
+    device_id: nonempty(x.device_id), display_name: str(x.display_name), device_type: str(x.device_type),
+    area_id: nullable(x.area_id, str), connection_status: oneOf(x.connection_status, ['online', 'stale', 'offline', 'unknown']),
+    operation_mode: oneOf(x.operation_mode, ['active', 'maintenance', 'disabled']), retired: x.retired,
+    retired_at: nullable(x.retired_at, iso), last_updated_at: nullable(x.last_updated_at, iso), last_seen_at: nullable(x.last_seen_at, iso),
+    availability_status: oneOf(x.availability_status, ['available', 'delayed', 'unavailable', 'unknown', 'maintenance', 'disabled', 'retired']),
+    status_text: { connection: str(status.connection), operation: str(status.operation) }, availability_text: str(x.availability_text),
+    security_capability: { available: security.available, reason: nullable(security.reason, str), active_notice_count: count,
+      recent_notices: security.recent_notices.map(parseDeviceNoticeSummary),
+      gnn: { available: false, reason: nonempty(gnn.reason) } },
+    traffic_capability: { available: traffic.available, reason: nullable(traffic.reason, str) },
+  };
+}
+const parseMobileTrafficPoint = (value: unknown): MobileTrafficPoint => {
+  const x = obj(value); onlyKeys(x, ['bucket_start', 'uploaded_bytes', 'downloaded_bytes', 'uploaded_packets', 'downloaded_packets']);
+  return { bucket_start: iso(x.bucket_start), uploaded_bytes: int(x.uploaded_bytes), downloaded_bytes: int(x.downloaded_bytes),
+    uploaded_packets: int(x.uploaded_packets), downloaded_packets: int(x.downloaded_packets) };
+};
+export function parseMobileDeviceTraffic(value: unknown): MobileDeviceTraffic {
+  const x = obj(value);
+  onlyKeys(x, ['device_id', 'window', 'query_window', 'generated_at', 'is_historical', 'availability', 'freshness',
+    'current_rate', 'summary', 'trend_resolution_seconds', 'trend', 'protocols', 'data_quality']);
+  if (typeof x.is_historical !== 'boolean' || !Array.isArray(x.trend) || !Array.isArray(x.protocols)) throw new Error('traffic');
+  const bounds = obj(x.query_window); onlyKeys(bounds, ['from', 'to']);
+  const availability = obj(x.availability); onlyKeys(availability, ['status', 'available', 'reason']);
+  if (typeof availability.available !== 'boolean') throw new Error('availability');
+  const freshness = obj(x.freshness); onlyKeys(freshness, ['status', 'latest_sample_at']);
+  const rate = obj(x.current_rate);
+  onlyKeys(rate, ['status', 'label', 'window_seconds', 'as_of', 'uploaded_bytes_per_second', 'downloaded_bytes_per_second',
+    'uploaded_packets_per_second', 'downloaded_packets_per_second']);
+  const optionalRate = (v: unknown) => nullable(v, finiteNonnegative);
+  if (rate.status === 'available' && [rate.uploaded_bytes_per_second, rate.downloaded_bytes_per_second,
+    rate.uploaded_packets_per_second, rate.downloaded_packets_per_second].some(v => v === null || v === undefined)) throw new Error('available rate');
+  const summary = x.summary === null ? null : (() => {
+    const s = obj(x.summary); onlyKeys(s, ['uploaded_bytes', 'downloaded_bytes', 'uploaded_packets', 'downloaded_packets']);
+    return { uploaded_bytes: int(s.uploaded_bytes), downloaded_bytes: int(s.downloaded_bytes),
+      uploaded_packets: int(s.uploaded_packets), downloaded_packets: int(s.downloaded_packets) };
+  })();
+  const quality = obj(x.data_quality); onlyKeys(quality, ['complete', 'message']);
+  if (quality.complete !== null) throw new Error('quality');
+  const availabilityStatus = oneOf(availability.status, ['available', 'no_samples']);
+  const freshnessStatus = oneOf(freshness.status, ['fresh', 'stale', 'unavailable']);
+  const latestSampleAt = nullable(freshness.latest_sample_at, iso);
+  const trend = x.trend.map(parseMobileTrafficPoint);
+  const protocols = x.protocols.map((raw: unknown) => { const p = obj(raw); onlyKeys(p, ['category', 'label', 'bytes', 'packets', 'share_percent']);
+    const share = finiteNonnegative(p.share_percent); if (share > 100) throw new Error('share');
+    return { category: oneOf(p.category, ['tcp', 'udp', 'network_diagnostics', 'other']), label: str(p.label),
+      bytes: int(p.bytes), packets: int(p.packets), share_percent: share }; });
+  if (availabilityStatus === 'available') {
+    if (!availability.available || summary === null || latestSampleAt === null || freshnessStatus === 'unavailable')
+      throw new Error('available data consistency');
+  } else if (availability.available || availability.reason !== 'no_samples' || summary !== null ||
+    trend.length > 0 || protocols.length > 0 || latestSampleAt !== null || freshnessStatus !== 'unavailable') {
+    throw new Error('no sample consistency');
+  }
+  const resolution = int(x.trend_resolution_seconds);
+  if (resolution <= 0) throw new Error('trend resolution');
+  const queryFrom = iso(bounds.from), queryTo = iso(bounds.to);
+  if (Date.parse(queryFrom) >= Date.parse(queryTo)) throw new Error('query bounds');
+  const currentRateStatus = oneOf(rate.status, ['available', 'warming_up']);
+  const rateWindow = nullable(rate.window_seconds, int);
+  const rateAsOf = nullable(rate.as_of, iso);
+  const rateValues = [rate.uploaded_bytes_per_second, rate.downloaded_bytes_per_second,
+    rate.uploaded_packets_per_second, rate.downloaded_packets_per_second].map(optionalRate);
+  if (currentRateStatus === 'available') {
+    if (rateWindow === null || rateWindow <= 0 || rateAsOf === null || rateValues.some(v => v === null))
+      throw new Error('available rate consistency');
+  } else if (rateValues.some(v => v !== null)) throw new Error('warming rate consistency');
+  return { device_id: nonempty(x.device_id), window: oneOf(x.window, ['15m', '1h', '24h']),
+    query_window: { from: queryFrom, to: queryTo }, generated_at: iso(x.generated_at), is_historical: x.is_historical,
+    availability: { status: availabilityStatus, available: availability.available,
+      reason: nullable(availability.reason, str) },
+    freshness: { status: freshnessStatus, latest_sample_at: latestSampleAt },
+    current_rate: { status: currentRateStatus, label: str(rate.label),
+      window_seconds: rateWindow, as_of: rateAsOf,
+      uploaded_bytes_per_second: rateValues[0], downloaded_bytes_per_second: rateValues[1],
+      uploaded_packets_per_second: rateValues[2], downloaded_packets_per_second: rateValues[3] },
+    summary, trend_resolution_seconds: resolution, trend, protocols,
+    data_quality: { complete: null, message: str(quality.message) } };
+}
+
 async function request<T>(config: ServerConfig, path: string, parse: (v: unknown) => T,
   options: { method?: 'GET' | 'POST'; body?: object; accessToken?: string; signal?: AbortSignal; idempotencyKey?: string } = {}): Promise<T> {
   let response: Response;
@@ -266,4 +415,9 @@ export const mobileApi = {
     request(config, '/api/v3/mobile/help-requests', parseHelpRequestList, { accessToken, signal }),
   helpRequest: (config: ServerConfig, accessToken: string, helpRequestId: string, signal?: AbortSignal) =>
     request(config, `/api/v3/mobile/help-requests/${encodeURIComponent(helpRequestId)}`, parseHelpRequest, { accessToken, signal }),
+  deviceDetail: (config: ServerConfig, accessToken: string, deviceId: string, signal?: AbortSignal) =>
+    request(config, `/api/v3/mobile/devices/${encodeURIComponent(deviceId)}`, parseMobileDeviceDetail, { accessToken, signal }),
+  deviceTraffic: (config: ServerConfig, accessToken: string, deviceId: string, window: MobileTrafficWindow = '15m', signal?: AbortSignal) =>
+    request(config, `/api/v3/mobile/devices/${encodeURIComponent(deviceId)}/traffic?window=${encodeURIComponent(window)}`,
+      parseMobileDeviceTraffic, { accessToken, signal }),
 };
