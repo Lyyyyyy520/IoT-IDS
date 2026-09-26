@@ -36,11 +36,9 @@ _ALLOWED_REASONS = {
     "mqtt_managed_by_single_worker",
     "debug_reloader_parent",
     "traffic_not_started",
-    "capture_not_started",
     "worker_stop_timeout",
     "traffic_store_unavailable",
     "aggregation_transaction_failed",
-    "capture_aggregation_failed",
     "candidate_capacity_reached",
     "discovery_storage_error",
     "component_restarting",
@@ -293,8 +291,6 @@ def build_system_health(
                         "SELECT readiness,reason,updated_at FROM v3_system_component_health "
                         "WHERE component_id='traffic-aggregation'"
                     ).fetchone()
-                    capture = container.capture_service
-                    capture_running = bool(capture is not None and getattr(capture, "running", False))
                     if not integrity_ok:
                         traffic_status, traffic_reason = "degraded", "integrity_check_failed"
                     elif traffic_row is None:
@@ -314,8 +310,6 @@ def build_system_health(
                     components["traffic"] = _component(
                         traffic_status, traffic_reason, observed_at,
                         aggregation_status=traffic_status,
-                        capture_status="ready" if capture_running else "unavailable",
-                        capture_reason_code=None if capture_running else "capture_not_started",
                     )
                     components["incident"] = _component("ready", None, observed_at)
                     components["mobile"] = _component("ready", None, observed_at)

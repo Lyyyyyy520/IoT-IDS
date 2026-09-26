@@ -6,18 +6,17 @@
 
 - 创建 Flask app，并应用可覆盖配置；
 - 为该 app 创建独立的 `BackendServiceContainer`；
-- 注册 legacy、probe 及各个独立 v3 Blueprint；
+- 注册 health/auth、probe 及各个独立 v3 Blueprint；
 - 注册缺库时的安全错误处理。
 
 它不会创建或打开数据库、执行 migration、创建用户、加载 Paho、连接 Broker 或启动
-线程。多个测试 app 拥有不同的 service container，不共享 MQTT 或抓包对象。
+线程。多个测试 app 拥有不同的 service container，不共享 MQTT subscriber 或流量聚合窗口。
 
-legacy 路由函数主体保持不变，统一移入 `legacy_api` Blueprint。probe 继续使用现有
-`probe` Blueprint。v3 通过
-`create_v3_realtime_blueprint(...)`、`create_v3_devices_blueprint(...)` 和
-`create_v3_traffic_blueprint(...)` 和 `create_v3_mobile_blueprint(...)` 注册，因此正式
-app 始终有 monitor/events、设备管理、只读 traffic/peers 以及受限 mobile 路由；
-缺少数据库时返回 503，而不是 404 或演示数据。
+`legacy_api` Blueprint 只保留 `/api/health` 与 `/api/auth/login|logout|me`；旧版页面所用
+REST handler 已删除。`probe` Blueprint 保留实际边缘客户端使用的注册、心跳、v2 push、
+状态上报及受控轮询/控制。v3 blueprint 提供 monitor/events、设备/发现、设备流量、事件、
+移动用户管理、配对、受限 Mobile API 和只读系统健康；完整路径见
+[`docs/05-api-spec.md`](../05-api-spec.md)。数据库缺失时数据库接口返回 503，不返回演示数据。
 
 ## 2. 唯一数据库路径
 

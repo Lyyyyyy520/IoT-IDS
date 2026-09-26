@@ -15,6 +15,19 @@ def test_empty_database_does_not_receive_shared_default_accounts(tmp_path, monke
         assert connection.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
 
 
+def test_empty_legacy_asset_inventory_is_not_filled_with_demo_devices(tmp_path, monkeypatch):
+    database_path = tmp_path / "ids.db"
+    monkeypatch.delenv("IOT_IDS_BOOTSTRAP_ADMIN_PASSWORD", raising=False)
+
+    database.init_db(database_path)
+
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM assets").fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM config WHERE key IN "
+            "('detection_mode', 'confidence_threshold', 'merge_window_minutes', 'auto_block')"
+        ).fetchone()[0] == 0
+
 def test_explicit_bootstrap_admin_is_hashed_and_idempotent(tmp_path, monkeypatch):
     database_path = tmp_path / "ids.db"
     monkeypatch.setenv("IOT_IDS_BOOTSTRAP_ADMIN_USERNAME", "initial-admin")

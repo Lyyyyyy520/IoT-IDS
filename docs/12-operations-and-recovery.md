@@ -80,6 +80,7 @@ with sqlite3.connect("verified-backup.sqlite") as source:
 
 ## 故障处理与运行限制
 
+- Windows 桌面演示使用仓库根目录的一键启动.bat。若提示 5000 端口进程未验证，启动器会保留进程；先按 PID 检查命令行和 /api/health。它只复用命令行指向当前仓库、绑定 127.0.0.1:5000 且健康 API 报告数据库/v3 schema 可用的后端，每次按端口监听进程、命令行和健康 API 实时识别服务，不保存也不依赖 PID。未知或多个不匹配监听进程不会被自动结束。
 - `database_file_missing`：核对配置和恢复介质；服务不会自动建立空库。
 - `schema_checksum_mismatch` / `schema_incomplete`：停止写入，核对发布版本与备份；维护不会迁移 schema。
 - `database_read_only`：核对文件及父目录权限。不要尝试用新空库替代。
@@ -88,7 +89,7 @@ with sqlite3.connect("verified-backup.sqlite") as source:
 - `database_wal_mode_unsupported`、`database_sidecar_present`、`database_journal_present` 或 WAL/SHM 不匹配：停止所有进程，保留整组文件，通过 SQLite API 做隔离副本和恢复检查；不要自行删 sidecar。
 - 维护前/中完整性检查失败：不继续清理；事务内失败会回滚。保留失败库、journal 和日志用于责任人复核。
 - 自动维护固定关闭。MQTT subscriber 不会由多进程 WSGI worker 启动；需要 MQTT 时使用一个单实例后端进程。debug reloader 父进程不启动服务。SQLite 锁冲突应等待写事务结束，不能删除锁文件或 sidecar。
-- runtime start/stop 对同一 app 实例可重复调用。启动部分失败会停止已创建的 subscriber；修复数据库/配置后可再次启动。停止时请求停止该 app 拥有的 capture service 并等待采集线程退出；超时记录稳定 `worker_stop_timeout` reason code。
+- runtime start/stop 对同一 app 实例可重复调用。启动部分失败会停止已创建的 subscriber；修复数据库/配置后可再次启动。停止时请求停止该 app 拥有的 MQTT subscriber 并等待其线程退出；超时记录稳定 `worker_stop_timeout` reason code。
 
 ## SSE 重同步与现场验收
 

@@ -53,12 +53,12 @@ describe('MainLayout system health navigation', () => {
 describe('MainLayout mobile access navigation', () => {
   it('shows APP access administration only to administrators', async () => {
     await renderLayout();
-    expect(screen.getByText('APP 访问管理')).toBeInTheDocument();
+    expect(screen.getByText('移动用户管理')).toBeInTheDocument();
   });
 
   it.each(['operator', 'user'])('does not render the entry for %s', async (role) => {
     auth.role = role;
     await renderLayout();
-    expect(screen.queryByText('APP 访问管理')).not.toBeInTheDocument();
+    expect(screen.queryByText('移动用户管理')).not.toBeInTheDocument();
   });
 });

@@ -166,9 +166,7 @@ def test_missing_database_health_and_all_database_routes_fail_closed(tmp_path):
     assert client.get("/api/v3/monitor").status_code == 503
     assert client.get("/api/v3/events?after=0").status_code == 503
     assert client.get("/api/v3/devices").status_code == 503
-    legacy = client.get("/api/assets")
-    assert legacy.status_code == 503
-    assert legacy.get_json()["code"] == "database_unavailable"
+    assert client.get("/api/assets").status_code == 404
     assert not missing.exists()
 
 
@@ -224,22 +222,27 @@ def test_registered_v3_routes_preserve_restricted_roles(tmp_path, role, expected
     assert client.get("/api/v3/devices/discovered").status_code == expected
 
 
-def test_legacy_and_probe_routes_remain_registered(tmp_path):
+def test_current_and_compatibility_routes_remain_registered(tmp_path):
     application = create_app(_config(tmp_path / "missing.sqlite"))
     rules = {rule.rule for rule in application.url_map.iter_rules()}
 
-    assert "/api/auth/login" in rules
-    assert "/api/dashboard/stats" in rules
-    assert "/api/alerts" in rules
-    assert "/api/assets" in rules
-    assert "/api/config" in rules
-    assert "/api/probe/heartbeat" in rules
-    assert "/api/v3/monitor" in rules
-    assert "/api/v3/events" in rules
-    assert "/api/v3/devices" in rules
-    assert "/api/v3/devices/<device_id>" in rules
-    assert "/api/v3/devices/discovered" in rules
-    assert "/api/v3/devices/discovered/<candidate_id>" in rules
+    assert {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me"} <= rules
+    assert {
+        "/api/probe/register", "/api/probe/heartbeat", "/api/probe/push",
+        "/api/probe/control", "/api/probe/control-status", "/api/probe/status-report",
+    } <= rules
+    assert {
+        "/api/v3/monitor", "/api/v3/events", "/api/v3/devices",
+        "/api/v3/devices/<device_id>", "/api/v3/devices/discovered",
+        "/api/v3/devices/discovered/<candidate_id>", "/api/v3/devices/<device_id>/traffic",
+        "/api/v3/incidents", "/api/v3/system/health", "/api/v3/mobile-users",
+    } <= rules
+    assert not {
+        "/api/dashboard/stats", "/api/alerts", "/api/assets", "/api/traffic/summary",
+        "/api/analysis/mitre", "/api/detect/upload", "/api/export/excel",
+        "/api/policy", "/api/logs", "/api/probe/list", "/api/probe/status",
+        "/api/capture/start",
+    } & rules
 
 
 def test_create_app_does_not_create_default_account(tmp_path, monkeypatch):
@@ -431,39 +434,15 @@ def test_multiworker_wsgi_does_not_start_per_process_mqtt_subscriber(tmp_path):
     assert factory_calls == []
 
 
-def test_runtime_shutdown_waits_for_capture_worker(tmp_path):
+def test_runtime_container_has_no_legacy_capture_worker(tmp_path):
     application = create_app(
         _config(tmp_path / "missing.sqlite"),
         mqtt_settings_provider=lambda: _settings(enabled=False),
         service_environment={},
     )
-    stopped = threading.Event()
-    done = threading.Event()
-    worker = threading.Thread(
-        target=lambda: (stopped.wait(timeout=2), done.set()),
-        name="capture-shutdown-test-worker",
-        daemon=True,
-    )
-    worker.start()
-
-    class Capture:
-        running = True
-        thread = worker
-
-        @staticmethod
-        def stop():
-            Capture.running = False
-            stopped.set()
-
     container = get_service_container(application)
-    container.capture_service = Capture()
-
-    stop_runtime_services(application)
-
-    assert done.is_set()
-    assert not worker.is_alive()
-    assert container.capture_service.running is False
-
+    assert not hasattr(container, "capture_service")
+    assert not hasattr(container, "get_capture_service")
 
 def test_retention_environment_is_validated_at_application_startup(tmp_path, monkeypatch):
     database_path = tmp_path / "must-not-be-created.sqlite"

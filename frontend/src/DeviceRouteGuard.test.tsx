@@ -36,7 +36,7 @@ function guardTree(path = '/devices') {
     >
       <Routes>
         <Route path="/login" element={<div>登录页</div>} />
-        <Route path="/dashboard" element={<div>普通用户首页</div>} />
+        <Route path="/mobile-app-required" element={<div>普通用户请使用移动端</div>} />
         <Route
           path="/devices"
           element={<RequireDeviceRole><div>设备管理工作区</div></RequireDeviceRole>}
@@ -72,7 +72,7 @@ describe('v3 management route guards', () => {
   it('rejects a user at the route boundary', () => {
     auth.role = 'user';
     renderGuard();
-    expect(screen.getByText('普通用户首页')).toBeInTheDocument();
+    expect(screen.getByText('普通用户请使用移动端')).toBeInTheDocument();
     expect(screen.queryByText('设备管理工作区')).not.toBeInTheDocument();
   });
 
@@ -92,7 +92,7 @@ describe('v3 management route guards', () => {
   it('rejects a user at the incident route boundary', () => {
     auth.role = 'user';
     renderGuard('/incidents');
-    expect(screen.getByText('普通用户首页')).toBeInTheDocument();
+    expect(screen.getByText('普通用户请使用移动端')).toBeInTheDocument();
     expect(screen.queryByText('事件处置工作区')).not.toBeInTheDocument();
   });
 

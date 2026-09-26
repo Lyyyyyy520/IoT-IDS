@@ -1,3 +1,5 @@
+> 历史参考：本文是 2026-08 的旧硬件部署步骤，包含已过期的网络和凭据示例，不可作为当前操作手册。当前服务、数据库升级与恢复以 [README](../README.md)、[API 目录](05-api-spec.md)、[v3 清理清单](rebuild/legacy-cleanup-inventory.md) 和 [运维恢复手册](12-operations-and-recovery.md) 为准。
+
 # 09 - 现场部署步骤清单（硬件到货后照着做）
 
 > 状态：部署操作手册

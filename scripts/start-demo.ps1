@@ -15,7 +15,6 @@ $DatabaseLockPath = "$DatabasePath.bootstrap.lock"
 $BackupDir = Join-Path (Split-Path -Parent $DatabasePath) 'backups'
 $RuntimeDir = Join-Path $KnownLocalAppData 'IoT-IDS\runtime'
 $LogDir = Join-Path $KnownLocalAppData 'IoT-IDS\logs'
-$StatePath = Join-Path $RuntimeDir 'launcher-state.txt'
 $BackendLog = Join-Path $LogDir 'backend.stdout.log'
 $BackendErrorLog = Join-Path $LogDir 'backend.stderr.log'
 $FrontendLog = Join-Path $LogDir 'frontend.stdout.log'
@@ -72,42 +71,30 @@ function Get-Secret([string]$Path) {
     return $secret
 }
 
-function Get-PathHash([string]$Value) {
-    $normalized = [IO.Path]::GetFullPath($Value).TrimEnd('\').ToUpperInvariant()
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try {
-        $bytes = [Text.Encoding]::UTF8.GetBytes($normalized)
-        return [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant()
-    } finally {
-        $sha.Dispose()
-    }
-}
-
-$ProjectHash = Get-PathHash $ProjectRoot
-$DatabaseHash = Get-PathHash $DatabasePath
-
-function Write-State($State) {
-    $lines = @(
-        "projectHash=$ProjectHash",
-        "databaseHash=$DatabaseHash",
-        "backendPid=$($State.backendPid)",
-        "frontendPid=$($State.frontendPid)"
-    )
-    [IO.File]::WriteAllLines($StatePath, [string[]]$lines, [Text.Encoding]::ASCII)
-}
-
 function Test-BackendHealth {
     try {
         $health = Invoke-RestMethod -Uri "$ApiRoot/api/health" -TimeoutSec 3
-        $expectedModel = [IO.Path]::GetFullPath((Join-Path $BackendDir 'data\best_model.onnx'))
-        $actualModel = if ($health.model_path) { [IO.Path]::GetFullPath([string]$health.model_path) } else { '' }
         return ($health.status -eq 'ok' -and
             $health.database.available -eq $true -and
-            $health.database.v3_schema_ready -eq $true -and
-            [String]::Equals($actualModel, $expectedModel, [StringComparison]::OrdinalIgnoreCase))
+            $health.database.v3_schema_ready -eq $true)
     } catch {
         return $false
     }
+}
+
+function Test-ProjectBackendProcess($Record) {
+    if (-not $Record) { return $false }
+    $commandLine = [string]$Record.CommandLine
+    foreach ($requiredArgument in @(
+        $BackendApp,
+        '-m flask',
+        '--host 127.0.0.1',
+        '--port 5000',
+        '--no-reload'
+    )) {
+        if (-not (Test-CommandContains $commandLine $requiredArgument)) { return $false }
+    }
+    return $true
 }
 
 function Test-FrontendHealth {
@@ -353,44 +340,19 @@ try {
 
     Initialize-MissingDemoDatabase
 
-    $state = $null
-    if (Test-Path -LiteralPath $StatePath) {
-        try {
-            $saved = @{}
-            foreach ($line in Get-Content -LiteralPath $StatePath -Encoding ASCII) {
-                $parts = $line -split '=', 2
-                if ($parts.Count -eq 2) { $saved[$parts[0]] = $parts[1] }
-            }
-            if ($saved.projectHash -eq $ProjectHash -and $saved.databaseHash -eq $DatabaseHash) {
-                $state = @{
-                    projectHash = $ProjectHash
-                    databaseHash = $DatabaseHash
-                    backendPid = [int]$saved.backendPid
-                    frontendPid = [int]$saved.frontendPid
-                }
-            }
-        } catch {
-            $state = $null
-        }
-    }
-    if (-not $state) {
-        $state = @{ projectHash = $ProjectHash; databaseHash = $DatabaseHash; backendPid = 0; frontendPid = 0 }
-    }
-
     $backendOwners = @(Get-ListenPids 5000)
     $frontendOwners = @(Get-ListenPids 3000)
     $backendReady = $false
     $frontendReady = $false
 
     if ($backendOwners.Count -gt 0 -and $script:DemoDatabaseBootstrapped) {
+        if ($backendOwners.Count -ne 1) {
+            throw 'Multiple processes are listening on port 5000. No process was stopped.'
+        }
         $confirmedBackendOwners = @()
         foreach ($ownerId in $backendOwners) {
             $record = Get-ProcessRecord ([int]$ownerId)
-            $isProjectBackend = $record -and
-                (Test-CommandContains ([string]$record.CommandLine) $BackendApp) -and
-                (Test-CommandContains ([string]$record.CommandLine) '--port 5000') -and
-                (Test-CommandContains ([string]$record.CommandLine) '--host 127.0.0.1') -and
-                (Test-CommandContains ([string]$record.CommandLine) '-m flask')
+            $isProjectBackend = Test-ProjectBackendProcess $record
             if (-not $isProjectBackend) {
                 throw 'Port 5000 has a listener that cannot be confirmed as this project. It was left running.'
             }
@@ -411,45 +373,33 @@ try {
     }
 
     if ($backendOwners.Count -gt 0) {
-        $pidValue = [int]$state.backendPid
-        $record = if ($pidValue -gt 0) { Get-ProcessRecord $pidValue } else { $null }
-        $validOwner = $record -and
-            (Test-CommandContains ([string]$record.CommandLine) $BackendApp) -and
-            (Test-CommandContains ([string]$record.CommandLine) '--port 5000') -and
-            ($backendOwners -contains $pidValue)
-        if (-not $validOwner -or -not (Test-BackendHealth)) {
+        if ($backendOwners.Count -ne 1) {
+            throw 'Multiple processes are listening on port 5000. They were left running.'
+        }
+        $ownerId = [int]$backendOwners[0]
+        $record = Get-ProcessRecord $ownerId
+        if (-not (Test-ProjectBackendProcess $record) -or -not (Test-BackendHealth)) {
             throw 'Port 5000 is occupied by an unverified process. It was left running; inspect it before retrying.'
         }
         $backendReady = $true
-        Write-Status 'Reusing this launchers verified backend.'
+        Write-Status 'Reusing the healthy project backend discovered on port 5000.'
     }
-
     if ($frontendOwners.Count -gt 0) {
-        $pidValue = [int]$state.frontendPid
-        $record = if ($pidValue -gt 0) { Get-ProcessRecord $pidValue } else { $null }
+        if ($frontendOwners.Count -ne 1) {
+            throw 'Multiple processes are listening on port 3000. They were left running.'
+        }
+        $ownerId = [int]$frontendOwners[0]
+        $record = Get-ProcessRecord $ownerId
         $validOwner = $record -and
             (Test-CommandContains ([string]$record.CommandLine) $ViteCli) -and
             (Test-CommandContains ([string]$record.CommandLine) '--port 3000') -and
-            ($frontendOwners -contains $pidValue)
-        if (-not $validOwner -and $frontendOwners.Count -eq 1) {
-            $candidatePid = [int]$frontendOwners[0]
-            $candidateRecord = Get-ProcessRecord $candidatePid
-            $validOwner = $candidateRecord -and
-                (Test-CommandContains ([string]$candidateRecord.CommandLine) $ViteCli) -and
-                (Test-CommandContains ([string]$candidateRecord.CommandLine) '--port 3000') -and
-                (Test-CommandContains ([string]$candidateRecord.CommandLine) '--host 127.0.0.1')
-            if ($validOwner) {
-                $pidValue = $candidatePid
-                $state.frontendPid = $candidatePid
-            }
-        }
+            (Test-CommandContains ([string]$record.CommandLine) '--host 127.0.0.1')
         if (-not $validOwner -or -not (Test-FrontendHealth)) {
             throw 'Port 3000 is occupied by an unverified process. It was left running; inspect it before retrying.'
         }
         $frontendReady = $true
-        Write-Status 'Reusing the verified project frontend.'
+        Write-Status 'Reusing the verified project frontend discovered on port 3000.'
     }
-
     if (-not $backendReady) {
         $oldEnvironment = @{}
         $environmentNames = @(
@@ -471,8 +421,6 @@ try {
         } finally {
             foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, $oldEnvironment[$name], 'Process') }
         }
-        $state.backendPid = $StartedBackend.Id
-        Write-State $state
         Write-Status "Started backend (PID $($StartedBackend.Id)); waiting for database and v3 health."
         if (-not (Wait-ForBackend $StartedBackend.Id)) { throw "Backend did not become healthy. See $BackendErrorLog" }
     }
@@ -480,13 +428,10 @@ try {
     if (-not $frontendReady) {
         $arguments = '"' + $ViteCli + '" --host 127.0.0.1 --port 3000 --strictPort'
         $StartedFrontend = Start-Process -FilePath $node.Source -ArgumentList $arguments -WorkingDirectory $FrontendDir -WindowStyle Hidden -RedirectStandardOutput $FrontendLog -RedirectStandardError $FrontendErrorLog -PassThru
-        $state.frontendPid = $StartedFrontend.Id
-        Write-State $state
         Write-Status "Started frontend (PID $($StartedFrontend.Id)); waiting for Vite."
         if (-not (Wait-ForFrontend $StartedFrontend.Id)) { throw "Frontend did not become ready. See $FrontendErrorLog" }
     }
 
-    Write-State $state
     $health = Invoke-RestMethod -Uri "$ApiRoot/api/health" -TimeoutSec 3
     Write-Status "Frontend: $LoginUrl"
     Write-Status "Backend:  $ApiRoot (health $($health.status), schema $($health.database.schema_version), v3 ready)"

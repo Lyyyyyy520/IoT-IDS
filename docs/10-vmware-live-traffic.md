@@ -1,3 +1,5 @@
+> 历史参考：本文记录旧版规划或部署方案，不代表当前产品需求或可用 API。当前范围见 [README](../README.md)、[API 目录](05-api-spec.md) 与 [v3 清理清单](rebuild/legacy-cleanup-inventory.md)。
+
 # VMware IoT 流量实时接入 IoT-IDS
 
 目标：不经过 PCAP/CSV 中转。Ubuntu 虚拟机上的真实模拟流量直接进入 Windows 上运行的 IoT-IDS。

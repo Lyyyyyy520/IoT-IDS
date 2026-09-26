@@ -1,80 +1,72 @@
-"""
-Probe Integration API — receives data from Raspberry Pi probe nodes
-"""
-from functools import wraps
-import hmac
-import logging
-
-from flask import Blueprint, current_app, request, jsonify, session
-from database import query_all, query_one, execute
+"""Authenticated edge probe endpoints retained for v3 ingestion and control."""
 from datetime import datetime, timezone
+import hmac
+import ipaddress
+import logging
+import math
+import re
+from functools import wraps
+from uuid import uuid4
+
+from flask import Blueprint, current_app, jsonify, request, session
+
 from config import probe_token
 from contracts import Role
-from services.auth import effective_role, require_admin, require_operator
+from database import execute, query_one
+from services.auth import effective_role, require_admin
+from services.device_traffic import resolve_ip_binding
+from services.incident_workflow import IncidentActor
+from runtime_services import get_service_container
+from v3_database import connect_v3_existing
 
-probe_bp = Blueprint('probe', __name__)
+probe_bp = Blueprint("probe", __name__)
 LOGGER = logging.getLogger(__name__)
+_SAMPLE_FIELDS = {
+    "sample_id", "occurred_at", "src_ip", "dst_ip", "network_protocol",
+    "application_protocol", "application_protocol_inferred", "src_port",
+    "dst_port", "bytes", "packets", "flow_count",
+}
+_SEVERITIES = {"info", "low", "medium", "high", "critical"}
 
 
 def _ingest_versioned_traffic(data: dict) -> dict:
-    """Adapt the probe v2 envelope to the shared strict aggregation service."""
-    version = data.get('schema_version')
+    """Send only contract fields to the shared v3 aggregation service."""
+    version = data.get("schema_version")
     if version is None:
-        return {
-            'status': 'not_ingested',
-            'reason_code': 'legacy_probe_schema_no_idempotency',
-        }
-    if version != 2:
-        return {'status': 'rejected', 'reason_code': 'unsupported_schema_version'}
-    required = {
-        'source_id', 'source_session_id', 'batch_id', 'batch_sequence', 'flows'
-    }
-    if not required <= set(data):
-        return {'status': 'rejected', 'reason_code': 'invalid_batch_envelope'}
-    if not isinstance(data.get('flows'), list):
-        return {'status': 'rejected', 'reason_code': 'invalid_batch_envelope'}
-    sample_fields = {
-        'sample_id', 'occurred_at', 'src_ip', 'dst_ip', 'network_protocol',
-        'application_protocol', 'application_protocol_inferred', 'src_port',
-        'dst_port', 'bytes', 'packets', 'flow_count',
-    }
+        return {"status": "not_ingested", "reason_code": "legacy_probe_schema_no_idempotency"}
+    if type(version) is not int or version != 2:
+        return {"status": "rejected", "reason_code": "unsupported_schema_version"}
+    required = {"source_id", "source_session_id", "batch_id", "batch_sequence", "flows"}
+    if not required <= set(data) or not isinstance(data.get("flows"), list):
+        return {"status": "rejected", "reason_code": "invalid_batch_envelope"}
     samples = [
-        {key: value for key, value in flow.items() if key in sample_fields}
+        {key: value for key, value in flow.items() if key in _SAMPLE_FIELDS}
         if isinstance(flow, dict) else flow
-        for flow in data['flows']
+        for flow in data["flows"]
     ]
-    from runtime_services import get_service_container
-
-    service = get_service_container(
-        current_app._get_current_object()
-    ).get_traffic_service()
+    service = get_service_container(current_app._get_current_object()).get_traffic_service()
     try:
         return service.ingest_batch(
-            source_id=data['source_id'],
-            source_session_id=data['source_session_id'],
-            batch_id=data['batch_id'],
-            batch_sequence=data['batch_sequence'],
+            source_id=data["source_id"],
+            source_session_id=data["source_session_id"],
+            batch_id=data["batch_id"],
+            batch_sequence=data["batch_sequence"],
             samples=samples,
             received_at=datetime.now(timezone.utc),
         )
     except Exception as exc:
-        reason = getattr(exc, 'code', 'aggregation_failed')
+        reason = getattr(exc, "code", "aggregation_failed")
         service.mark_degraded(reason)
-        LOGGER.error(
-            'probe_traffic_ingest_failed code=%s type=%s',
-            reason, type(exc).__name__,
-        )
-        return {'status': 'degraded', 'reason_code': reason}
+        LOGGER.error("probe_traffic_ingest_failed code=%s type=%s", reason, type(exc).__name__)
+        return {"status": "degraded", "reason_code": reason}
 
 
 def _request_probe_token() -> str:
-    explicit = request.headers.get('X-Probe-Token', '').strip()
+    explicit = request.headers.get("X-Probe-Token", "").strip()
     if explicit:
         return explicit
-    authorization = request.headers.get('Authorization', '')
-    if authorization.lower().startswith('bearer '):
-        return authorization[7:].strip()
-    return ''
+    authorization = request.headers.get("Authorization", "")
+    return authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
 
 
 def require_probe_auth(f):
@@ -83,12 +75,12 @@ def require_probe_auth(f):
     def decorated(*args, **kwargs):
         expected = probe_token()
         if not expected:
-            return jsonify({'error': '探针凭据未配置'}), 503
+            return jsonify({"error": "探针凭据未配置"}), 503
         supplied = _request_probe_token()
         if not supplied:
-            return jsonify({'error': '缺少探针凭据'}), 401
+            return jsonify({"error": "缺少探针凭据"}), 401
         if not hmac.compare_digest(supplied, expected):
-            return jsonify({'error': '探针凭据无效'}), 403
+            return jsonify({"error": "探针凭据无效"}), 403
         return f(*args, **kwargs)
     return decorated
 
@@ -101,222 +93,235 @@ def require_probe_or_admin(f):
         supplied = _request_probe_token()
         if expected and supplied and hmac.compare_digest(supplied, expected):
             return f(*args, **kwargs)
-        role = effective_role(session.get('username', ''), session.get('role'))
-        if session.get('user_id') and role == Role.ADMIN.value:
+        role = effective_role(session.get("username", ""), session.get("role"))
+        if session.get("user_id") and role == Role.ADMIN.value:
             return f(*args, **kwargs)
         if not expected:
-            return jsonify({'error': '探针凭据未配置'}), 503
-        return jsonify({'error': '缺少或无效的探针凭据'}), 401
+            return jsonify({"error": "探针凭据未配置"}), 503
+        return jsonify({"error": "缺少或无效的探针凭据"}), 401
     return decorated
 
 
-@probe_bp.route('/api/probe/register', methods=['POST'])
+def _validated_ip(value):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return ipaddress.ip_address(value.strip()).compressed
+    except ValueError:
+        return False
+
+
+def _create_probe_incident(alert, *, database_path, incident_service, observed_at):
+    if not isinstance(alert, dict):
+        return {"status": "rejected", "reason_code": "invalid_alert"}
+    severity = alert.get("risk_level", "medium")
+    if not isinstance(severity, str) or severity.lower() not in _SEVERITIES:
+        return {"status": "rejected", "reason_code": "invalid_alert_severity"}
+    severity = severity.lower()
+    attack_type = alert.get("attack_type", "probe-detection")
+    if not isinstance(attack_type, str):
+        return {"status": "rejected", "reason_code": "invalid_alert_type"}
+    incident_type = re.sub(r"[^a-z0-9_.-]+", "-", attack_type.strip().lower()).strip("-.")[:64]
+    if not incident_type:
+        incident_type = "probe-detection"
+    source_ip = _validated_ip(alert.get("src_ip", ""))
+    target_ip = _validated_ip(alert.get("dst_ip", ""))
+    if source_ip is False or target_ip is False or target_ip is None:
+        return {"status": "rejected", "reason_code": "invalid_alert_address"}
+
+    source_port = alert.get("src_port", 0)
+    target_port = alert.get("dst_port", 0)
+    for value in (source_port, target_port):
+        if type(value) is not int or value < 0 or value > 65535:
+            return {"status": "rejected", "reason_code": "invalid_alert_port"}
+    protocol = alert.get("protocol", "")
+    if not isinstance(protocol, str) or len(protocol) > 16:
+        return {"status": "rejected", "reason_code": "invalid_alert_protocol"}
+    protocol = re.sub(r"[^A-Za-z0-9_-]", "", protocol).upper() or "UNKNOWN"
+    confidence = alert.get("confidence")
+    if confidence is not None and (
+        isinstance(confidence, bool)
+        or not isinstance(confidence, (int, float))
+        or not math.isfinite(confidence)
+        or confidence < 0
+        or confidence > 1
+    ):
+        return {"status": "rejected", "reason_code": "invalid_alert_confidence"}
+
+    try:
+        connection = connect_v3_existing(database_path)
+        try:
+            target_status, target_device = resolve_ip_binding(connection, target_ip, observed_at)
+            source_device = None
+            if source_ip is not None:
+                source_status, source_device = resolve_ip_binding(connection, source_ip, observed_at)
+                if source_status != "resolved":
+                    source_device = None
+            if target_status != "resolved" or target_device is None:
+                return {"status": "unassigned", "reason_code": target_status}
+        finally:
+            connection.close()
+
+        devices = [{
+            "device_id": target_device,
+            "incident_role": "affected",
+            "user_visible": True,
+        }]
+        if source_device and source_device != target_device:
+            devices.append({
+                "device_id": source_device,
+                "incident_role": "suspected_source",
+                "user_visible": False,
+            })
+        evidence = (
+            f"Probe {incident_type}; {source_ip or 'unknown'}:{source_port} -> "
+            f"{target_ip}:{target_port}; protocol={protocol}"
+        )
+        if confidence is not None:
+            evidence += f"; confidence={float(confidence):.4f}"
+        incident = incident_service.create_incident(
+            incident_type=incident_type,
+            severity=severity,
+            source="rule",
+            admin_title=f"探针规则初判：{incident_type}",
+            admin_summary=evidence,
+            user_title="检测到可疑网络活动",
+            user_summary="系统发现与一台已登记设备相关的异常通信，管理人员正在核实。",
+            devices=devices,
+            publish_to_mobile=True,
+            first_seen_at=observed_at,
+            public_progress="管理人员正在核实探针上报的异常通信。",
+            actor=IncidentActor(None, "probe-ingestion", "system"),
+            request_id=str(uuid4()),
+        )
+        return {"status": "accepted", "incident_id": incident["incident_id"]}
+    except Exception as exc:
+        reason = getattr(exc, "code", "incident_store_unavailable")
+        LOGGER.error("probe_incident_ingest_failed code=%s type=%s", reason, type(exc).__name__)
+        return {"status": "degraded", "reason_code": reason}
+
+
+@probe_bp.post("/api/probe/register")
 @require_probe_auth
 def register():
-    """Register a new probe node."""
-    data = request.get_json() or {}
-    name = data.get('name', 'Unknown Probe')
-    ip = request.remote_addr or 'unknown'
-
+    """Register a legacy edge-probe identity used by the control loop."""
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "Unknown Probe")
+    ip = request.remote_addr or "unknown"
     existing = query_one("SELECT id FROM assets WHERE ip_address = ? AND device_type = 'probe'", (ip,))
     if existing:
-        execute("UPDATE assets SET status='online', last_seen=datetime('now','localtime') WHERE id=?", (existing['id'],))
-        return jsonify({'success': True, 'probe_id': existing['id'], 'message': 'Probe re-registered'})
-
+        execute("UPDATE assets SET status='online', last_seen=datetime('now','localtime') WHERE id=?", (existing["id"],))
+        return jsonify({"success": True, "probe_id": existing["id"], "message": "Probe re-registered"})
     probe_id = execute(
-        "INSERT INTO assets (name, ip_address, device_type, status, last_seen) VALUES (?,?,?,?,datetime('now','localtime'))",
-        (name, ip, 'probe', 'online'),
+        "INSERT INTO assets (name, ip_address, device_type, status, last_seen) "
+        "VALUES (?,?,?,?,datetime('now','localtime'))",
+        (str(name)[:128], ip, "probe", "online"),
     )
-    return jsonify({'success': True, 'probe_id': probe_id, 'message': 'Probe registered'})
+    return jsonify({"success": True, "probe_id": probe_id, "message": "Probe registered"})
 
 
-@probe_bp.route('/api/probe/heartbeat', methods=['POST'])
+@probe_bp.post("/api/probe/heartbeat")
 @require_probe_auth
 def heartbeat():
-    """Probe heartbeat — updates last_seen timestamp."""
-    data = request.get_json() or {}
-    probe_id = data.get('probe_id')
-    ip = request.remote_addr or 'unknown'
-
-    if probe_id:
+    """Record edge-probe liveness in its legacy compatibility row."""
+    data = request.get_json(silent=True) or {}
+    probe_id = data.get("probe_id")
+    ip = request.remote_addr or "unknown"
+    if type(probe_id) is int and probe_id > 0:
         execute("UPDATE assets SET status='online', last_seen=datetime('now','localtime') WHERE id=?", (probe_id,))
     else:
         execute("UPDATE assets SET status='online', last_seen=datetime('now','localtime') WHERE ip_address=? AND device_type='probe'", (ip,))
+    return jsonify({"success": True, "timestamp": datetime.now(timezone.utc).isoformat()})
 
-    return jsonify({'success': True, 'timestamp': datetime.now().isoformat()})
 
-
-@probe_bp.route('/api/probe/push', methods=['POST'])
+@probe_bp.post("/api/probe/push")
 @require_probe_auth
 def push_data():
-    """
-    Receive alert/flow data from a probe.
-    Expected JSON format:
-    {
-        "probe_id": 1,
-        "probe_name": "Pi-LivingRoom",
-        "alerts": [
-            {
-                "risk_level": "critical",
-                "attack_type": "Mirai",
-                "src_ip": "192.168.1.105",
-                "dst_ip": "192.168.1.1",
-                "src_port": 54321,
-                "dst_port": 23,
-                "protocol": "TCP",
-                "confidence": 0.95,
-                "description": "Mirai SYN scan detected by Suricata"
-            }
-        ],
-        "flows": [...]
-    }
-    """
-    data = request.get_json() or {}
-    if not data:
-        return jsonify({'success': False, 'message': 'No data provided'}), 400
+    """Receive idempotent probe v2 traffic and forward located alerts to v3."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not data:
+        return jsonify({"success": False, "message": "No data provided"}), 400
+    alerts = data.get("alerts", [])
+    if not isinstance(alerts, list) or len(alerts) > 100:
+        return jsonify({"success": False, "message": "Invalid alert batch"}), 400
 
-    probe_name = data.get('probe_name', 'Unknown')
-    probe_ip = request.remote_addr or 'unknown'
-
-    # Update probe online status
+    probe_ip = request.remote_addr or "unknown"
     execute(
-        "UPDATE assets SET status='online', last_seen=datetime('now','localtime') WHERE ip_address=? AND device_type='probe'",
+        "UPDATE assets SET status='online', last_seen=datetime('now','localtime') "
+        "WHERE ip_address=? AND device_type='probe'",
         (probe_ip,),
     )
-
-    alerts_received = 0
-    flows_received = 0
-    traffic_aggregation = _ingest_versioned_traffic(data)
-
-    # Process alerts
-    for alert in data.get('alerts', []):
-        # 匹配目标设备
-        dst_ip = alert.get('dst_ip', '')
-        device_name = None
-        if dst_ip:
-            asset_row = query_one("SELECT id, name FROM assets WHERE ip_address = ? AND device_type != 'probe'", (dst_ip,))
-            if asset_row:
-                device_name = asset_row['name']
-                # 更新设备风险等级
-                execute("UPDATE assets SET risk_level = ?, status = 'alert', last_seen = datetime('now','localtime') WHERE id = ?",
-                        (alert.get('risk_level', 'high'), asset_row['id']))
-
-        desc = f"[Probe:{probe_name}] {alert.get('description', '')}"
-        if device_name:
-            desc = f"[Probe:{probe_name}] 目标: {device_name}({dst_ip}) - {alert.get('description', '')}"
-
-        execute(
-            "INSERT INTO alerts (risk_level, attack_type, src_ip, dst_ip, src_port, dst_port, protocol, confidence, description, status) "
-            "VALUES (?,?,?,?,?,?,?,?,?,'new')",
-            (
-                alert.get('risk_level', 'medium'),
-                alert.get('attack_type', 'Other'),
-                alert.get('src_ip', ''),
-                dst_ip,
-                alert.get('src_port', 0),
-                alert.get('dst_port', 0),
-                alert.get('protocol', ''),
-                alert.get('confidence', 0.8),
-                desc,
-            ),
-        )
-        alerts_received += 1
-
-    # Process flows through the same IDS pipeline as local capture so remote
-    # probe traffic is evaluated by rules and models before it is stored.
-    from services.traffic_capture import get_capture
-    capture = get_capture()
-    for flow in data.get('flows', []):
-        try:
-            capture.process_external_packet(
-                src_ip=flow.get('src_ip', ''),
-                dst_ip=flow.get('dst_ip', ''),
-                src_port=int(flow.get('src_port', 0) or 0),
-                dst_port=int(flow.get('dst_port', 0) or 0),
-                protocol=flow.get('network_protocol', flow.get('protocol', '')),
-                length=int(flow.get('bytes', flow.get('length', 0)) or 0),
-                flags=flow.get('flags', ''),
-                payload=flow.get('payload', ''),
-                source=flow.get('source', 'real'),
-                aggregate_v3=False,
-            )
-            flows_received += 1
-        except Exception as exc:
-            LOGGER.error(
-                'probe_legacy_flow_failed code=legacy_pipeline_failure type=%s',
-                type(exc).__name__,
-            )
+    traffic = _ingest_versioned_traffic(data)
+    incident_results = []
+    accepted_batch = (
+        traffic.get("status") in {"committed", "partial"}
+        and int(traffic.get("accepted_samples", 0)) > 0
+    )
+    if alerts and accepted_batch:
+        container = get_service_container(current_app._get_current_object())
+        incident_service = current_app.extensions.get("iot_ids_incident_workflow")
+        if incident_service is None:
+            incident_results = [{"status": "degraded", "reason_code": "incident_store_unavailable"}]
+        else:
+            observed_at = datetime.now(timezone.utc)
+            incident_results = [
+                _create_probe_incident(
+                    alert,
+                    database_path=container.database_path,
+                    incident_service=incident_service,
+                    observed_at=observed_at,
+                )
+                for alert in alerts
+            ]
+    elif alerts:
+        reason = "duplicate_probe_batch" if traffic.get("status") == "duplicate" else "alerts_require_accepted_v2_batch"
+        incident_results = [{"status": "not_ingested", "reason_code": reason}]
 
     return jsonify({
-        'success': True,
-        'alerts_received': alerts_received,
-        'flows_received': flows_received,
-        'traffic_aggregation': traffic_aggregation,
-        'timestamp': datetime.now().isoformat(),
-    })
+        "success": traffic.get("status") not in {"rejected", "degraded"},
+        "flows_received": traffic.get("accepted_samples", 0),
+        "alerts_received": sum(result.get("status") == "accepted" for result in incident_results),
+        "alerts_unassigned": sum(result.get("status") == "unassigned" for result in incident_results),
+        "alerts_rejected": sum(result.get("status") == "rejected" for result in incident_results),
+        "alert_ingestion": incident_results,
+        "traffic_aggregation": traffic,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }), (200 if traffic.get("status") not in {"rejected", "degraded"} else 400)
 
 
-@probe_bp.route('/api/probe/list')
-@require_operator
-def list_probes():
-    """List all registered probes."""
-    probes = query_all("SELECT * FROM assets WHERE device_type = 'probe' ORDER BY last_seen DESC")
-    return jsonify({'probes': probes})
-
-
-@probe_bp.route('/api/probe/status')
-@require_operator
-def probe_status():
-    """Get aggregate probe status."""
-    total = query_one("SELECT COUNT(*) as c FROM assets WHERE device_type='probe'")['c']
-    online = query_one("SELECT COUNT(*) as c FROM assets WHERE device_type='probe' AND status='online'")['c']
-    offline = total - online
-    alerts_from_probes = query_one("SELECT COUNT(*) as c FROM alerts WHERE description LIKE '[Probe:%'")['c']
-
-    return jsonify({
-        'total_probes': total,
-        'online_probes': online,
-        'offline_probes': offline,
-        'alerts_from_probes': alerts_from_probes,
-    })
-
-
-@probe_bp.route('/api/probe/control', methods=['POST'])
+@probe_bp.post("/api/probe/control")
 @require_admin
 def probe_control():
-    data = request.get_json() or {}
-    action = data.get('action', '')
-    probe_name = data.get('probe_name', '')
-    if not action or not probe_name:
-        return jsonify({'success': False}), 400
-    from database import execute
-    execute("INSERT OR REPLACE INTO config (key, value) VALUES (?,?)",
-            (f'probe_control_{probe_name}', action))
-    return jsonify({'success': True, 'action': action})
+    data = request.get_json(silent=True) or {}
+    action = data.get("action", "")
+    probe_name = data.get("probe_name", "")
+    if not isinstance(action, str) or not isinstance(probe_name, str) or not action or not probe_name:
+        return jsonify({"success": False}), 400
+    execute("INSERT OR REPLACE INTO config (key, value) VALUES (?,?)", (f"probe_control_{probe_name[:128]}", action[:32]))
+    return jsonify({"success": True, "action": action[:32]})
 
 
-@probe_bp.route('/api/probe/control-status', methods=['GET'])
+@probe_bp.get("/api/probe/control-status")
 @require_probe_or_admin
 def probe_control_status():
-    from database import query_one, execute
-    name = request.args.get('name', 'Pi-001')
-    row = query_one("SELECT value FROM config WHERE key = ?", (f'probe_control_{name}',))
-    status_row = query_one("SELECT value FROM config WHERE key = ?", (f'probe_status_{name}',))
+    name = request.args.get("name", "Pi-001")[:128]
+    row = query_one("SELECT value FROM config WHERE key = ?", (f"probe_control_{name}",))
+    status_row = query_one("SELECT value FROM config WHERE key = ?", (f"probe_status_{name}",))
     return jsonify({
-        'action': row['value'] if row else 'stop',
-        'capturing': status_row['value'] == 'running' if status_row else False
+        "action": row["value"] if row else "stop",
+        "capturing": status_row["value"] == "running" if status_row else False,
     })
 
 
-@probe_bp.route('/api/probe/status-report', methods=['POST'])
+@probe_bp.post("/api/probe/status-report")
 @require_probe_auth
 def probe_status_report():
-    """探头主动上报运行状态"""
-    from database import execute
-    data = request.get_json() or {}
-    name = data.get('name', '')
-    status = data.get('status', 'stopped')  # running / stopped
+    """Record the edge-probe state used by its explicit control loop."""
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "")
+    status = data.get("status", "stopped")
+    if not isinstance(name, str) or not isinstance(status, str) or status not in {"running", "stopped"}:
+        return jsonify({"success": False}), 400
     if name:
-        execute("INSERT OR REPLACE INTO config (key, value) VALUES (?,?)",
-                (f'probe_status_{name}', status))
-    return jsonify({'success': True})
+        execute("INSERT OR REPLACE INTO config (key, value) VALUES (?,?)", (f"probe_status_{name[:128]}", status))
+    return jsonify({"success": True})

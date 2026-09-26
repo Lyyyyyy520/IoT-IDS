@@ -27,7 +27,7 @@ function renderGuard() {
     >
       <Routes>
         <Route path="/login" element={<div>登录页</div>} />
-        <Route path="/dashboard" element={<div>工作台</div>} />
+        <Route path="/monitor" element={<div>工作台</div>} />
         <Route
           path="/mobile-access"
           element={<RequireAdmin><div>APP 访问管理工作区</div></RequireAdmin>}

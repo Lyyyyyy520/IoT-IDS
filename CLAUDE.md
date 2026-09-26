@@ -9,11 +9,11 @@
 ### 标准文档
 | 文件 | 路径 | 内容 |
 |------|------|------|
-| 需求规格 | [docs/01-requirements.md](docs/01-requirements.md) | 项目功能与非功能需求 |
-| 技术架构 | [docs/02-tech-stack.md](docs/02-tech-stack.md) | 技术栈、架构图、约束条件 |
-| UI 设计规范 | [docs/03-design-spec.md](docs/03-design-spec.md) | 色板、布局、组件规范 |
-| 执行计划 | [docs/04-execution-plan.md](docs/04-execution-plan.md) | 六阶段任务清单 |
-| API 规范 | [docs/05-api-spec.md](docs/05-api-spec.md) | RESTful 接口定义 |
+| 当前功能/API | [README.md](README.md)、[docs/05-api-spec.md](docs/05-api-spec.md) | 当前 v3 产品范围与实际路由 |
+| v3 契约 | [docs/rebuild/](docs/rebuild/) | 实时设备、流量、事件、移动端与运行时契约 |
+| 运维恢复 | [docs/12-operations-and-recovery.md](docs/12-operations-and-recovery.md) | 显式升级、备份、维护与恢复 |
+| 清理记录 | [docs/rebuild/legacy-cleanup-inventory.md](docs/rebuild/legacy-cleanup-inventory.md) | 旧功能入口、调用关系、保留/合并/删除决策 |
+| 历史计划 | [docs/11-rebuild-plan.md](docs/11-rebuild-plan.md) | 第 12 节旧功能取舍参考；其他段落为历史设计输入 |
 
 ### 开发日志
 每日日志保存在 `dev-logs/YYYY-MM-DD.md`，记录完成事项和待办。
@@ -55,11 +55,9 @@ iot-ids/
 - Windows 开发环境：`npm run dev`（前端）+ `python app.py`（后端）
 - 树莓派环境：Python 3.9+, ONNX Runtime, 脚本路径 `edge/`
 
-## 当前进度
-- [x] 项目规划与文档体系建立
-- [ ] 阶段一：项目脚手架与环境搭建（进行中）
-- [ ] 阶段二：仪表盘与告警页面
-- [ ] 阶段三：分析视图
-- [ ] 阶段四：检测引擎
-- [ ] 阶段五：配置与收尾
-- [ ] 阶段六：演示准备
+## 当前产品主线
+- Web admin/operator：实时设备监视、设备管理/发现/流量、安全事件、系统健康、移动用户授权。
+- Expo 普通用户：本人设备、事件提醒、设备详情、配对、求助和设置。
+- Flask：v3 API、MQTT 与 probe v2 上报、持久 SSE、事件/移动通知、会话鉴权、审计。
+- 数据库升级、恢复和维护均通过显式 CLI；普通应用启动只读检查，不创建/升级/清理数据库。
+- 旧版页面和 API 不再注册；历史文档页已标明参考状态，清单见 `docs/rebuild/legacy-cleanup-inventory.md`。

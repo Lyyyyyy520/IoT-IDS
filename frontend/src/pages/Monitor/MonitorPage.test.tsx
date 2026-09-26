@@ -55,6 +55,7 @@ beforeEach(() => {
 describe('MonitorPage real states', () => {
   it('shows graph and incident unavailable reasons without a fake topology or safety claim', () => {
     renderPage();
+    expect(screen.queryByRole('button', { name: '旧版功能' })).not.toBeInTheDocument();
     expect(screen.getByTestId('graph-capability')).toHaveTextContent('后端尚未提供图快照能力');
     expect(screen.getByTestId('incident-capability')).toHaveTextContent('后端尚未提供安全事件存储能力');
     expect(screen.getByText(/不能代表“没有攻击”/)).toBeInTheDocument();

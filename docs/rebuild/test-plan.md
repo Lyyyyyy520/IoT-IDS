@@ -35,7 +35,7 @@ npm --prefix IoT‑IDS‑Mobile run typecheck
   `warming_up/ready/degraded` 恢复均使用假客户端及临时 SQLite 验证。
 - monitor 空库和真实状态快照不注入演示数据；缺库/未迁移返回带 request_id 的 503。
 - 导入 app 和多次调用 `create_app()` 不建库、不迁移、不启动线程；每个 app 拥有独立
-  service container，legacy/probe/v3 路由只注册一次。
+  service container，health/auth/probe/v3 路由只注册一次；旧业务 API 返回 404。
 - 正式数据库助手只以 SQLite `mode=rw` 打开显式存在文件；缺库时 health 降级，旧/v3
   数据接口均失败关闭且不创建空文件。
 - MQTT 只允许正式生命周期入口启动；禁用、debug reloader 父进程、缺库或 migration
@@ -51,7 +51,7 @@ npm --prefix IoT‑IDS‑Mobile run typecheck
 - 本地 Mosquitto 启用密码和 ACL，验证设备只能写自己的 status 主题。
 - REST 首次快照后通过 SSE 接收增量；断线重连不会用旧版本覆盖新状态。
 - APP SSE 失败后回退约 5 秒轮询，回前台先重新拉快照。
-- MQTT、探针、抓包、GNN 任一故障时只降级对应组件，不显示全绿。
+- MQTT、探针、流量聚合或 graph capability 任一状态异常时如实显示；不再测试已删除的本地 capture runtime。
 
 ## 5. 固定回放样本
 

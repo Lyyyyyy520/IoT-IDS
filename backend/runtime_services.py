@@ -16,18 +16,7 @@ from v3_database import V3_EXPECTED_OBJECTS, V3_MIGRATIONS, read_applied_migrati
 
 LOGGER = logging.getLogger(__name__)
 EXTENSION_KEY = "iot_ids_services"
-LEGACY_TABLES = frozenset(
-    {
-        "users",
-        "alerts",
-        "traffic_logs",
-        "audit_logs",
-        "assets",
-        "policies",
-        "config",
-        "rules",
-    }
-)
+LEGACY_TABLES = frozenset({"users", "audit_logs", "assets", "config"})
 
 
 def _path(value: str | Path | None) -> Path | None:
@@ -220,7 +209,6 @@ class BackendServiceContainer:
     ] = _default_mqtt_factory
     environment: Mapping[str, str] = field(default_factory=lambda: os.environ, repr=False)
     mqtt_subscriber: Any = field(default=None, init=False, repr=False)
-    capture_service: Any = field(default=None, init=False, repr=False)
     traffic_window: Any = field(default=None, init=False, repr=False)
     traffic_service: Any = field(default=None, init=False, repr=False)
     mqtt_state: str = field(default="stopped", init=False)
@@ -242,17 +230,6 @@ class BackendServiceContainer:
 
     def database_health(self) -> dict:
         return inspect_database(self.database_path)
-
-    def get_capture_service(self, app):
-        with self._lock:
-            if self.capture_service is None:
-                from services.traffic_capture import TrafficCapture
-
-                self.capture_service = TrafficCapture(
-                    application=app,
-                    traffic_aggregation_service=self.get_traffic_service(),
-                )
-            return self.capture_service
 
     def get_traffic_window(self):
         with self._lock:
@@ -395,24 +372,6 @@ def stop_runtime_services(app) -> dict:
                     "runtime_service_stop_failed service=mqtt type=%s",
                     type(exc).__name__,
                 )
-        capture = container.capture_service
-        if capture is not None and bool(getattr(capture, "running", False)):
-            try:
-                with app.app_context():
-                    capture.stop()
-            except Exception as exc:
-                LOGGER.error(
-                    "runtime_service_stop_failed service=capture type=%s",
-                    type(exc).__name__,
-                )
-        capture_thread = getattr(capture, "thread", None) if capture is not None else None
-        if capture_thread is not None and capture_thread is not threading.current_thread():
-            capture_thread.join(timeout=5.0)
-            if capture_thread.is_alive():
-                container.mark_degraded("traffic", "worker_stop_timeout")
-                LOGGER.error("runtime_service_stop_failed service=capture code=worker_stop_timeout")
-            else:
-                container.clear_degraded("traffic")
         container.mqtt_state = "stopped"
         container.mqtt_reason = None
         return {"mqtt": "stopped", "reason": None}

@@ -20,7 +20,7 @@ function renderRoute() {
     <MemoryRouter initialEntries={['/system-health']} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         <Route path="/login" element={<div>登录页</div>} />
-        <Route path="/dashboard" element={<div>普通用户首页</div>} />
+        <Route path="/mobile-app-required" element={<div>普通用户请使用移动端</div>} />
         <Route path="/system-health" element={<RequireMonitorRole><div>系统健康页面</div></RequireMonitorRole>} />
       </Routes>
     </MemoryRouter>,
@@ -43,7 +43,7 @@ describe('system health route access', () => {
   it('rejects user at the route boundary', () => {
     auth.role = 'user';
     renderRoute();
-    expect(screen.getByText('普通用户首页')).toBeInTheDocument();
+    expect(screen.getByText('普通用户请使用移动端')).toBeInTheDocument();
     expect(screen.queryByText('系统健康页面')).not.toBeInTheDocument();
   });
 
