@@ -72,7 +72,7 @@ class TrafficCapture:
         if DEVICE_GNN_AVAILABLE:
             try:
                 self.device_detector = DeviceGraphDetector(
-                    window_seconds=60, community_subnet='192.168.4.')
+                    window_seconds=300, community_subnet='192.168.4.')
             except Exception:
                 self.device_detector = None
 
@@ -243,6 +243,7 @@ class TrafficCapture:
 
     def _capture_scapy(self, interface=None):
         """Real packet capture using Scapy."""
+        iface = interface or 'wlan0'  # 默认抓热点接口（设备都连在 wlan0 上）
         def packet_handler(pkt):
             if not self.running:
                 return False
@@ -264,7 +265,9 @@ class TrafficCapture:
 
             self._process_packet(ip.src, ip.dst, sport, dport, proto, len(pkt), flags)
 
-        sniff(prn=packet_handler, store=False, timeout=1)
+        # 持续抓包，直到 stop() 设置 running=False（之前 timeout=1 只抓 1 秒就停了）
+        while self.running:
+            sniff(prn=packet_handler, store=False, timeout=1, iface=iface)
 
     def _capture_simulate(self):
         """模拟真实社区IoT场景：多设备+正常通信+攻击混合"""
@@ -401,7 +404,7 @@ class TrafficCapture:
             level = r['level']
             if level < 2:  # 绿/黄 不告警
                 continue
-            conf = float(r['probs'].max())
+            conf = float(max(r['probs']))
             risk = 'critical' if level == 3 else 'high'
             attack_type = 'Botnet' if level == 3 else 'DoS'
             from database import query_one as _q, get_config

@@ -80,7 +80,7 @@ class DeviceGraphDetector:
                  norm_path: Optional[str] = None):
         self.window_seconds = window_seconds
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        onnx_path = onnx_path or os.path.join(here, 'data', 'device_gnn.onnx')
+        onnx_path = onnx_path or os.path.join(here, 'data', 'device_gnn_hetero.onnx')
         norm_path = norm_path or os.path.join(here, 'data', 'device_gnn_norm.npz')
         self.inference = DeviceGNNInference(onnx_path, norm_path, community_subnet)
         self._flow_buffer: List[dict] = []
@@ -144,4 +144,4 @@ if __name__ == '__main__':
         print('  (无结果)')
     for ip in sorted(result):
         r = result[ip]
-        print(f"  {ip:16s} -> {r['name']:<8s} 置信度 {r['probs'].max():.1%}")
+        print(f"  {ip:16s} -> {r['name']:<8s} 置信度 {max(r['probs']):.1%}")

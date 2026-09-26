@@ -33,7 +33,7 @@
 #define DEVICE_SENSOR   4   // 温湿度传感器（DHT11）
 #define DEVICE_SPEAKER  5   // 智能音箱（蜂鸣器发声）
 
-#define DEVICE_TYPE DEVICE_LIGHT   // ← 改成你要烧录的设备
+#define DEVICE_TYPE   DEVICE_LIGHT   // ← 改成你要烧录的设备
 
 // WiFi（树莓派热点）
 const char* WIFI_SSID = "iot-community";
@@ -57,6 +57,38 @@ const char* DEVICE_ID   = "light-01";
 // 遥测间隔（毫秒）
 const unsigned long TELEMETRY_MS = 5000;
 
+// ==================== 设备间联动配置（CoAP 直连） ====================
+// 固定 IP：CoAP 直连需要设备知道彼此的 IP，所以用静态 IP
+IPAddress GATEWAY(192, 168, 4, 1);
+IPAddress SUBNET(255, 255, 255, 0);
+
+#if DEVICE_TYPE == DEVICE_DOOR
+  IPAddress STATIC_IP(192, 168, 4, 11);
+  const char* COAP_TARGET = "192.168.4.15";  // 联动音箱 speaker-01
+  #define COAP_SEND   1   // 门禁主动发联动
+  #define COAP_LISTEN 1   // 门禁也接收烟雾的联动
+#elif DEVICE_TYPE == DEVICE_LIGHT
+  IPAddress STATIC_IP(192, 168, 4, 12);
+  const char* COAP_TARGET = "";
+  #define COAP_SEND   0
+  #define COAP_LISTEN 0
+#elif DEVICE_TYPE == DEVICE_PLUG
+  IPAddress STATIC_IP(192, 168, 4, 13);
+  const char* COAP_TARGET = "";
+  #define COAP_SEND   0
+  #define COAP_LISTEN 1   // 插座接收传感器的联动
+#elif DEVICE_TYPE == DEVICE_SENSOR
+  IPAddress STATIC_IP(192, 168, 4, 14);
+  const char* COAP_TARGET = "192.168.4.13";  // 联动插座 plug-01
+  #define COAP_SEND   1   // 传感器主动发联动
+  #define COAP_LISTEN 0
+#elif DEVICE_TYPE == DEVICE_SPEAKER
+  IPAddress STATIC_IP(192, 168, 4, 15);
+  const char* COAP_TARGET = "";
+  #define COAP_SEND   0
+  #define COAP_LISTEN 1   // 音箱接收门禁的联动
+#endif
+
 // ==================== 设备相关库（按需引入） ====================
 
 #if DEVICE_TYPE == DEVICE_SENSOR
@@ -74,6 +106,7 @@ const unsigned long TELEMETRY_MS = 5000;
 WiFiClient    wifiClient;
 PubSubClient  mqtt(wifiClient);
 WiFiUDP       udp;
+WiFiUDP       coapUdp;    // 设备间联动 CoAP（独立于攻击 UDP）
 
 bool attack_mode = false;         // 是否处于攻击模式（被感染）
 unsigned long lastTelemetry = 0;  // 上次遥测时间
@@ -193,6 +226,7 @@ void doAttack() {
 void connectWiFi() {
   Serial.printf("连接 WiFi: %s\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
+  WiFi.config(STATIC_IP, GATEWAY, SUBNET);  // 固定 IP（设备间 CoAP 直连需要）
   WiFi.disconnect();
   delay(200);
 
@@ -236,6 +270,49 @@ void connectMQTT() {
   }
 }
 
+// ==================== 设备间联动（CoAP 直连） ====================
+
+#if COAP_SEND
+void sendCoapEvent() {
+  // 周期发送联动事件给目标设备（UDP 到 5683 端口）
+  coapUdp.beginPacket(COAP_TARGET, 5683);
+  coapUdp.write((const uint8_t*)"evt", 3);
+  coapUdp.endPacket();
+  Serial.printf("[联动] 发送联动事件给 %s\n", COAP_TARGET);
+}
+#endif
+
+#if COAP_LISTEN
+void checkCoapEvent() {
+  // 检查是否有设备间联动事件到达
+  int sz = coapUdp.parsePacket();
+  if (sz > 0) {
+    char buf[8];
+    coapUdp.read(buf, sizeof(buf));
+    Serial.println("[联动] 收到设备间联动事件");
+    actuatorTriggered();
+  }
+}
+
+void actuatorTriggered() {
+  // 收到联动事件后的设备反应
+#if DEVICE_TYPE == DEVICE_PLUG
+  digitalWrite(PIN_RELAY, !digitalRead(PIN_RELAY));  // 插座切换通断
+  Serial.println("[联动] 插座切换通断");
+#elif DEVICE_TYPE == DEVICE_SPEAKER
+  digitalWrite(PIN_BUZZER, HIGH);  // 音箱响一声
+  delay(200);
+  digitalWrite(PIN_BUZZER, LOW);
+  Serial.println("[联动] 音箱响一声");
+#elif DEVICE_TYPE == DEVICE_DOOR
+  doorServo.write(0);   // 门禁联动解锁（烟雾触发）
+  delay(500);
+  doorServo.write(90);  // 回位
+  Serial.println("[联动] 门禁联动解锁");
+#endif
+}
+#endif
+
 // ==================== setup / loop ====================
 
 void setup() {
@@ -259,6 +336,11 @@ void setup() {
   digitalWrite(PIN_BUZZER, LOW);
 #endif
 
+  // 设备间联动：绑定 CoAP 端口（接收方监听 5683）
+#if COAP_LISTEN
+  coapUdp.begin(5683);
+#endif
+
   connectWiFi();
   connectMQTT();
   Serial.printf("设备启动: %s (类型 %d)\n", DEVICE_ID, DEVICE_TYPE);
@@ -273,7 +355,21 @@ void loop() {
   }
   mqtt.loop();
 
+  // 设备间联动：接收联动事件
+#if COAP_LISTEN
+  checkCoapEvent();
+#endif
+
   unsigned long now = millis();
+
+  // 设备间联动：周期发送联动事件（每 30 秒）
+#if COAP_SEND
+  static unsigned long lastCoapSend = 0;
+  if (now - lastCoapSend >= 30000) {
+    lastCoapSend = now;
+    sendCoapEvent();
+  }
+#endif
 
   // 攻击模式：持续发 UDP 洪水
   if (attack_mode) {

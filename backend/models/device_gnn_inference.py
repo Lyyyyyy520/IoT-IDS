@@ -28,6 +28,22 @@ FEATURE_COLUMNS = [
 ]
 
 
+def port_to_edge_type(port) -> int:
+    """把目的端口映射成边类型（协议），与训练一致。"""
+    port = int(port)
+    if port in (1883, 8883):
+        return 0  # mqtt
+    if port in (80, 443):
+        return 1  # http
+    if port == 53:
+        return 2  # dns
+    if port == 123:
+        return 3  # ntp
+    if port in (5683, 5684):
+        return 4  # coap
+    return 5  # other
+
+
 class DeviceGNNInference:
     def __init__(self, onnx_path: str, norm_path: str, community_subnet: str = '192.168.4.'):
         self.community_subnet = community_subnet
@@ -68,20 +84,35 @@ class DeviceGNNInference:
         )
         return feats
 
-    def _build_adjacency(self, devices: list, flows: pd.DataFrame) -> np.ndarray:
-        """设备间通信边（0/1 无向）。"""
+    def _build_graph(self, devices: list, flows: pd.DataFrame):
+        """构建异构图：adjacency + node_type + edge_type + edge_weight。"""
         idx = {ip: i for i, ip in enumerate(devices)}
         n = len(devices)
         adj = np.zeros((n, n), dtype=np.float32)
+        edge_type = np.full((n, n), -1, dtype=np.int64)
+        edge_weight = np.zeros((n, n), dtype=np.float32)
+
+        # 节点类型：gateway=0, device=1（网关 = 社区网段第一个 IP）
+        gateway_ip = self.community_subnet + '1'
+        node_type = np.where(np.array(devices) == gateway_ip, 0, 1).astype(np.int64)
+
+        # 通信边（带协议类型 + 频率权重）
         d2d = flows[flows['src_ip'].apply(self._is_community)
                     & flows['dst_ip'].apply(self._is_community)]
-        for _, row in d2d.iterrows():
-            i = idx.get(row['src_ip'])
-            j = idx.get(row['dst_ip'])
+        for (sip, dip), grp in d2d.groupby(['src_ip', 'dst_ip']):
+            i = idx.get(sip)
+            j = idx.get(dip)
             if i is not None and j is not None and i != j:
                 adj[i, j] = 1.0
                 adj[j, i] = 1.0
-        return adj
+                et = port_to_edge_type(grp['dst_port'].mode()[0])
+                freq = len(grp)
+                edge_type[i, j] = et
+                edge_type[j, i] = et
+                edge_weight[i, j] = freq
+                edge_weight[j, i] = freq
+
+        return adj, node_type, edge_type, edge_weight
 
     def predict(self, flows: pd.DataFrame) -> dict:
         """
@@ -114,11 +145,14 @@ class DeviceGNNInference:
         X = np.log1p(X)
         X = (X - self.feature_mean) / self.feature_std
 
-        # 邻接矩阵
-        adj = self._build_adjacency(devices, flows)
+        # 异构图（邻接 + 节点类型 + 边类型 + 边权重）
+        adj, node_type, edge_type, edge_weight = self._build_graph(devices, flows)
 
         # ONNX 推理
-        logits = self.session.run(None, {'features': X, 'adjacency': adj})[0]
+        logits = self.session.run(None, {
+            'features': X, 'adjacency': adj, 'node_type': node_type,
+            'edge_type': edge_type, 'edge_weight': edge_weight,
+        })[0]
         probs = self._softmax(logits)
         preds = probs.argmax(axis=1)
 
@@ -127,7 +161,7 @@ class DeviceGNNInference:
             result[ip] = {
                 'level': int(preds[i]),
                 'name': LEVEL_NAMES[int(preds[i])],
-                'probs': probs[i].astype(np.float64),
+                'probs': probs[i].astype(np.float64).tolist(),
             }
         return result
 
