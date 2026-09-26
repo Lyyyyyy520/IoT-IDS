@@ -11,7 +11,8 @@
     3. 电脑连上树莓派热点 iot-community
 
 运行：
-    python virtual_device_generator.py
+    python virtual_device_generator.py                        # 全正常
+    python virtual_device_generator.py --attack plug-03       # 指定某台被感染（发 Mirai 洪水）
 """
 
 import socket
@@ -27,6 +28,7 @@ BROKER_PORT = 1883
 DNS_SERVER  = '8.8.8.8'       # 外网 DNS
 NTP_SERVER  = '192.168.4.1'   # 时间同步（网关）
 CLOUD_HTTP  = '8.8.8.8'       # 外网云（HTTP 心跳，占位）
+ATTACK_TARGET = '8.8.8.8'     # 攻击目标（Mirai UDP 洪水的外网目标）
 
 # 虚拟设备：(device_id, 类型, IP, 是否监听CoAP, 联动目标列表)
 # 类型：camera/door/light/plug/temp_sensor/speaker/door_sensor/smoke/corridor_light
@@ -166,10 +168,29 @@ def coap_listen(device_id, src_ip, stop):
             break
 
 
+# ==================== 攻击模式（被感染设备） ====================
+
+def attack_worker(device_id, src_ip, stop):
+    """攻击模式：模拟被 Mirai 感染，向目标高频发 UDP 洪水。
+
+    Mirai udpplain 特征：固定源端口 + 随机目的端口 + 高频，制造大量流，
+    使 GNN 能判出「僵尸网络(红)」。
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((src_ip, 0))  # 固定源端口（持久 socket，避免被误判成扫描）
+    print(f'[攻击] {device_id} ({src_ip}) 开始 Mirai UDP 洪水 -> {ATTACK_TARGET}')
+    while not stop.is_set():
+        for _ in range(10):
+            dst_port = random.randint(1, 65535)  # 随机目的端口（Mirai udpplain 特征）
+            sock.sendto(b'\x00\x00\x00\x00', (ATTACK_TARGET, dst_port))
+        time.sleep(0.05)  # ~200 包/秒
+    sock.close()
+
+
 # ==================== 设备 worker ====================
 
-def device_worker(device_id, device_type, src_ip, listen_coap, coap_targets):
-    """一台虚拟设备的主循环：MQTT + DNS + NTP + HTTP + CoAP。"""
+def device_worker(device_id, device_type, src_ip, listen_coap, coap_targets, is_attacker=False):
+    """一台虚拟设备的主循环：MQTT + DNS + NTP + HTTP + CoAP（+ 可选攻击）。"""
     stop = threading.Event()
     threads = []
 
@@ -186,6 +207,12 @@ def device_worker(device_id, device_type, src_ip, listen_coap, coap_targets):
     # CoAP 监听（执行器）
     if listen_coap:
         t = threading.Thread(target=coap_listen, args=(device_id, src_ip, stop), daemon=True)
+        t.start()
+        threads.append(t)
+
+    # 攻击模式（被感染设备额外发 Mirai 洪水）
+    if is_attacker:
+        t = threading.Thread(target=attack_worker, args=(device_id, src_ip, stop), daemon=True)
         t.start()
         threads.append(t)
 
@@ -219,11 +246,22 @@ def device_worker(device_id, device_type, src_ip, listen_coap, coap_targets):
 # ==================== main ====================
 
 def main():
+    # 解析攻击设备：python virtual_device_generator.py --attack plug-03,cam-02
+    import sys
+    attack_ids = set()
+    if '--attack' in sys.argv:
+        idx = sys.argv.index('--attack')
+        if idx + 1 < len(sys.argv):
+            attack_ids = set(a.strip() for a in sys.argv[idx + 1].split(',') if a.strip())
+    if attack_ids:
+        print(f'被感染设备（攻击模式）: {", ".join(sorted(attack_ids))}')
+
     print(f'启动 {len(DEVICES)} 台虚拟设备...\n')
     for device_id, device_type, src_ip, listen_coap, coap_targets in DEVICES:
+        is_attacker = device_id in attack_ids
         t = threading.Thread(
             target=device_worker,
-            args=(device_id, device_type, src_ip, listen_coap, coap_targets),
+            args=(device_id, device_type, src_ip, listen_coap, coap_targets, is_attacker),
             daemon=True,
         )
         t.start()

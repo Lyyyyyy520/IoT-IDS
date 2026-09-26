@@ -394,11 +394,11 @@ class TrafficCapture:
 
     def _capture_simulate(self):
         """模拟真实社区IoT场景：多设备+正常通信+攻击混合"""
-        cameras = [f'192.168.1.{i}' for i in range(10, 15)]
-        doors = [f'192.168.1.{i}' for i in range(20, 23)]
-        sensors = [f'192.168.1.{i}' for i in range(30, 38)]
-        plugs = [f'192.168.1.{i}' for i in range(40, 44)]
-        hub = '192.168.1.1'
+        cameras = [f'192.168.4.{i}' for i in range(10, 15)]
+        doors = [f'192.168.4.{i}' for i in range(20, 23)]
+        sensors = [f'192.168.4.{i}' for i in range(30, 38)]
+        plugs = [f'192.168.4.{i}' for i in range(40, 44)]
+        hub = '192.168.4.1'
         cloud = '10.0.0.1'
         all_devices = cameras + doors + sensors + plugs + [hub]
         attackers = ['10.99.1.100', '10.99.1.200', '172.20.0.50', '45.33.32.156']
