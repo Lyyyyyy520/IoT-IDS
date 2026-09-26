@@ -116,7 +116,9 @@ if __name__ == '__main__':
 
     rng = np.random.default_rng(42)
     hub = '192.168.4.1'
-    ext = '8.8.8.8'
+    # Synthetic metadata only; keep even the smoke-test target inside the
+    # isolated lab range so examples cannot be copied into a public target.
+    ext = '192.168.4.200'
     t = time.time()
 
     # 正常设备：MQTT 遥测（小包 TCP，到网关）

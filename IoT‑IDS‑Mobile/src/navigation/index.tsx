@@ -1,156 +1,64 @@
 import React from 'react';
-import { ActivityIndicator, View, StyleSheet, TouchableOpacity } from 'react-native';
-import { NavigationContainer, DarkTheme } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../context/AuthContext';
-import { colors } from '../theme';
+import { useMobile } from '../mobile/MobileContext';
+import PairingScreen from '../mobile/PairingScreen';
+import HomeScreen from '../mobile/HomeScreen';
+import DevicesScreen from '../mobile/DevicesScreen';
+import SettingsScreen from '../mobile/SettingsScreen';
+import NoticeListScreen, { NoticeDetailScreen } from '../mobile/NoticeScreens';
+import { HelpDetailScreen, HelpListScreen, SubmitHelpScreen } from '../mobile/HelpScreens';
+import MobileDeviceDetailScreen from '../mobile/MobileDeviceDetailScreen';
+import { palette, ui } from '../mobile/ui';
 
-import LoginScreen from '../screens/LoginScreen';
-import DashboardScreen from '../screens/DashboardScreen';
-import AssetsScreen from '../screens/AssetsScreen';
-import MonitorScreen from '../screens/MonitorScreen';
-import AnalysisScreen from '../screens/AnalysisScreen';
-import AlertsScreen from '../screens/AlertsScreen';
-import HistoryScreen from '../screens/HistoryScreen';
-import AlertDetailScreen from '../screens/AlertDetailScreen';
-import SettingsScreen from '../screens/SettingsScreen';
-
-const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
-
-const navTheme = {
-  ...DarkTheme,
-  colors: {
-    ...DarkTheme.colors,
-    primary: colors.accentCyan,
-    background: colors.bgBase,
-    card: colors.bgElevated,
-    text: colors.textPrimary,
-    border: colors.border,
-  },
-};
-
-type IoniconName = keyof typeof Ionicons.glyphMap;
-
-function tabIcon(route: string, focused: boolean): IoniconName {
-  switch (route) {
-    case 'Dashboard':
-      return focused ? 'shield-checkmark' : 'shield-checkmark-outline';
-    case 'Assets':
-      return focused ? 'hardware-chip' : 'hardware-chip-outline';
-    case 'Monitor':
-      return focused ? 'pulse' : 'pulse-outline';
-    case 'Analysis':
-      return focused ? 'analytics' : 'analytics-outline';
-    case 'Alerts':
-      return focused ? 'warning' : 'warning-outline';
-    case 'History':
-      return focused ? 'time' : 'time-outline';
-    default:
-      return 'ellipse';
-  }
-}
+const Stack = createNativeStackNavigator();
+const theme = { ...DefaultTheme, colors: { ...DefaultTheme.colors,
+  background: palette.background, card: palette.card, primary: palette.green,
+  text: palette.text, border: palette.border } };
 
 function MainTabs() {
-  return (
-    <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerStyle: { backgroundColor: colors.bgElevated },
-        headerTintColor: colors.textPrimary,
-        headerTitleStyle: { fontWeight: '700' },
-        headerShadowVisible: false,
-        tabBarStyle: {
-          backgroundColor: colors.bgElevated,
-          borderTopColor: colors.border,
-        },
-        tabBarActiveTintColor: colors.accentCyan,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarIcon: ({ focused, color, size }) => (
-          <Ionicons name={tabIcon(route.name, focused)} size={size} color={color} />
-        ),
-      })}
-    >
-      <Tab.Screen
-        name="Dashboard"
-        component={DashboardScreen}
-        options={({ navigation }) => ({
-          title: '态势大屏',
-          headerRight: () => (
-            <TouchableOpacity
-              onPress={() => navigation.navigate('Settings' as never)}
-              style={{ paddingHorizontal: 14 }}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons name="settings-outline" size={22} color={colors.textPrimary} />
-            </TouchableOpacity>
-          ),
-        })}
-      />
-      <Tab.Screen name="Assets" component={AssetsScreen} options={{ title: '设备列表' }} />
-      <Tab.Screen name="Monitor" component={MonitorScreen} options={{ title: '数据监控' }} />
-      <Tab.Screen name="Analysis" component={AnalysisScreen} options={{ title: '分析视图' }} />
-      <Tab.Screen name="Alerts" component={AlertsScreen} options={{ title: '入侵告警' }} />
-      <Tab.Screen name="History" component={HistoryScreen} options={{ title: '历史记录' }} />
-    </Tab.Navigator>
-  );
-}
-
-function SplashScreen() {
-  return (
-    <View style={styles.splash}>
-      <ActivityIndicator size="large" color={colors.accentCyan} />
-    </View>
-  );
+  const auth = useMobile();
+  const unreadNotices = auth.notices
+    ? auth.notices.filter(item => !item.read && item.status !== 'false_positive').length
+    : auth.overview?.security_capability.available ? auth.overview.security_capability.unread_count : undefined;
+  return <Tab.Navigator screenOptions={({ route }) => ({
+    headerStyle: { backgroundColor: palette.card }, headerTintColor: palette.text,
+    tabBarStyle: { backgroundColor: palette.card }, tabBarActiveTintColor: palette.green,
+    tabBarIcon: ({ color, size }) => <Ionicons name={route.name === '首页' ? 'home-outline' :
+      route.name === '安全提醒' ? 'notifications-outline' : route.name === '本人设备' ? 'cube-outline' : 'settings-outline'} size={size} color={color} />,
+  })}>
+    <Tab.Screen name="首页" component={HomeScreen} />
+    <Tab.Screen name="安全提醒" component={NoticeListScreen} options={{ tabBarBadge: unreadNotices && unreadNotices > 0 ? unreadNotices : undefined }} />
+    <Tab.Screen name="本人设备" component={DevicesScreen} />
+    <Tab.Screen name="设置" component={SettingsScreen} />
+  </Tab.Navigator>;
 }
 
 export default function RootNavigator() {
-  const { authenticated, loading } = useAuth();
-
-  if (loading) return <SplashScreen />;
-
-  return (
-    <NavigationContainer theme={navTheme}>
-      <Stack.Navigator
-        screenOptions={{
-          headerStyle: { backgroundColor: colors.bgElevated },
-          headerTintColor: colors.textPrimary,
-          headerTitleStyle: { fontWeight: '700' },
-          headerShadowVisible: false,
-        }}
-      >
-        {authenticated ? (
-          <>
-            <Stack.Screen name="Tabs" component={MainTabs} options={{ headerShown: false }} />
-            <Stack.Screen
-              name="AlertDetail"
-              component={AlertDetailScreen}
-              options={{ title: '告警详情' }}
-            />
-            <Stack.Screen
-              name="Settings"
-              component={SettingsScreen}
-              options={{ title: '系统设置' }}
-            />
-          </>
-        ) : (
-          <Stack.Screen
-            name="Login"
-            component={LoginScreen}
-            options={{ headerShown: false }}
-          />
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
-  );
+  const auth = useMobile();
+  if (auth.phase === 'restoring') return <View style={[ui.page, { justifyContent: 'center', alignItems: 'center' }]}>
+    <ActivityIndicator color={palette.green} /><Text style={ui.muted}>正在安全恢复会话…</Text>
+  </View>;
+  if (auth.phase === 'offline-with-session') return <View style={[ui.page, ui.content, { justifyContent: 'center' }]}>
+    <Text style={ui.title}>暂时无法连接服务器</Text>
+    <Text style={ui.body}>本机凭据仍保留。请检查网络后重试；不会显示缓存的设备安全结论。</Text>
+    {auth.error && <Text accessibilityRole="alert" style={ui.warning}>{auth.error}</Text>}
+    <TouchableOpacity accessibilityRole="button" style={ui.button} onPress={() => void auth.sync()}><Text style={ui.buttonText}>重试连接</Text></TouchableOpacity>
+    <TouchableOpacity accessibilityRole="button" style={ui.secondaryButton} onPress={() => void auth.logout()}><Text style={ui.secondaryText}>清除此设备配对</Text></TouchableOpacity>
+  </View>;
+  if (auth.phase !== 'authenticated') return <PairingScreen />;
+  return <NavigationContainer theme={theme}>
+    <Stack.Navigator screenOptions={{ headerStyle: { backgroundColor: palette.card }, headerTintColor: palette.text }}>
+      <Stack.Screen name="主界面" component={MainTabs} options={{ headerShown: false }} />
+      <Stack.Screen name="提醒详情" component={NoticeDetailScreen} options={{ title: '提醒详情' }} />
+      <Stack.Screen name="设备详情" component={MobileDeviceDetailScreen} options={{ title: '设备详情' }} />
+      <Stack.Screen name="提交求助" component={SubmitHelpScreen} options={{ title: '联系管理员' }} />
+      <Stack.Screen name="我的求助" component={HelpListScreen} options={{ title: '我的求助' }} />
+      <Stack.Screen name="求助详情" component={HelpDetailScreen} options={{ title: '求助详情' }} />
+    </Stack.Navigator>
+  </NavigationContainer>;
 }
-
-const styles = StyleSheet.create({
-  splash: {
-    flex: 1,
-    backgroundColor: colors.bgBase,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});

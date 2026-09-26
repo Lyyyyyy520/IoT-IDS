@@ -1,0 +1,15 @@
+# Copy to /etc/mosquitto/conf.d/iot-ids.conf on the isolated gateway.
+# Create the password file locally with mosquitto_passwd; never commit it.
+# Build the ACL from acl-iot-ids.example with explicit backend/device identities.
+listener 1883 192.168.4.1
+allow_anonymous false
+password_file /etc/mosquitto/passwd-iot-ids
+acl_file /etc/mosquitto/acl-iot-ids
+
+persistence true
+persistence_location /var/lib/mosquitto/
+log_type error
+log_type warning
+connection_messages true
+
+# TLS is required before enabling access outside the isolated trusted LAN.

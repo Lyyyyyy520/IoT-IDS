@@ -3,19 +3,21 @@ SQLite Database Layer — 7 tables for IoT IDS v2.0
 
 Tables: users, alerts, traffic_logs, audit_logs, assets, policies, rules
 """
+from contextlib import closing
+from pathlib import Path
 import sqlite3
-import os
 from datetime import datetime
+from flask import current_app, has_app_context
 from werkzeug.security import generate_password_hash
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'ids.db')
+from config import bootstrap_admin_password, bootstrap_admin_username
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'user',  -- 'admin' or 'user'
+    role TEXT NOT NULL DEFAULT 'user',  -- admin/operator/user
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
@@ -100,19 +102,48 @@ CREATE TABLE IF NOT EXISTS rules (
 """
 
 
-def get_db():
-    """Get a database connection with row factory."""
-    conn = sqlite3.connect(DB_PATH)
+class DatabaseUnavailableError(RuntimeError):
+    """Raised when runtime access has no explicit, existing database file."""
+
+
+def _existing_database_path(database_path=None) -> Path:
+    if database_path is not None:
+        raw_path = database_path
+    elif has_app_context():
+        raw_path = current_app.config.get("DATABASE_PATH")
+    else:
+        raise DatabaseUnavailableError(
+            "database path requires an application context or explicit argument"
+        )
+    if raw_path is None or not str(raw_path).strip():
+        raise DatabaseUnavailableError("IOT_IDS_DATABASE_PATH is not configured")
+    path = Path(raw_path).expanduser()
+    if not path.is_file():
+        raise DatabaseUnavailableError("configured database file does not exist")
+    return path.resolve()
+
+
+def get_db(database_path=None):
+    """Open an existing runtime database without allowing SQLite creation."""
+    path = _existing_database_path(database_path)
+    try:
+        conn = sqlite3.connect(f"{path.as_uri()}?mode=rw", uri=True)
+    except sqlite3.Error as exc:
+        raise DatabaseUnavailableError("configured database cannot be opened") from exc
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
-def init_db():
-    """Initialize database: create tables and seed default data."""
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = get_db()
+def init_db(database_path):
+    """Explicit legacy initializer; never called by import or create_app()."""
+    if database_path is None or not str(database_path).strip():
+        raise ValueError("database_path is required for explicit initialization")
+    path = Path(database_path).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
 
     # Migration: add trace_info column if it doesn't exist
@@ -138,22 +169,26 @@ def init_db():
 
     conn.commit()
 
-    # Seed default accounts independently. Only username "admin" is privileged.
-    default_users = [
-        ('admin', 'admin123', 'admin'),
-        ('guest', 'guest123', 'user'),
-    ]
-    for username, password, role in default_users:
-        existing = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
-        if not existing:
-            conn.execute(
-                "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-                (username, generate_password_hash(password), role),
-            )
+    # Never seed a reusable password.  A first administrator is created only
+    # when the operator supplies a one-time bootstrap password explicitly.
+    admin_username = bootstrap_admin_username()
+    admin_password = bootstrap_admin_password()
+    admin_exists = conn.execute(
+        "SELECT id FROM users WHERE username = ?", (admin_username,)
+    ).fetchone()
+    if admin_password and not admin_exists:
+        conn.execute(
+            "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')",
+            (admin_username, generate_password_hash(admin_password)),
+        )
 
-    # Normalize existing rows so database metadata matches the effective permission rule.
+    # Keep operator rows intact.  This is role normalization only; no v3 schema
+    # or real data migration is performed during phase 0.
+    conn.execute("UPDATE users SET role = 'admin' WHERE username = ?", (admin_username,))
     conn.execute(
-        "UPDATE users SET role = CASE WHEN username = 'admin' THEN 'admin' ELSE 'user' END"
+        "UPDATE users SET role = 'user' "
+        "WHERE username != ? AND role NOT IN ('operator', 'user')",
+        (admin_username,),
     )
 
     # Seed demo assets if empty
@@ -186,43 +221,39 @@ def init_db():
 
     conn.commit()
     conn.close()
-    print(f'[DB] Initialized: {DB_PATH}')
+    print(f'[DB] Initialized: {path}')
 
 
 # ===== Query Helpers =====
 
 def query_all(sql: str, params=()):
     """Run a SELECT query and return all rows as dicts."""
-    conn = get_db()
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
+    with closing(get_db()) as conn:
+        rows = conn.execute(sql, params).fetchall()
     return [dict(r) for r in rows]
 
 
 def query_one(sql: str, params=()):
     """Run a SELECT query and return one row as dict, or None."""
-    conn = get_db()
-    row = conn.execute(sql, params).fetchone()
-    conn.close()
+    with closing(get_db()) as conn:
+        row = conn.execute(sql, params).fetchone()
     return dict(row) if row else None
 
 
 def execute(sql: str, params=()):
     """Run an INSERT/UPDATE/DELETE and return lastrowid."""
-    conn = get_db()
-    cur = conn.execute(sql, params)
-    conn.commit()
-    last_id = cur.lastrowid
-    conn.close()
+    with closing(get_db()) as conn:
+        cur = conn.execute(sql, params)
+        conn.commit()
+        last_id = cur.lastrowid
     return last_id
 
 
 def execute_many(sql: str, params_list):
     """Run executemany."""
-    conn = get_db()
-    conn.executemany(sql, params_list)
-    conn.commit()
-    conn.close()
+    with closing(get_db()) as conn:
+        conn.executemany(sql, params_list)
+        conn.commit()
 
 
 def get_config(key: str, default=None):

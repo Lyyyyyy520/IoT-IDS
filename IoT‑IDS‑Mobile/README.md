@@ -1,162 +1,58 @@
-# 🛡️ IoT IDS Mobile — 移动端
+# IoT IDS Mobile（普通用户端）
 
-智慧社区物联网僵尸网络入侵检测系统 **移动端 App**（Expo / React Native）。
+Expo SDK 54 / React Native 0.81。当前入口仅有“首页、本人设备、设置”。旧管理员页面源码暂时归档，但不在导航或深链中注册；旧 Cookie 客户端已停用。APP 不提供设备管理、全局抓包、GNN 或事件处置。
 
-本 App 对接原网页后端项目 `D:\IoT‑IDS\backend`（Flask + SQLite + ONNX），复刻网页端全部物联网入侵检测核心功能。项目与网页端**完全解耦**，不读取、不修改 `D:\IoT‑IDS` 下任何文件。
+## 安装与离线检查
 
----
-
-## 功能页面
-
-| 页面 | 说明 | 对应后端接口 |
-|------|------|--------------|
-| 态势大屏 | KPI 统计、流量趋势图、攻击类型分布、最新告警 | `GET /api/dashboard/stats` |
-| 设备列表 | IoT 设备资产列表、在线/离线/告警状态 | `GET /api/assets` |
-| 数据监控 | 实时抓包检测控制、探针节点状态、实时流量日志 | `/api/capture/*`、`/api/probe/status`、`/api/traffic/logs` |
-| 分析视图 | 网络拓扑、攻击热力图（7 天×24 小时）、MITRE ATT&CK 攻击链 | `/api/analysis/topology`、`/api/analysis/heatmap`、`/api/analysis/mitre` |
-| 入侵告警 | 告警列表（筛选/合并）、实时轮询新告警、拉黑/溯源/误报 | `/api/alerts`、`/api/alerts/new`、`/api/alerts/:id/*` |
-| 历史记录 | 告警历史（时间范围筛选）、审计日志（管理员） | `/api/alerts`、`/api/logs/audit` |
-| 系统设置 | 后端地址配置、连接测试、账号信息、退出登录 | `/api/health`、`/api/config` |
-
----
-
-## 技术栈
-
-- Expo SDK 54 + React Native 0.81
-- React Navigation 7（Bottom Tabs + Native Stack）
-- `react-native-svg` 自绘图表
-- `@react-native-async-storage/async-storage`（会话与配置持久化）
-- TypeScript
-
----
-
-## 与后端的对接方式
-
-原网页后端使用 **Flask Session（签名 Cookie）** 认证，移动端没有浏览器自动 Cookie 存储，因此 App 内置了 Cookie 管理：
-
-1. 登录成功后从响应头 `Set-Cookie` 抓取 `session=xxx`；
-2. 持久化到本地存储；
-3. 后续每个请求手动携带 `Cookie: session=xxx`。
-
-**后端地址自动推导**：在 Expo Go 开发模式下，App 会从 Expo 的 `hostUri` 自动推导出开发机（电脑）的局域网 IP，拼接成 `http://<电脑IP>:5000/api`，因此真机调试**通常无需手动配置**即可连上同一台电脑上的后端。
-
-如需手动指定，可在 App 内「系统设置」页或登录页右下角「后端连接设置」中修改，或编辑 `app.json` 的 `extra.apiBaseUrl`。
-
----
-
-## 环境要求
-
-- **Node.js >= 20**（当前环境 Node v24 ✅）
-- **后端已启动**：`D:\IoT‑IDS\backend`（Flask，监听 `0.0.0.0:5000`）
-- 手机端 **Expo Go** App（应用商店搜索安装），且手机与电脑处于**同一局域网**
-
----
-
-## 安装依赖
-
-在 `D:\IoT‑IDS‑Mobile` 目录下执行：
-
-```bash
-npm install
+```powershell
+cd IoT‑IDS‑Mobile
+npm ci
+npm test -- --watch=false
+npm run typecheck
+npx expo config --type public --json
 ```
 
-> 首次安装若提示 Expo 依赖版本需要校正，可执行：
-> ```bash
-> npx expo install --fix
-> ```
+依赖 `expo-secure-store` 保存轮换的 refresh token，`expo-crypto` 生成随机 `client_instance_id`；Jest、`jest-expo`、React Native Testing Library 和 `test-renderer` 用于测试。未执行 Android/iOS 原生构建时，不应把测试通过解释为真机安全存储已验证。
 
----
+## 首次配对
 
-## 启动步骤（完整）
+管理员先在 Web 端建立 `user` 账号、授权设备/区域，并生成一次性配对码。APP 输入完整服务器根地址（例如 `https://ids.example.com`，不要附 `/api`）、配对码和用户确认的客户端名称。配对码只在表单内存中，成功或离开页面即清除；APP 不使用 Web 用户名/密码或 Cookie 登录。
 
-### 第一步：启动后端（原网页项目）
+生产地址必须为 HTTPS，不能含用户名、密码、查询串、fragment 或路径。仅 Expo 开发模式可由用户明确开启隔离局域网 HTTP；界面持续警告，且只接受本机/私有局域网主机。服务端仍可能返回 `https_required`（当前后端仅允许 loopback 或测试环境的不安全 HTTP），这不是证书忽略开关。APP 不信任任意自签名证书或代理。
 
-另开一个终端，启动 `D:\IoT‑IDS` 的后端：
+## 凭据分类与恢复
 
-```bash
-cd D:\IoT-IDS\backend
-python app.py
+| 数据 | 存储 |
+| --- | --- |
+| access token | 进程内存；不持久化 |
+| refresh token | Expo SecureStore：`iot_ids_mobile_refresh_v1` |
+| 随机客户端 ID | Expo SecureStore：`iot_ids_mobile_client_instance_v1` |
+| 服务器地址、开发 HTTP 标志 | AsyncStorage：`iot_ids_mobile_server_v1`（非秘密） |
+| 配对码 | 配对表单内存；不持久化 |
+| overview | 进程内存；不持久化 |
+
+启动先清理旧版本在 AsyncStorage 中的 Web Cookie 和可能的旧认证字段；不会自动迁移旧登录。若有 refresh token，则先轮换，再取 `/api/v3/mobile/session` 与 `/api/v3/mobile/overview`；离线时保留 refresh token，但不展示缓存的“安全正常”结论。并发 access 失效请求只发起一次 refresh，服务端返回新 refresh token 后，必须先写入 SecureStore，才更新内存 access token。refresh 重放、会话撤销或用户不再有资格时清除本机凭据并要求重新配对。
+
+首页只显示后端授权范围内的设备。`security_capability.available=false` 显示“安全事件功能尚未接入”，不是“无攻击”。当前没有用户专属设备详情 API，因此“本人设备”只展示 overview 中已有的简化字段，不查询全局 `/api/v3/devices/{id}`。
+
+APP 前台每约 30 秒刷新 overview；从后台恢复时重新验证令牌并获取 session 和 overview。离线时可保留进程内最后一次真实数据，但明确标记过期。用户确认注销后立即清理本机凭据；服务端注销请求失败时提示管理员在 Web 端撤销。重置客户端还会清除随机客户端 ID。
+
+真实联调前请确认服务端 HTTPS、v3 migration 已显式完成、管理员已设置授权范围、设备时钟/网络和真机 SecureStore 行为。不要对真实数据库使用测试脚本。本轮未连接真实后端、Broker 或探针。
+
+## Android 直装 APK（无需 Expo Go 或 EAS）
+
+本项目仍使用 Expo SDK/React Native 作为代码框架，但生成的 APK 是独立安装包，手机上不需要 Expo Go，也不需要 EAS 云构建。
+
+Windows 本地构建需要 Android SDK、Android NDK、CMake 和 JDK 21。首次生成或 app.json 原生配置变更后，在本目录执行：
+
+```powershell
+npx expo prebuild --platform android
+cd android
+.\gradlew.bat assembleRelease
 ```
 
-看到 `Running on http://...5000` 即成功。可浏览器访问验证：
+APK 输出在 `android/app/build/outputs/apk/release/app-release.apk`。当前生成的 Gradle 工程使用 debug 签名配置，适合私下安装试用；正式商店发布需要设置自己的签名密钥并妥善保管。
 
-```
-http://localhost:5000/api/health
-```
+iPhone 包后续需在 Mac 上用 Xcode 编译和签名；可通过 TestFlight 或登记设备的 Ad Hoc 方式安装。Windows 不能直接编译 iPhone 原生包。
 
-返回 `{"status": "ok", ...}` 即后端就绪。
-
-### 第二步：启动移动端
-
-```bash
-cd D:\IoT‑IDS‑Mobile
-npx expo start
-```
-
-启动后终端会显示二维码。
-
-### 第三步：在手机上运行
-
-- **真机（推荐）**：手机安装 Expo Go，扫描终端二维码即可打开 App。
-  - 手机与电脑需在同一 Wi-Fi 下。
-  - App 会自动把后端地址指向电脑 IP 的 5000 端口。
-- **Android 模拟器**：按 `a` 键（后端地址会自动推导为 `10.0.2.2:5000`，或手动在设置页改）。
-- **iOS 模拟器（仅 macOS）**：按 `i` 键。
-
-### 第四步：登录
-
-使用后端默认账号登录：
-
-| 账号 | 密码 | 权限 |
-|------|------|------|
-| `admin` | `admin123` | 管理员（可拉黑/溯源/误报/抓包控制/审计日志） |
-| `guest` | `guest123` | 普通用户（只读） |
-
----
-
-## 常用命令
-
-| 命令 | 说明 |
-|------|------|
-| `npm install` | 安装依赖 |
-| `npx expo start` | 启动开发服务器 |
-| `npx expo start --android` | 直接启动 Android |
-| `npx expo start --ios` | 直接启动 iOS（仅 macOS） |
-| `npx expo start --tunnel` | 局域网不通时用隧道模式（需 Expo 账号） |
-
----
-
-## 目录结构
-
-```
-IoT‑IDS‑Mobile/
-├── App.tsx                    # 应用入口
-├── app.json                   # Expo 配置（extra.apiBaseUrl 可覆盖后端地址）
-├── package.json
-├── tsconfig.json
-├── babel.config.js
-└── src/
-    ├── config.ts              # API Base URL 自动推导
-    ├── theme.ts               # 暗色主题 + 风险色板（对齐网页端 theme.css）
-    ├── types.ts               # 后端返回结构类型定义
-    ├── api/
-    │   ├── client.ts          # fetch 封装 + Flask 会话 Cookie 管理
-    │   └── index.ts           # 全部后端 API 方法
-    ├── context/
-    │   └── AuthContext.tsx    # 登录状态管理
-    ├── navigation/
-    │   └── index.tsx          # 导航（登录栈 + 底部 Tab）
-    ├── components/            # 通用组件（卡片/徽章/图表/列表项等）
-    ├── screens/               # 页面（登录/大屏/设备/监控/告警/历史/详情/设置）
-    └── utils/format.ts        # 数字/时间格式化
-```
-
----
-
-## 注意事项
-
-1. **同一局域网**：真机需与后端所在电脑处于同一 Wi-Fi；若无法连通，用 `--tunnel` 或手动填写后端地址。
-2. **HTTP 明文流量**：开发期（Expo Go）访问 `http://` 局域网地址正常。若将来打包成独立 Android APK，需在 `app.json` 开启 `usesCleartextTraffic`（或使用 HTTPS）才能访问 `http` 后端。
-3. **会话失效**：后端 `secret_key` 每次启动会随机生成，后端重启后 App 会话失效，需重新登录。
-4. **管理员接口**：拉黑 IP、溯源、标记误报、抓包控制、审计日志等仅 `admin` 账号可操作；`guest` 会看到只读界面。
-5. **未改动原项目**：本 App 完全独立，`D:\IoT‑IDS` 目录下的任何文件均未修改。
+安装包不会内置后端。正式配对需要可从手机访问的 HTTPS 服务：管理员在 Web 端创建 `user` 账号、授权设备/区域并生成一次性配对码；APP 输入完整 HTTPS 服务器根地址（不要附 `/api`）、配对码和用户确认的客户端名称。仓库的一键演示服务只监听 `127.0.0.1`，且发布版 APP 不允许 HTTP，因此不能直接用它连接手机。

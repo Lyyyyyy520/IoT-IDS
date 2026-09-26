@@ -8,8 +8,11 @@ Works in two modes:
 import threading
 import time
 import random
-from datetime import datetime
+from datetime import datetime, timezone
+import logging
 from typing import Optional, Callable
+from uuid import uuid4
+from flask import current_app, has_app_context
 
 from database import execute
 from services.rule_engine import get_rule_engine, FlowRecord
@@ -45,18 +48,27 @@ except Exception:
     DEVICE_GNN_AVAILABLE = False
 
 FLOW_PACKET_THRESHOLD = 4   # packets per flow before extraction
+LOGGER = logging.getLogger(__name__)
 
 
 class TrafficCapture:
     """Background traffic capture with dual-engine detection."""
 
-    def __init__(self):
+    def __init__(self, application=None, traffic_aggregation_service=None):
+        self.application = application
+        self.traffic_aggregation_service = traffic_aggregation_service
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.packet_count = 0
         self.alert_count = 0
         self.attack_ratio = 0.25
+        self.capture_mode = 'sim'
+        self.capture_interface = None
+        self.scapy_error = ''
         self.on_alert: Optional[Callable] = None  # callback(alert_dict)
+        self._traffic_source_session_id = uuid4().hex
+        self._traffic_sequence = 0
+        self._traffic_lock = threading.Lock()
         # GAT flow-based detection state
         self.gat_detector = None
         self.flow_buffers = {}   # flow key -> FlowFeatureExtractor
@@ -83,14 +95,30 @@ class TrafficCapture:
 
         self.attack_ratio = max(0, min(1, attack_ratio))
         self.capture_mode = 'real' if (use_scapy and SCAPY_AVAILABLE) else 'sim'
+        self.capture_interface = interface
+        self.scapy_error = ''
 
         self.running = True
         if use_scapy and SCAPY_AVAILABLE:
-            self.thread = threading.Thread(target=self._capture_scapy, args=(interface,), daemon=True)
+            target = self._capture_scapy
+            target_args = (interface,)
         else:
-            self.thread = threading.Thread(target=self._capture_simulate, daemon=True)
+            target = self._capture_simulate
+            target_args = ()
+        self.thread = threading.Thread(
+            target=self._run_with_application_context,
+            args=(target, target_args),
+            daemon=True,
+        )
         self.thread.start()
         return {'success': True, 'message': '抓包已启动', 'mode': 'scapy' if (use_scapy and SCAPY_AVAILABLE) else 'simulation'}
+
+    def _run_with_application_context(self, target, target_args):
+        if self.application is None:
+            target(*target_args)
+            return
+        with self.application.app_context():
+            target(*target_args)
 
     def stop(self):
         """Stop capture."""
@@ -117,13 +145,74 @@ class TrafficCapture:
             'gat_loaded': self.gat_detector.model_loaded if self.gat_detector else False,
             'device_gnn_available': DEVICE_GNN_AVAILABLE and self.device_detector is not None,
             'device_gnn_loaded': self.device_detector.model_loaded if self.device_detector else False,
+            'mode': self.capture_mode,
+            'interface': self.capture_interface,
+            'scapy_error': self.scapy_error,
         }
+
+    def _aggregate_packet_v3(self, *, src_ip, dst_ip, src_port, dst_port,
+                             protocol, length, occurred_at=None):
+        service = self.traffic_aggregation_service
+        if service is None:
+            return
+        at = occurred_at or datetime.now(timezone.utc)
+        if at.tzinfo is None or at.utcoffset() is None:
+            at = at.replace(tzinfo=timezone.utc)
+        else:
+            at = at.astimezone(timezone.utc)
+        with self._traffic_lock:
+            sequence = self._traffic_sequence
+            self._traffic_sequence += 1
+        identifier = f"{self._traffic_source_session_id}-{sequence}"
+        try:
+            service.ingest_batch(
+                source_id="local-capture",
+                source_session_id=self._traffic_source_session_id,
+                batch_id=identifier,
+                batch_sequence=sequence,
+                received_at=datetime.now(timezone.utc),
+                samples=[{
+                    "sample_id": identifier,
+                    "occurred_at": at,
+                    "src_ip": src_ip,
+                    "dst_ip": dst_ip,
+                    "network_protocol": protocol,
+                    "application_protocol": None,
+                    "application_protocol_inferred": False,
+                    "src_port": src_port or None,
+                    "dst_port": dst_port or None,
+                    "bytes": length,
+                    "packets": 1,
+                    # This source observes packets, not completed flows.
+                    "flow_count": 0,
+                }],
+            )
+        except Exception as exc:
+            service.mark_degraded("capture_aggregation_failed")
+            LOGGER.error(
+                "traffic_source_failed source=local-capture "
+                "code=capture_aggregation_failed type=%s",
+                type(exc).__name__,
+            )
 
     def _process_packet(self, src_ip: str, dst_ip: str, src_port: int, dst_port: int,
                          protocol: str, length: int, flags: str = '', payload: str = '',
-                         known_normal: bool = False):
-        """Process a single packet through the detection pipeline."""
+                         known_normal: bool = False, source: Optional[str] = None,
+                         aggregate_v3: bool = True, occurred_at=None):
+        """Process a single packet through the detection pipeline.
+
+        ``source`` lets remote probes use the same rule, model, logging and
+        alert pipeline as packets captured locally.
+        """
+        source_label = source or self.capture_mode
         self.packet_count += 1
+
+        if aggregate_v3 and source_label == 'real':
+            self._aggregate_packet_v3(
+                src_ip=src_ip, dst_ip=dst_ip, src_port=src_port,
+                dst_port=dst_port, protocol=protocol, length=length,
+                occurred_at=occurred_at,
+            )
 
         # 0. GAT flow-based detection (binary Normal/Attack)
         self._feed_gat_flow(src_ip, dst_ip, src_port, dst_port, protocol, length, flags)
@@ -169,7 +258,7 @@ class TrafficCapture:
         # 3. Save traffic log with ONNX label
         execute(
             "INSERT INTO traffic_logs (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, onnx_label, source) VALUES (?,?,?,?,?,?,?,?,?)",
-            (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, onnx_label, self.capture_mode),
+            (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, onnx_label, source_label),
         )
 
         # 4. ONNX 检测到攻击 → 生成告警（已知正常流量跳过）
@@ -208,11 +297,10 @@ class TrafficCapture:
                 elif total >= 60: risk_level = 'high'
                 else: risk_level = 'medium'
 
-                # 自动拉黑：开关开启 + 高危 || (中危且持续攻击≥5次)
-                should_block = get_config('auto_block', 'false') == 'true' and (
-                    risk_level == 'critical' or
-                    (risk_level == 'high' and freq >= 5)
-                )
+                # Phase 0 contract: the first release never blocks or powers
+                # off a device automatically.  Keep the legacy branch visible
+                # for later removal, but make it unreachable.
+                should_block = False
                 if should_block:
                     existing = _q("SELECT id FROM policies WHERE policy_type='blacklist' AND target=? AND enabled=1", (src_ip,))
                     if not existing or existing['c'] == 0:
@@ -233,21 +321,49 @@ class TrafficCapture:
                     "VALUES (?,?,?,?,?,?,?,?,?,'new')",
                     (risk_level, onnx_label.title(), src_ip, dst_ip,
                      src_port, dst_port, protocol, round(result['confidence'], 2),
-                     f'[{self.capture_mode}]{dev_name} {result["class_name"]} (置信度 {result["confidence"]:.1%})'),
+                     f'[{source_label}]{dev_name} {result["class_name"]} (置信度 {result["confidence"]:.1%})'),
                 )
 
-        # 5. Rule engine: log matches only (no alerts, ONNX is primary)
-        for match in matches:
-            self.alert_count += 1  # count for stats
-            # Rule matches logged but NOT inserted as alerts
+        # 5. Create deduplicated alerts for rule matches. This provides a
+        # deterministic alert path for remote traffic even when a single
+        # packet does not produce a confident ML classification.
+        if matches and not known_normal:
+            from database import query_one as _q, get_config
+            merge_window = int(get_config('merge_window_minutes', '5'))
+            for match in matches:
+                attack_type = match.get('rule_name') or match.get('category', 'Rule')
+                severity = match.get('severity', 'medium')
+                dup = _q(
+                    "SELECT COUNT(*) as c FROM alerts WHERE attack_type = ? AND src_ip = ? "
+                    "AND created_at > datetime('now', ? || ' minutes', 'localtime')",
+                    (attack_type, src_ip, f'-{merge_window}'),
+                )
+                if dup and dup['c'] > 0:
+                    continue
+                self.alert_count += 1
+                confidence = 0.99 if severity == 'critical' else 0.90 if severity == 'high' else 0.80
+                execute(
+                    "INSERT INTO alerts (risk_level, attack_type, src_ip, dst_ip, src_port, dst_port, protocol, confidence, description, status) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,'new')",
+                    (severity, attack_type, src_ip, dst_ip, src_port, dst_port, protocol,
+                     confidence, f'[{source_label}][Rule:{match.get("rule_id", "")}] {match.get("description", "")}'),
+                )
+
+    def process_external_packet(self, src_ip: str, dst_ip: str, src_port: int, dst_port: int,
+                                protocol: str, length: int, flags: str = '',
+                                payload: str = '', source: str = 'real',
+                                aggregate_v3: bool = False):
+        """Feed a packet received from a remote or VM probe into the IDS pipeline."""
+        self._process_packet(
+            src_ip, dst_ip, src_port, dst_port, protocol, length, flags, payload,
+            known_normal=False, source=source, aggregate_v3=aggregate_v3,
+        )
 
     def _capture_scapy(self, interface=None):
-        """Real packet capture using Scapy."""
+        """Real packet capture using Scapy until stop() is requested."""
         iface = interface or 'wlan0'  # 默认抓热点接口（设备都连在 wlan0 上）
         def packet_handler(pkt):
-            if not self.running:
-                return False
-            if IP not in pkt:
+            if not self.running or IP not in pkt:
                 return
             ip = pkt[IP]
             proto = ''
@@ -262,12 +378,19 @@ class TrafficCapture:
                 sport, dport = pkt[UDP].sport, pkt[UDP].dport
             elif ICMP in pkt:
                 proto = 'ICMP'
+            else:
+                return
 
-            self._process_packet(ip.src, ip.dst, sport, dport, proto, len(pkt), flags)
+            self._process_packet(ip.src, ip.dst, sport, dport, proto, len(pkt), flags, source='real')
 
         # 持续抓包，直到 stop() 设置 running=False（之前 timeout=1 只抓 1 秒就停了）
         while self.running:
-            sniff(prn=packet_handler, store=False, timeout=1, iface=iface)
+            try:
+                sniff(iface=iface, prn=packet_handler, store=False, timeout=1)
+            except Exception as e:
+                self.scapy_error = str(e)
+                self.running = False
+                break
 
     def _capture_simulate(self):
         """模拟真实社区IoT场景：多设备+正常通信+攻击混合"""
@@ -425,12 +548,11 @@ class TrafficCapture:
             )
 
 
-# ---- Global singleton ----
-_capture: Optional[TrafficCapture] = None
-
-
 def get_capture() -> TrafficCapture:
-    global _capture
-    if _capture is None:
-        _capture = TrafficCapture()
-    return _capture
+    """Return the capture service owned by the current Flask application."""
+    if not has_app_context():
+        raise RuntimeError("traffic capture requires a Flask application context")
+    from runtime_services import get_service_container
+
+    app = current_app._get_current_object()
+    return get_service_container(app).get_capture_service(app)

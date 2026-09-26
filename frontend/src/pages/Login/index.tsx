@@ -17,7 +17,7 @@ export default function LoginPage() {
     setLoading(false);
     if (result.success) {
       message.success('登录成功');
-      navigate('/dashboard', { replace: true });
+      navigate(result.role === 'admin' || result.role === 'operator' ? '/monitor' : '/dashboard', { replace: true });
     } else {
       message.error(result.message || '登录失败');
     }
@@ -133,8 +133,8 @@ export default function LoginPage() {
             marginTop: 16,
           }}
         >
-          <div>演示账号：admin / admin123</div>
-          <div style={{ marginTop: 4 }}>只读账号：guest / guest123</div>
+          <div>账号由系统管理员配置</div>
+          <div style={{ marginTop: 4 }}>请勿使用共享或演示密码</div>
         </div>
       </Card>
 

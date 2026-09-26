@@ -1,35 +1,71 @@
-"""
-IoT IDS Backend — Flask API Server v2.0
-"""
-from flask import Flask, jsonify, session, request
+"""IoT IDS Flask application factory and compatible legacy API routes."""
+import logging
+from pathlib import Path
+
+from flask import Blueprint, Flask, current_app, jsonify, session, request
 from flask_cors import CORS
 from datetime import datetime
 import os
 
-app = Flask(__name__)
-app.secret_key = os.urandom(24).hex()  # Session encryption key
-app.config['SESSION_PERMANENT'] = True
-CORS(app, supports_credentials=True)
-
-# Init database on startup
-from database import init_db, query_all, query_one, execute
-init_db()
+from config import (
+    MobileSecuritySettings,
+    cors_origins,
+    database_path as configured_database_path,
+    flask_debug_enabled,
+    mobile_security_settings,
+    runtime_environment,
+    session_secret,
+)
+from database import DatabaseUnavailableError, query_all, query_one, execute
 
 # Import auth services
-from services.auth import require_auth, require_admin, login_user, logout_user, get_current_user, log_action
+from services.auth import (
+    require_auth,
+    require_admin,
+    require_operator,
+    login_user,
+    logout_user,
+    get_current_user,
+    log_action,
+)
 
 # Register probe blueprint
 from api.probe import probe_bp
-app.register_blueprint(probe_bp)
+from api.v3_devices import create_v3_devices_blueprint
+from api.v3_device_discovery import create_v3_device_discovery_blueprint
+from api.v3_system_health import create_v3_system_health_blueprint
+from api.v3_incidents import create_v3_incidents_blueprint
+from api.v3_mobile import create_v3_mobile_blueprint
+from api.v3_realtime import create_v3_realtime_blueprint
+from api.v3_traffic import create_v3_traffic_blueprint
+from runtime_services import (
+    BackendServiceContainer,
+    EXTENSION_KEY,
+    default_mqtt_settings_provider,
+    get_service_container,
+    start_runtime_services,
+    stop_runtime_services,
+)
+
+
+LOGGER = logging.getLogger(__name__)
+legacy_bp = Blueprint("legacy_api", __name__)
 
 # ---- Health Check ----
 _MODEL_PATH = os.path.join(os.path.dirname(__file__), 'data', 'best_model.onnx')
 _model_loaded = os.path.exists(_MODEL_PATH)
 
-@app.route('/api/health')
+@legacy_bp.route('/api/health')
 def health():
+    database = get_service_container(current_app).database_health()
+    healthy = (
+        database["available"]
+        and database["legacy_schema_ready"]
+        and database["v3_schema_ready"]
+    )
     return jsonify({
-        'status': 'ok',
+        'status': 'ok' if healthy else 'degraded',
+        'database': database,
         'model_loaded': _model_loaded,
         'model_path': _MODEL_PATH if _model_loaded else None,
         'uptime': 0,
@@ -37,7 +73,7 @@ def health():
     })
 
 # ---- Authentication Routes ----
-@app.route('/api/auth/login', methods=['POST'])
+@legacy_bp.route('/api/auth/login', methods=['POST'])
 def auth_login():
     data = request.get_json() or {}
     username = data.get('username', '').strip()
@@ -49,12 +85,12 @@ def auth_login():
         return jsonify(result)
     return jsonify(result), 401
 
-@app.route('/api/auth/logout', methods=['POST'])
+@legacy_bp.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
     result = logout_user()
     return jsonify(result)
 
-@app.route('/api/auth/me')
+@legacy_bp.route('/api/auth/me')
 def auth_me():
     user = get_current_user()
     if not user:
@@ -96,8 +132,8 @@ def _get_traffic_history(source: str = ''):
     return result
 
 
-@app.route('/api/dashboard/stats')
-@require_auth
+@legacy_bp.route('/api/dashboard/stats')
+@require_operator
 def dashboard_stats():
     source = request.args.get('source', '')  # '' = all, 'sim' or 'real'
     src_prefix = f'[{source}]' if source else ''
@@ -186,8 +222,8 @@ def dashboard_stats():
 
 
 # ---- Alerts List ----
-@app.route('/api/alerts')
-@require_auth
+@legacy_bp.route('/api/alerts')
+@require_operator
 def alerts_list():
     from flask import request
     page = request.args.get('page', 1, type=int)
@@ -284,8 +320,8 @@ def alerts_list():
     })
 
 
-@app.route('/api/alerts/new')
-@require_auth
+@legacy_bp.route('/api/alerts/new')
+@require_operator
 def alerts_new():
     """查询新告警，用于前端实时轮询"""
     since_id = request.args.get('since_id', 0, type=int)
@@ -305,8 +341,8 @@ def alerts_new():
 
 
 # ---- Analysis Data ----
-@app.route('/api/analysis/topology')
-@require_auth
+@legacy_bp.route('/api/analysis/topology')
+@require_operator
 def topology_data():
     # 从 assets 表查所有设备作为节点
     assets = query_all("SELECT id, name, device_type, status, ip_address FROM assets")
@@ -349,8 +385,8 @@ def topology_data():
     })
 
 
-@app.route('/api/analysis/heatmap')
-@require_auth
+@legacy_bp.route('/api/analysis/heatmap')
+@require_operator
 def heatmap_data():
     # 统计最近 7 天、24 小时的告警分布
     sql = """
@@ -379,8 +415,8 @@ def heatmap_data():
     })
 
 
-@app.route('/api/analysis/mitre')
-@require_auth
+@legacy_bp.route('/api/analysis/mitre')
+@require_operator
 def mitre_data():
     """根据告警数据动态生成 MITRE ATT&CK 链路"""
     # 攻击类型 → MITRE 阶段映射
@@ -431,7 +467,7 @@ def mitre_data():
 
 
 # ---- Detection ----
-@app.route('/api/detect/upload', methods=['POST'])
+@legacy_bp.route('/api/detect/upload', methods=['POST'])
 @require_admin
 def detect_upload():
     from flask import request
@@ -485,8 +521,8 @@ def detect_upload():
 
 
 # ---- Export ----
-@app.route('/api/export/excel')
-@require_auth
+@legacy_bp.route('/api/export/excel')
+@require_operator
 def export_excel():
     from flask import Response, request
     from openpyxl import Workbook
@@ -540,8 +576,8 @@ def export_excel():
         headers={'Content-Disposition': 'attachment; filename=iot_ids_alerts.xlsx'})
 
 
-@app.route('/api/data/cleanup', methods=['POST'])
-@require_auth
+@legacy_bp.route('/api/data/cleanup', methods=['POST'])
+@require_admin
 def data_cleanup():
     """清空全部历史数据"""
     from database import get_config
@@ -561,20 +597,25 @@ def data_cleanup():
 
 
 # ---- Traffic Capture Control ----
-from services.traffic_capture import get_capture
+def get_capture():
+    """Lazily resolve the capture service owned by the current app."""
+    return get_service_container(current_app).get_capture_service(
+        current_app._get_current_object()
+    )
 
-@app.route('/api/capture/start', methods=['POST'])
+@legacy_bp.route('/api/capture/start', methods=['POST'])
 @require_admin
 def capture_start():
     data = request.get_json() or {}
     use_scapy = data.get('use_scapy', False)
     attack_ratio = data.get('attack_ratio', 0.25)
-    result = get_capture().start(use_scapy=use_scapy, attack_ratio=attack_ratio)
+    interface = data.get('interface')
+    result = get_capture().start(interface=interface, use_scapy=use_scapy, attack_ratio=attack_ratio)
     log_action('capture_start', f'mode={result["mode"]}')
     return jsonify(result)
 
 
-@app.route('/api/capture/stop', methods=['POST'])
+@legacy_bp.route('/api/capture/stop', methods=['POST'])
 @require_admin
 def capture_stop():
     result = get_capture().stop()
@@ -582,15 +623,15 @@ def capture_stop():
     return jsonify(result)
 
 
-@app.route('/api/capture/status')
-@require_auth
+@legacy_bp.route('/api/capture/status')
+@require_operator
 def capture_status():
     return jsonify(get_capture().status())
 
 
 # ---- GAT Detection Status ----
-@app.route('/api/gat/status')
-@require_auth
+@legacy_bp.route('/api/gat/status')
+@require_operator
 def gat_status():
     cap = get_capture()
     status = cap.status()
@@ -605,8 +646,8 @@ def gat_status():
 
 
 # ---- Device Graph Detection (4-level device risk) ----
-@app.route('/api/device/status')
-@require_auth
+@legacy_bp.route('/api/device/status')
+@require_operator
 def device_status():
     cap = get_capture()
     status = cap.status()
@@ -621,8 +662,8 @@ def device_status():
     })
 
 
-@app.route('/api/device/detect', methods=['POST'])
-@require_auth
+@legacy_bp.route('/api/device/detect', methods=['POST'])
+@require_admin
 def device_detect():
     cap = get_capture()
     result = cap.device_detect()
@@ -631,8 +672,8 @@ def device_detect():
 
 
 # ---- Traffic Logs ----
-@app.route('/api/traffic/logs')
-@require_auth
+@legacy_bp.route('/api/traffic/logs')
+@require_operator
 def traffic_logs():
     source = request.args.get('source', '')
     if source:
@@ -650,7 +691,7 @@ def traffic_logs():
 
 
 # ---- Alert Actions ----
-@app.route('/api/alerts/<int:alert_id>/block', methods=['POST'])
+@legacy_bp.route('/api/alerts/<int:alert_id>/block', methods=['POST'])
 @require_admin
 def block_ip(alert_id):
     """拉黑 IP：写入 policies 黑名单 + 更新告警状态 + 记录审计日志"""
@@ -687,7 +728,7 @@ def block_ip(alert_id):
     return jsonify({'success': True, 'message': f'已拉黑 IP: {src_ip}'})
 
 
-@app.route('/api/alerts/<int:alert_id>/unblock', methods=['POST'])
+@legacy_bp.route('/api/alerts/<int:alert_id>/unblock', methods=['POST'])
 @require_admin
 def unblock_ip(alert_id):
     """解除拉黑：删除黑名单 policy + 恢复该 IP 所有告警状态"""
@@ -716,8 +757,8 @@ def unblock_ip(alert_id):
     return jsonify({'success': True, 'message': f'已解除对 {ip_address} 的拉黑'})
 
 
-@app.route('/api/alerts/<int:alert_id>/trace', methods=['POST'])
-@require_admin
+@legacy_bp.route('/api/alerts/<int:alert_id>/trace', methods=['POST'])
+@require_operator
 def trace_alert(alert_id):
     """溯源分析：生成溯源报告 + 更新告警状态"""
     alert = query_one(
@@ -783,8 +824,8 @@ def trace_alert(alert_id):
     })
 
 
-@app.route('/api/alerts/<int:alert_id>/false-positive', methods=['POST'])
-@require_admin
+@legacy_bp.route('/api/alerts/<int:alert_id>/false-positive', methods=['POST'])
+@require_operator
 def mark_false_positive(alert_id):
     """标记误报：更新告警状态 + 记录审计日志"""
     alert = query_one("SELECT id, src_ip, attack_type FROM alerts WHERE id = ?", (alert_id,))
@@ -801,8 +842,8 @@ def mark_false_positive(alert_id):
     return jsonify({'success': True, 'message': f'已将告警 #{alert_id} 标记为误报'})
 
 
-@app.route('/api/alerts/<int:alert_id>/unmark-false-positive', methods=['POST'])
-@require_admin
+@legacy_bp.route('/api/alerts/<int:alert_id>/unmark-false-positive', methods=['POST'])
+@require_operator
 def unmark_false_positive(alert_id):
     """撤销误报标记：恢复告警状态为 reviewed"""
     alert = query_one("SELECT id, status FROM alerts WHERE id = ?", (alert_id,))
@@ -822,7 +863,7 @@ def unmark_false_positive(alert_id):
 
 
 # ---- Blacklist Management ----
-@app.route('/api/blocklist', methods=['GET'])
+@legacy_bp.route('/api/blocklist', methods=['GET'])
 @require_admin
 def blocklist_list():
     """获取所有黑名单记录（关联告警信息）"""
@@ -853,7 +894,7 @@ def blocklist_list():
     return jsonify({'total': len(deduped), 'items': deduped})
 
 
-@app.route('/api/blocklist/<int:policy_id>', methods=['DELETE'])
+@legacy_bp.route('/api/blocklist/<int:policy_id>', methods=['DELETE'])
 @require_admin
 def blocklist_delete(policy_id):
     """解除拉黑：删除 policy 记录 + 恢复关联告警状态"""
@@ -881,7 +922,7 @@ def blocklist_delete(policy_id):
 
 
 # ---- Policy Management ----
-@app.route('/api/policies', methods=['GET'])
+@legacy_bp.route('/api/policies', methods=['GET'])
 @require_admin
 def policies_list():
     """获取策略列表"""
@@ -898,7 +939,7 @@ def policies_list():
     return jsonify({'items': rows})
 
 
-@app.route('/api/policies', methods=['POST'])
+@legacy_bp.route('/api/policies', methods=['POST'])
 @require_admin
 def policies_create():
     """新增策略"""
@@ -918,7 +959,7 @@ def policies_create():
     return jsonify({'success': True, 'id': pid})
 
 
-@app.route('/api/policies/<int:policy_id>', methods=['PUT'])
+@legacy_bp.route('/api/policies/<int:policy_id>', methods=['PUT'])
 @require_admin
 def policies_update(policy_id):
     """编辑策略"""
@@ -932,7 +973,7 @@ def policies_update(policy_id):
     return jsonify({'success': True})
 
 
-@app.route('/api/policies/<int:policy_id>', methods=['DELETE'])
+@legacy_bp.route('/api/policies/<int:policy_id>', methods=['DELETE'])
 @require_admin
 def policies_delete(policy_id):
     """删除策略"""
@@ -942,15 +983,15 @@ def policies_delete(policy_id):
 
 
 # ---- Asset Management ----
-@app.route('/api/assets', methods=['GET'])
-@require_auth
+@legacy_bp.route('/api/assets', methods=['GET'])
+@require_operator
 def assets_list():
     """获取设备列表"""
     rows = query_all("SELECT * FROM assets ORDER BY created_at DESC")
     return jsonify({'items': rows})
 
 
-@app.route('/api/assets', methods=['POST'])
+@legacy_bp.route('/api/assets', methods=['POST'])
 @require_admin
 def assets_create():
     """新增设备"""
@@ -967,7 +1008,7 @@ def assets_create():
     return jsonify({'success': True, 'id': aid})
 
 
-@app.route('/api/assets/<int:asset_id>', methods=['PUT'])
+@legacy_bp.route('/api/assets/<int:asset_id>', methods=['PUT'])
 @require_admin
 def assets_update(asset_id):
     """编辑设备"""
@@ -980,7 +1021,7 @@ def assets_update(asset_id):
     return jsonify({'success': True})
 
 
-@app.route('/api/assets/<int:asset_id>', methods=['DELETE'])
+@legacy_bp.route('/api/assets/<int:asset_id>', methods=['DELETE'])
 @require_admin
 def assets_delete(asset_id):
     """删除设备"""
@@ -989,7 +1030,7 @@ def assets_delete(asset_id):
 
 
 # ---- Log Center ----
-@app.route('/api/logs/audit')
+@legacy_bp.route('/api/logs/audit')
 @require_admin
 def logs_audit():
     """审计日志"""
@@ -999,7 +1040,7 @@ def logs_audit():
     return jsonify({'items': rows})
 
 
-@app.route('/api/logs/traffic')
+@legacy_bp.route('/api/logs/traffic')
 @require_admin
 def logs_traffic():
     """流量日志"""
@@ -1010,15 +1051,16 @@ def logs_traffic():
 
 
 # ---- Configuration ----
-@app.route('/api/config', methods=['GET'])
-@require_auth
+@legacy_bp.route('/api/config', methods=['GET'])
+@require_admin
 def get_config():
     from database import get_config as gc
     return jsonify({
         'detection_mode': gc('detection_mode', 'offline'),
         'confidence_threshold': float(gc('confidence_threshold', '0.85')),
         'merge_window_minutes': int(gc('merge_window_minutes', '5')),
-        'auto_block': gc('auto_block', 'false').lower() == 'true',
+        # Fixed false by the v3 safety contract; first release is advice-only.
+        'auto_block': False,
         'retention_days': int(gc('retention_days', '30')),
         'model_name': 'CNN+LSTM Hybrid',
         'model_version': 'v3.0',
@@ -1027,18 +1069,210 @@ def get_config():
     })
 
 
-@app.route('/api/config', methods=['PUT'])
-@require_auth
+@legacy_bp.route('/api/config', methods=['PUT'])
+@require_admin
 def update_config():
     from database import set_config as sc
     data = request.get_json() or {}
-    for key in ('detection_mode', 'confidence_threshold', 'merge_window_minutes', 'auto_block', 'retention_days'):
+    if data.get('auto_block') not in (None, False, 'false'):
+        return jsonify({
+            'success': False,
+            'message': '第一版禁止自动封禁或断电，只提供人工处置建议',
+        }), 400
+    for key in ('detection_mode', 'confidence_threshold', 'merge_window_minutes', 'retention_days'):
         if key in data:
             sc(key, str(data[key]).lower())
     return jsonify({'success': True})
 
 
-if __name__ == '__main__':
+def create_app(
+    config_overrides=None,
+    *,
+    mqtt_settings_provider=None,
+    mqtt_subscriber_factory=None,
+    service_environment=None,
+    mobile_settings: MobileSecuritySettings | None = None,
+):
+    """Create one side-effect-free Flask application instance."""
+    overrides = dict(config_overrides or {})
+    configured_secret = overrides.get("SECRET_KEY") or session_secret()
+    application = Flask(__name__)
+    application.config.from_mapping(
+        SECRET_KEY=configured_secret,
+        SESSION_PERMANENT=True,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=runtime_environment() == "production",
+        MAX_CONTENT_LENGTH=2 * 1024 * 1024,
+        DATABASE_PATH=configured_database_path(),
+        DEBUG=flask_debug_enabled(),
+        V3_REPLAY_LIMIT=256,
+        V3_POLL_INTERVAL=1.0,
+        V3_KEEPALIVE_INTERVAL=15.0,
+    )
+    application.config.update(overrides)
+    from v3_db_maintenance import RetentionSettings
+    RetentionSettings.from_environment()
+    resolved_mobile_settings = (
+        mobile_settings
+        or application.config.get("MOBILE_SECURITY_SETTINGS")
+        or mobile_security_settings(fallback_secret=configured_secret)
+    )
+    if not isinstance(resolved_mobile_settings, MobileSecuritySettings):
+        raise TypeError("MOBILE_SECURITY_SETTINGS must be MobileSecuritySettings")
+    resolved_mobile_settings.validate()
+    application.config["MOBILE_SECURITY_SETTINGS"] = resolved_mobile_settings
+
+    configured_path = application.config.get("DATABASE_PATH")
+    normalized_path = (
+        Path(configured_path).expanduser().resolve()
+        if configured_path is not None and str(configured_path).strip()
+        else None
+    )
+    container_options = {
+        "database_path": normalized_path,
+        "mqtt_settings_provider": (
+            mqtt_settings_provider or default_mqtt_settings_provider
+        ),
+        "traffic_clock": application.config.get("V3_CLOCK"),
+    }
+    if mqtt_subscriber_factory is not None:
+        container_options["mqtt_subscriber_factory"] = mqtt_subscriber_factory
+    if service_environment is not None:
+        container_options["environment"] = service_environment
+    application.extensions[EXTENSION_KEY] = BackendServiceContainer(
+        **container_options
+    )
+
+    CORS(
+        application,
+        supports_credentials=True,
+        origins=list(application.config.get("CORS_ORIGINS", cors_origins())),
+    )
+    application.register_blueprint(legacy_bp)
+    application.register_blueprint(probe_bp)
+    application.register_blueprint(
+        create_v3_devices_blueprint(
+            normalized_path,
+            clock=application.config.get("V3_CLOCK"),
+        )
+    )
+    discovery_blueprint = create_v3_device_discovery_blueprint(
+        normalized_path,
+        clock=application.config.get("V3_CLOCK"),
+    )
+    application.extensions["iot_ids_device_discovery"] = discovery_blueprint.discovery_service
+    application.register_blueprint(discovery_blueprint)
+    application.register_blueprint(
+        create_v3_realtime_blueprint(
+            normalized_path,
+            clock=application.config.get("V3_CLOCK"),
+            waiter=application.config.get("V3_WAITER"),
+            monotonic_clock=application.config.get("V3_MONOTONIC_CLOCK"),
+            replay_limit=application.config["V3_REPLAY_LIMIT"],
+            poll_interval=application.config["V3_POLL_INTERVAL"],
+            keepalive_interval=application.config["V3_KEEPALIVE_INTERVAL"],
+            max_idle_cycles=application.config.get("V3_MAX_IDLE_CYCLES"),
+        )
+    )
+    traffic_service = get_service_container(application).get_traffic_service()
+    application.register_blueprint(
+        create_v3_traffic_blueprint(
+            traffic_service,
+            clock=application.config.get("V3_CLOCK"),
+        )
+    )
+    mobile_blueprint = create_v3_mobile_blueprint(
+        normalized_path,
+        resolved_mobile_settings,
+        clock=application.config.get("V3_CLOCK"),
+        fault_injector=application.config.get("MOBILE_FAULT_INJECTOR"),
+        traffic_service=traffic_service,
+    )
+    application.extensions["iot_ids_mobile_access"] = mobile_blueprint.mobile_service
+    application.register_blueprint(mobile_blueprint)
+    incident_blueprint = create_v3_incidents_blueprint(
+        normalized_path,
+        resolved_mobile_settings,
+        mobile_blueprint.mobile_service,
+        clock=application.config.get("V3_CLOCK"),
+        fault_injector=application.config.get(
+            "INCIDENT_FAULT_INJECTOR"
+        ),
+    )
+    application.extensions["iot_ids_incident_workflow"] = (
+        incident_blueprint.incident_service
+    )
+    application.register_blueprint(incident_blueprint)
+    application.register_blueprint(
+        create_v3_system_health_blueprint(
+            normalized_path,
+            get_service_container(application),
+            clock=application.config.get("V3_CLOCK"),
+        )
+    )
+
+    @application.after_request
+    def record_runtime_degradation(response):
+        if response.status_code >= 500:
+            path = request.path
+            if path.startswith("/api/v3/events"):
+                component = "event_log"
+            elif path.startswith("/api/v3/traffic"):
+                component = "traffic"
+            elif path.startswith("/api/v3/incidents"):
+                component = "incident"
+            elif path.startswith("/api/v3/mobile"):
+                component = "mobile"
+            elif path.startswith("/api/v3/devices/discovered"):
+                component = "discovery"
+            else:
+                component = "api"
+            container = get_service_container(application)
+            reason = "database_unavailable" if response.status_code == 503 else "request_failed"
+            container.mark_degraded(component, reason)
+            if response.status_code == 503:
+                container.mark_degraded("database", "database_unavailable")
+        return response
+
+    @application.errorhandler(DatabaseUnavailableError)
+    def database_unavailable(_error):
+        return jsonify(
+            {
+                "error": "数据库不可用",
+                "code": "database_unavailable",
+            }
+        ), 503
+
+    return application
+
+
+def validate_runtime_configuration(application) -> dict:
+    """Return a safe startup report without modifying the database."""
+    database = get_service_container(application).database_health()
+    if not database["available"]:
+        LOGGER.warning("database_unavailable reason=%s", database["reason"])
+    elif not database["v3_schema_ready"]:
+        LOGGER.warning("database_v3_schema_unavailable")
+    return {"database": database}
+
+
+def main() -> None:
+    application = create_app()
+    validate_runtime_configuration(application)
+    start_runtime_services(application)
     print('IoT IDS Backend starting...')
     print('    http://localhost:5000/api/health')
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    try:
+        application.run(
+            host='0.0.0.0',
+            port=5000,
+            debug=bool(application.debug),
+            use_reloader=bool(application.debug),
+        )
+    finally:
+        stop_runtime_services(application)
+
+
+if __name__ == '__main__':
+    main()

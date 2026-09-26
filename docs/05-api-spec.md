@@ -1,5 +1,10 @@
 # API 接口规范
 
+> 本文记录现有 `/api` 旧接口，供渐进式重构期间兼容使用。新版状态、权限、
+> ID、REST v3 和 SSE 契约见
+> [`docs/rebuild/state-and-api-contract.md`](rebuild/state-and-api-contract.md)。
+> 未列入 v3 契约的旧接口不得继续扩展；普通 user 不再访问全社区旧接口。
+
 ## 基础信息
 - Base URL: `http://localhost:5000/api`
 - 数据格式: JSON
@@ -159,3 +164,36 @@
 **Params**: 同 GET /api/alerts 的筛选参数
 
 **Response**: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+
+
+## 7. 系统健康
+
+### GET /api/v3/system/health
+
+只读运行状态快照。Web session 的 `admin` 与 `operator` 可读；匿名请求返回 401，普通 `user` 与 Mobile Bearer 返回 403。该请求不会建库、迁移、备份、清理、VACUUM 或访问外部服务。
+
+响应不含数据库路径、凭据、token/hash、MAC/IP、异常堆栈或任意环境变量。`components` 中每项返回 `status`（`ready`、`warming_up`、`degraded`、`unavailable`）、更新时间及可选稳定 `reason_code`；数据库状态另含 schema、只读 integrity check 与容量信息。GNN/Graph capability 固定为 unavailable。
+
+```json
+{
+  "observed_at": "2026-09-24T12:00:00Z",
+  "automatic_maintenance": false,
+  "components": {
+    "api": {"status": "ready", "updated_at": "2026-09-24T12:00:00Z", "reason_code": null},
+    "database": {"status": "ready", "exists": true, "readable": true, "writable": true, "updated_at": "2026-09-24T12:00:00Z", "reason_code": null},
+    "schema": {"status": "ready", "version": 9, "legacy_schema_ready": true, "migration_complete": true, "migration_checksums_valid": true, "updated_at": "2026-09-24T12:00:00Z", "reason_code": null},
+    "integrity_check": {"status": "ready", "result": "ok", "checked_at": "2026-09-24T12:00:00Z", "updated_at": "2026-09-24T12:00:00Z", "reason_code": null},
+    "mqtt": {"status": "unavailable", "updated_at": "2026-09-24T12:00:00Z", "reason_code": "mqtt_disabled"},
+    "traffic": {"status": "warming_up", "aggregation_status": "warming_up", "capture_status": "unavailable", "capture_reason_code": "capture_not_started", "updated_at": "2026-09-24T12:00:00Z", "reason_code": "traffic_not_started"},
+    "event_log": {"status": "ready", "retained_events": 0, "oldest_event_id": null, "latest_event_id": null, "latest_cursor": 0, "updated_at": "2026-09-24T12:00:00Z", "reason_code": null},
+    "incident": {"status": "ready", "updated_at": "2026-09-24T12:00:00Z", "reason_code": null},
+    "mobile": {"status": "ready", "updated_at": "2026-09-24T12:00:00Z", "reason_code": null},
+    "discovery": {"status": "ready", "updated_at": "2026-09-24T12:00:00Z", "reason_code": null},
+    "graph": {"status": "unavailable", "updated_at": "2026-09-24T12:00:00Z", "reason_code": "graph_capability_unavailable"}
+  },
+  "maintenance": {"last_successful_at": null, "last_plan_at": null, "last_apply_at": null, "last_plan_reason_code": "maintenance_plan_read_only", "reason_code": "no_maintenance_run"},
+  "capacity": {"database_file_bytes": 0, "page_size_bytes": 4096, "page_count": 0, "free_pages": 0, "free_bytes": 0, "disk_free_bytes": 0}
+}
+```
+
+容量数值示意；实际缺失或不可读取时返回 `null`。实时事件清理或其他游标断档使连续性无法证明时，`GET /api/v3/events` 返回 `snapshot.required`，客户端应先拉取快照并从快照游标重新订阅。维护流程见 [运行维护与故障恢复](12-operations-and-recovery.md)。

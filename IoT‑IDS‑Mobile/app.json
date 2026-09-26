@@ -4,16 +4,18 @@
     "slug": "iot-ids-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
-    "backgroundColor": "#0D1117",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F7F5F0",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.iotids.mobile"
     },
     "android": {
-      "softwareKeyboardLayoutMode": "pan"
+      "softwareKeyboardLayoutMode": "pan",
+      "package": "com.iotids.mobile"
     },
-    "extra": {
-      "apiBaseUrl": ""
-    }
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }
