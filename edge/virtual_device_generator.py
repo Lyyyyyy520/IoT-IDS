@@ -33,6 +33,9 @@ DNS_SERVER  = '8.8.8.8'       # 外网 DNS
 NTP_SERVER  = '192.168.4.1'   # 时间同步（网关）
 CLOUD_HTTP  = '8.8.8.8'       # 外网云（HTTP 心跳，占位）
 ATTACK_TARGET = '8.8.8.8'     # 攻击目标（Mirai UDP 洪水的外网目标）
+SCAN_SUBNET   = '192.168.4.'  # 内部网段（攻击扫描目标）
+SCAN_RATE     = 0.3           # 扫描概率（可调，现场校准邻居污染）
+SCAN_PORTS    = [23, 80, 8080, 2323]  # 常见扫描端口（Mirai 扫 telnet/HTTP）
 
 # 虚拟设备：(device_id, 类型, IP, 是否监听CoAP, 联动目标列表)
 # 类型：camera/door/light/plug/temp_sensor/speaker/door_sensor/smoke/corridor_light
@@ -41,23 +44,23 @@ DEVICES = [
     # ============ 楼栋 1（物理 door-01 .11, sensor-01 .14 在此）============
     ('ds-01', 'door_sensor',     '192.168.4.104', False, ['192.168.4.113']),
     ('ds-02', 'door_sensor',     '192.168.4.105', False, ['192.168.4.114']),
-    ('sm-01', 'smoke',           '192.168.4.110', False, ['192.168.4.11', '192.168.4.113', '192.168.4.114', '192.168.4.115']),
+    ('sm-01', 'smoke',           '192.168.4.110', False, ['192.168.4.11', '192.168.4.113', '192.168.4.114', '192.168.4.115', '192.168.4.124']),
     ('lt-01', 'corridor_light',  '192.168.4.113', True,  []),
     ('lt-02', 'corridor_light',  '192.168.4.114', True,  []),
     ('lt-03', 'corridor_light',  '192.168.4.115', True,  []),
 
     # ============ 楼栋 2（全虚拟）============
-    ('door-02', 'door',          '192.168.4.100', True,  ['192.168.4.129']),
+    ('door-02', 'door',          '192.168.4.100', True,  ['192.168.4.129', '192.168.4.122']),
     ('ts-02',   'temp_sensor',   '192.168.4.102', False, ['192.168.4.126']),
     ('ds-03',   'door_sensor',   '192.168.4.106', False, ['192.168.4.116']),
     ('ds-04',   'door_sensor',   '192.168.4.107', False, ['192.168.4.117']),
-    ('sm-02',   'smoke',         '192.168.4.111', False, ['192.168.4.100', '192.168.4.116', '192.168.4.117', '192.168.4.118']),
+    ('sm-02',   'smoke',         '192.168.4.111', False, ['192.168.4.100', '192.168.4.116', '192.168.4.117', '192.168.4.118', '192.168.4.125']),
     ('lt-04',   'corridor_light','192.168.4.116', True,  []),
     ('lt-05',   'corridor_light','192.168.4.117', True,  []),
     ('lt-06',   'corridor_light','192.168.4.118', True,  []),
 
     # ============ 楼栋 3（全虚拟）============
-    ('door-03', 'door',          '192.168.4.101', True,  ['192.168.4.129']),
+    ('door-03', 'door',          '192.168.4.101', True,  ['192.168.4.129', '192.168.4.123']),
     ('ts-03',   'temp_sensor',   '192.168.4.103', False, ['192.168.4.127']),
     ('ds-05',   'door_sensor',   '192.168.4.108', False, ['192.168.4.119']),
     ('ds-06',   'door_sensor',   '192.168.4.109', False, ['192.168.4.120']),
@@ -67,10 +70,10 @@ DEVICES = [
     ('lt-09',   'corridor_light','192.168.4.121', True,  []),
 
     # ============ 公共区域 ============
-    ('cam-02',  'camera',        '192.168.4.122', False, []),
-    ('cam-03',  'camera',        '192.168.4.123', False, []),
-    ('light-02','light',         '192.168.4.124', False, []),
-    ('light-03','light',         '192.168.4.125', False, []),
+    ('cam-02',  'camera',        '192.168.4.122', True,  []),
+    ('cam-03',  'camera',        '192.168.4.123', True,  []),
+    ('light-02','light',         '192.168.4.124', True,  []),
+    ('light-03','light',         '192.168.4.125', True,  []),
     ('plug-02', 'plug',          '192.168.4.126', True,  []),
     ('plug-03', 'plug',          '192.168.4.127', True,  []),
     ('plug-04', 'plug',          '192.168.4.128', True,  []),
@@ -189,19 +192,26 @@ def coap_listen(device_id, src_ip, stop):
 # ==================== 攻击模式（被感染设备） ====================
 
 def attack_worker(device_id, src_ip, attack_event, stop):
-    """攻击线程（常驻）：attack_event 触发时向目标高频发 UDP 洪水。
+    """攻击线程（常驻）：attack_event 触发时执行「内部扫描 + 外部洪水」。
 
-    Mirai udpplain 特征：固定源端口 + 随机目的端口 + 高频，制造大量流，
-    使 GNN 能判出「僵尸网络(红)」。未触发时 idle，几乎不占资源。
+    模拟 Mirai 两阶段：
+      阶段1 侦察（轻量内部扫描）：随机探测网段内设备，制造新内部边（图结构突变）
+      阶段2 僵尸网络（外部 UDP 洪水）：高流量 + 随机目的端口（节点特征突变）
+    双重信号让 GNN 能更准地判「僵尸网络(红)」。未触发时 idle，几乎不占资源。
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((src_ip, 0))  # 固定源端口（持久 socket，避免被误判成扫描）
+    sock.bind((src_ip, 0))  # 固定源端口（持久 socket）
     while not stop.is_set():
         if attack_event.is_set():
-            for _ in range(10):
-                dst_port = random.randint(1, 65535)  # 随机目的端口（Mirai udpplain 特征）
+            # 阶段1：轻量内部扫描（按 SCAN_RATE 概率，可调）
+            if random.random() < SCAN_RATE:
+                target = SCAN_SUBNET + str(random.randint(2, 129))
+                sock.sendto(b'\x00\x00', (target, random.choice(SCAN_PORTS)))
+            # 阶段2：外部 UDP 洪水（随机目的端口，Mirai udpplain 特征）
+            for _ in range(8):
+                dst_port = random.randint(1, 65535)
                 sock.sendto(b'\x00\x00\x00\x00', (ATTACK_TARGET, dst_port))
-            time.sleep(0.05)  # ~200 包/秒
+            time.sleep(0.05)  # ~160 包/秒
         else:
             time.sleep(0.2)  # 未攻击时降低轮询频率
     sock.close()

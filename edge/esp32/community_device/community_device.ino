@@ -74,7 +74,7 @@ IPAddress SUBNET(255, 255, 255, 0);
   IPAddress STATIC_IP(192, 168, 4, 12);
   const char* COAP_TARGET = "";
   #define COAP_SEND   0
-  #define COAP_LISTEN 0
+  #define COAP_LISTEN 1   // 路灯接收烟雾/门磁的联动（应急亮灯）
 #elif DEVICE_TYPE == DEVICE_PLUG
   IPAddress STATIC_IP(192, 168, 4, 13);
   const char* COAP_TARGET = "";
@@ -328,6 +328,13 @@ void sendCoapEvent() {
   coapUdp.write((const uint8_t*)"evt", 3);
   coapUdp.endPacket();
   Serial.printf("[联动] 发送联动事件给 %s\n", COAP_TARGET);
+#if DEVICE_TYPE == DEVICE_DOOR
+  // 门禁额外联动摄像头（开门录像，安防联动）
+  coapUdp.beginPacket("192.168.4.10", 5683);
+  coapUdp.write((const uint8_t*)"evt", 3);
+  coapUdp.endPacket();
+  Serial.println("[联动] 发送联动事件给 192.168.4.10 (摄像头)");
+#endif
 }
 #endif
 
@@ -358,6 +365,16 @@ void actuatorTriggered() {
   delay(500);
   doorServo.write(90);  // 回位
   Serial.println("[联动] 门禁联动解锁");
+#elif DEVICE_TYPE == DEVICE_LIGHT
+  // 路灯联动：闪烁 3 次（烟雾/门磁触发，应急亮灯）
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(PIN_LED, HIGH);
+    delay(200);
+    digitalWrite(PIN_LED, LOW);
+    delay(200);
+  }
+  digitalWrite(PIN_LED, HIGH);  // 恢复常亮
+  Serial.println("[联动] 路灯闪烁");
 #endif
 }
 #endif

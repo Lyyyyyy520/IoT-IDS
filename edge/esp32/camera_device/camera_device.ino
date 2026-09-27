@@ -47,6 +47,7 @@ const uint16_t MQTT_BUFFER_BYTES = 768;
 WiFiClient    wifiClient;
 PubSubClient  mqtt(wifiClient);
 WiFiUDP       udp;
+WiFiUDP       coapUdp;   // 设备间联动 CoAP（门禁→摄像头）
 Servo         panServo;
 
 bool attack_mode = false;
@@ -198,6 +199,21 @@ void connectMQTT() {
   }
 }
 
+// ==================== 设备间联动（CoAP 监听） ====================
+
+void checkCoapEvent() {
+  // 接收门禁联动（开门录像）：云台转向门禁方向停留片刻
+  int sz = coapUdp.parsePacket();
+  if (sz > 0) {
+    char buf[8];
+    coapUdp.read(buf, sizeof(buf));
+    Serial.println("[联动] 收到门禁联动事件，云台转向门禁");
+    panServo.write(30);    // 转向门禁方向
+    delay(2000);           // "录像"2 秒
+    panServo.write(90);    // 回正
+  }
+}
+
 // ==================== setup / loop ====================
 
 void setup() {
@@ -210,6 +226,8 @@ void setup() {
   panServo.attach(PIN_PAN);
   panServo.write(90);
 
+  coapUdp.begin(5683);   // 监听设备间联动（门禁→摄像头）
+
   connectWiFi();
   connectMQTT();
   Serial.printf("摄像头启动: %s\n", DEVICE_ID);
@@ -219,6 +237,8 @@ void loop() {
   if (WiFi.status() != WL_CONNECTED) connectWiFi();
   if (!mqtt.connected()) connectMQTT();
   mqtt.loop();
+
+  checkCoapEvent();   // 检查门禁联动（开门录像）
 
   unsigned long now = millis();
 
