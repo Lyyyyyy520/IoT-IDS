@@ -211,6 +211,7 @@ class BackendServiceContainer:
     mqtt_subscriber: Any = field(default=None, init=False, repr=False)
     traffic_window: Any = field(default=None, init=False, repr=False)
     traffic_service: Any = field(default=None, init=False, repr=False)
+    capture_service: Any = field(default=None, init=False, repr=False)
     mqtt_state: str = field(default="stopped", init=False)
     mqtt_reason: str | None = field(default=None, init=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
@@ -250,6 +251,15 @@ class BackendServiceContainer:
                     clock=self.traffic_clock,
                 )
             return self.traffic_service
+
+    def get_capture_service(self, app):
+        """Lazily resolve the edge traffic-capture + device-GNN detection service."""
+        with self._lock:
+            if self.capture_service is None:
+                from services.traffic_capture import TrafficCapture
+
+                self.capture_service = TrafficCapture(app)
+            return self.capture_service
 
 
 def get_service_container(app) -> BackendServiceContainer:

@@ -18,6 +18,7 @@ from config import (
 from database import DatabaseUnavailableError
 from services.auth import get_current_user, login_user, logout_user
 from api.probe import probe_bp
+from api.detection import detection_bp
 from api.v3_devices import create_v3_devices_blueprint
 from api.v3_device_discovery import create_v3_device_discovery_blueprint
 from api.v3_system_health import create_v3_system_health_blueprint
@@ -144,6 +145,7 @@ def create_app(
     )
     application.register_blueprint(shared_api_bp)
     application.register_blueprint(probe_bp)
+    application.register_blueprint(detection_bp)
     application.register_blueprint(
         create_v3_devices_blueprint(normalized_path, clock=application.config.get("V3_CLOCK"))
     )
