@@ -14,13 +14,13 @@ from v3_database import connect_v3_existing, initialize_v3_database
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
 
 
-class FakeCapture:
+class FakeIncidentWorkflow:
     def __init__(self):
         self.calls = []
 
-    def process_external_packet(self, **values):
+    def create_incident(self, **values):
         self.calls.append(values)
-
+        return {"incident_id": f"incident-{len(self.calls)}"}
 
 def prepare(path: Path):
     initialize_v3_database(path)
@@ -45,14 +45,14 @@ def test_versioned_probe_batch_uses_shared_dedup_service(tmp_path, monkeypatch):
     monkeypatch.setattr(probe_api, "query_one", lambda *_args, **_kwargs: None)
 
     app = Flask(__name__)
-    capture = FakeCapture()
     container = BackendServiceContainer(path, mqtt_settings_provider=lambda: None)
-    container.capture_service = capture
     container.traffic_service = DeviceTrafficService(
         path, clock=lambda: NOW,
         realtime_window=RealtimeTrafficWindow(clock=lambda: NOW),
     )
     app.extensions[EXTENSION_KEY] = container
+    incidents = FakeIncidentWorkflow()
+    app.extensions["iot_ids_incident_workflow"] = incidents
     app.register_blueprint(probe_api.probe_bp)
     client = app.test_client()
     payload = {
@@ -63,7 +63,16 @@ def test_versioned_probe_batch_uses_shared_dedup_service(tmp_path, monkeypatch):
         "batch_sequence": 1,
         "probe_id": 7,
         "probe_name": "Pi-001",
-        "alerts": [],
+        "alerts": [{
+            "risk_level": "high",
+            "attack_type": "PortScan",
+            "src_ip": "203.0.113.10",
+            "dst_ip": "192.168.1.10",
+            "src_port": 50000,
+            "dst_port": 443,
+            "protocol": "TCP",
+            "confidence": 0.91,
+        }],
         "flows": [{
             "sample_id": "sample-1",
             "occurred_at": (NOW - timedelta(minutes=1)).isoformat(),
@@ -86,7 +95,12 @@ def test_versioned_probe_batch_uses_shared_dedup_service(tmp_path, monkeypatch):
     assert first.status_code == second.status_code == 200
     assert first.get_json()["traffic_aggregation"]["accepted_samples"] == 1
     assert second.get_json()["traffic_aggregation"]["status"] == "duplicate"
-    assert all(call["aggregate_v3"] is False for call in capture.calls)
+    assert first.get_json()["alerts_received"] == 1, first.get_json()
+    assert first.get_json()["alert_ingestion"][0]["status"] == "accepted"
+    assert second.get_json()["alert_ingestion"][0]["reason_code"] == "duplicate_probe_batch"
+    assert len(incidents.calls) == 1
+    assert incidents.calls[0]["devices"][0]["device_id"] == "camera-01"
+    assert incidents.calls[0]["devices"][0]["user_visible"] is True
 
     connection = connect_v3_existing(path)
     try:
@@ -112,7 +126,6 @@ def test_legacy_probe_is_explicitly_not_aggregated(tmp_path, monkeypatch):
     monkeypatch.setattr(probe_api, "query_one", lambda *_args, **_kwargs: None)
     app = Flask(__name__)
     container = BackendServiceContainer(path, mqtt_settings_provider=lambda: None)
-    container.capture_service = FakeCapture()
     container.traffic_service = DeviceTrafficService(
         path, clock=lambda: NOW,
         realtime_window=RealtimeTrafficWindow(clock=lambda: NOW),
@@ -134,7 +147,8 @@ def test_probe_sources_declare_v2_ids_and_no_hardcoded_packet_length():
     root = Path(__file__).resolve().parents[2]
     vm = (root / "edge" / "vm_probe_client.py").read_text(encoding="utf-8")
     pi = (root / "edge" / "probe_client.py").read_text(encoding="utf-8")
-    for source in (vm, pi):
+    edge_detect = (root / "edge" / "edge_detect.py").read_text(encoding="utf-8")
+    for source in (vm, pi, edge_detect):
         assert "'schema_version': 2" in source
         assert "'source_session_id':" in source
         assert "'batch_sequence':" in source
@@ -144,3 +158,6 @@ def test_probe_sources_declare_v2_ids_and_no_hardcoded_packet_length():
         assert "'flow_count': 0" in source
     assert "'length': 100" not in pi
     assert "length_pat" in pi
+    assert "'alerts': []," in edge_detect
+    assert "not sent as incident" in edge_detect
+    assert "detect_pcap" not in edge_detect

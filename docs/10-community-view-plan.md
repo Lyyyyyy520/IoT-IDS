@@ -1,3 +1,5 @@
+> 历史参考：本文记录旧版规划或部署方案，不代表当前产品需求或可用 API。当前范围见 [README](../README.md)、[API 目录](05-api-spec.md) 与 [v3 清理清单](rebuild/legacy-cleanup-inventory.md)。
+
 # 10 - 智慧社区数字孪生视图方案（web + app）
 
 > 状态：方案设计稿（待实施）

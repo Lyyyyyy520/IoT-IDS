@@ -18,8 +18,6 @@ export interface SystemHealthComponent {
   migration_complete?: boolean;
   migration_checksums_valid?: boolean | null;
   aggregation_status?: SystemHealthStatus;
-  capture_status?: SystemHealthStatus;
-  capture_reason_code?: string | null;
 }
 
 export interface SystemHealthResponse {

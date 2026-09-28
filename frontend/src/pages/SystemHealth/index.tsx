@@ -7,7 +7,7 @@ import './system-health.css';
 const componentLabels: Record<string, string> = {
   api: 'API 服务', database: '数据库连接', schema: '数据库结构',
   integrity_check: '完整性检查', mqtt: 'MQTT 心跳接收',
-  traffic: '流量采集与聚合', event_log: 'SSE 事件日志',
+  traffic: '设备流量聚合', event_log: 'SSE 事件日志',
   incident: '事件处置', mobile: '移动端 session',
   discovery: '未知设备发现', graph: 'GNN / Graph 能力',
 };
@@ -40,7 +40,6 @@ const reasonMessages: Record<string, string> = {
   mqtt_managed_by_single_worker: '多进程 Web worker 不启动 MQTT；应由单独的单实例运行进程负责订阅。',
   mqtt_not_started: 'MQTT 已配置但运行服务尚未启动。检查单进程运行入口和启动日志。',
   traffic_not_started: '聚合服务尚未处理本次进程启动后的流量。',
-  capture_not_started: '流量采集未启动；健康页不会启动采集或访问网卡。',
   component_restarting: '组件正在根据本次运行重新计算状态。',
   maintenance_plan_read_only: '维护计划严格只读，因此不会写入最近计划时间。',
   mqtt_start_failed: 'MQTT 服务启动失败。检查配置和服务日志后再重启。',
@@ -52,10 +51,9 @@ const reasonMessages: Record<string, string> = {
   sse_replay_window_pruned: '旧事件已按保留期限清理；落后于保留窗口的客户端会收到 snapshot.required。',
   aggregation_transaction_failed: '流量聚合事务失败。检查 SQLite 写入错误和未提交事务，再确认聚合状态。',
   candidate_capacity_reached: '未知设备候选已达容量限制。先由运维人员处置现有候选，再检查配置。',
-  capture_aggregation_failed: '采集结果无法写入流量聚合。检查数据库空间、锁和采集器日志。',
   discovery_storage_error: '未知设备发现记录写入失败。检查数据库健康和发现服务日志。',
   traffic_store_unavailable: '流量聚合存储当前不可用。检查数据库 schema、权限和 SQLite 错误。',
-  worker_stop_timeout: '后台服务停止超时。确认采集线程退出后再重启或维护数据库。',
+  worker_stop_timeout: '后台服务停止超时。确认运行时线程退出后再重启或维护数据库。',
   graph_capability_unavailable: 'GNN 与 Graph capability 保持不可用。',
   no_maintenance_run: '尚无成功的维护记录。维护计划与备份目录需由值班负责人审核。',
   request_failed: '最近请求发生服务错误。确认数据库可用后重试并检查组件日志。',
@@ -129,11 +127,7 @@ function ComponentCard({ name, component }: { name: string; component?: SystemHe
         <p className="health-detail">检查结果：{component?.result === 'ok' ? '通过' : component?.result === 'failed' ? '失败' : '未知'}</p>
       )}
       {name === 'traffic' && (
-        <p className="health-detail">
-          聚合：{statusLabels[component?.aggregation_status ?? status]} ·
-          采集：{statusLabels[component?.capture_status ?? 'unavailable']}
-          {component?.capture_reason_code ? ' · ' + (reasonMessages[component.capture_reason_code] ?? reasonMessages.component_degraded) : ''}
-        </p>
+        <p className="health-detail">流量聚合：{statusLabels[component?.aggregation_status ?? status]}</p>
       )}
       {name === 'event_log' && component?.retained_events != null && (
         <p className="health-detail">

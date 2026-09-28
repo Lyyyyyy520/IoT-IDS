@@ -1,20 +1,16 @@
 # v3 设备流量聚合与只读 API
 
-本阶段只建立按稳定 `device_id` 查询的流量事实层，不迁移旧
-`traffic_logs`，也不连接真实网卡或现场 probe。历史分钟聚合以 SQLite 为事实
-来源；进程内实时窗口只用于短期速率展示。
+当前 v3 流量事实按稳定 `device_id` 查询；旧 `traffic_logs` 不自动迁移。现场 probe 经 v2 batch 接入，历史分钟聚合以 SQLite 为事实来源；进程内实时窗口只用于短期速率展示。
 
 ## 现有来源审计
 
 | 来源 | 原始含义 | 时间/大小 | 幂等能力 | v3 处理 |
 | --- | --- | --- | --- | --- |
 | `traffic_logs` | legacy 单包记录 | `timestamp` 为本地 SQLite 时间；`length` 为抓包长度 | 无 sample/batch ID | 不自动迁移 |
-| 本地 Scapy | 每次回调一个包 | `len(pkt)` 为包字节数；处理时生成 UTC 时间 | 进程启动会话 + 单调序号 | 仅真实抓包进入 v3；模拟流量不进入 |
 | VM probe | 每个 `flow` 实际是一个包 | `len(pkt)`；Scapy 包时间转 UTC | v2 会话、batch sequence、sample ID | 通过统一聚合服务 |
 | Raspberry Pi probe | tcpdump 文本中的一个包 | 使用 `-tt` epoch 和 `length N`；不再硬编码 100 字节 | v2 会话、batch sequence、sample ID | 通过统一聚合服务 |
 
-旧 probe 请求没有足够的幂等字段，仍可进入旧检测链，但响应明确返回
-`legacy_probe_schema_no_idempotency`，不会写 v3，避免重试造成双重累计。
+旧无版本 probe 请求不再进入旧检测链；响应明确返回 `legacy_probe_schema_no_idempotency`，不会写 v3。只有成功接收的 v2 batch 会被处理，重复 batch 不重复汇总或创建事件。
 
 ## Migration v5
 
@@ -84,8 +80,7 @@ IP、确定的 `network_protocol`、可选应用协议及 `application_protocol_
 }
 ```
 
-当前两个 probe 来源都是包观察，因此 `packets=1`、`flow_count=0`。服务端只选择
-TrafficSample 白名单字段，legacy payload 不会进入 v3 表。
+VM/Pi probe 和保留的 edge detector 均通过 v2 信封；来源为包观察时 `packets=1`、`flow_count=0`。edge detector 的本地研究模型目前使用占位流特征，其分数只在终端显示，不会创建 v3 事件。服务端只选择 TrafficSample 白名单字段，legacy payload 不会进入 v3 表。
 
 ## 查询 API
 

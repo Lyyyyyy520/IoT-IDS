@@ -65,8 +65,12 @@ def test_firmware_keeps_device_specific_fields_inside_telemetry():
     assert '\\\"angle\\\":%d' in camera
 
 
-def test_first_release_auto_block_path_is_disabled():
-    capture_source = (
-        ROOT / "backend" / "services" / "traffic_capture.py"
-    ).read_text(encoding="utf-8")
-    assert "should_block = False" in capture_source
+def test_first_release_has_no_legacy_capture_or_block_entry_points():
+    app_source = (ROOT / "backend" / "app.py").read_text(encoding="utf-8")
+    for retired_path in (
+        "/api/capture/start",
+        "/api/capture/stop",
+        "/api/alerts/<int:alert_id>/block",
+        "/api/alerts/<int:alert_id>/unblock",
+    ):
+        assert retired_path not in app_source

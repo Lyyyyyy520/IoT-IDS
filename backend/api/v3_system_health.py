@@ -80,8 +80,6 @@ def create_v3_system_health_blueprint(
                         "updated_at": observed_at,
                         "reason_code": "schema_incomplete",
                         "aggregation_status": "unavailable",
-                        "capture_status": "unavailable",
-                        "capture_reason_code": "capture_not_started",
                     },
                     "event_log": {
                         "status": "unavailable",

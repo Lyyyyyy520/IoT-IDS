@@ -1,6 +1,6 @@
 # 阶段 0：状态、权限、图与 API v3 契约
 
-> 状态：阶段 0 已冻结；实现必须保持向后兼容，不迁移真实数据库。
+> 状态：状态、权限和 v3 数据语义参考契约。当前实际注册路由以 [API 目录](../05-api-spec.md) 为准；旧版业务 API 已移除，数据库历史未删除。
 > 代码镜像：`backend/contracts.py`。文档与代码枚举变更必须同时提交。
 > 阶段 1 数据基础：`docs/rebuild/device-state-foundation.md`。
 
@@ -8,8 +8,8 @@
 
 - Flask 后端的 v3 状态服务是设备状态、事件阶段和图快照的唯一事实来源。
 - Web 和 APP 只展示后端结论，不在客户端重新判断在线、安全或事件角色。
-- 旧 `/api` 接口在过渡期保留，但只供 admin/operator 使用，不再作为 APP 数据源。
-- 真实模式请求失败时返回错误；客户端必须显示断线和最后成功同步时间，禁止回退到演示数据。
+- 当前保留 `/api/health`、`/api/auth/*` 与仍被边缘客户端调用的 `/api/probe/*`；旧 Dashboard/Alerts/Assets/Traffic/Analysis/Policy/Logs/Config 等业务 API 已移除。
+- 真实模式请求失败时返回错误；客户端必须显示断线和最后成功同步时间，禁止回退到演示数据。空设备库显示真实空态。
 
 ## 2. 稳定 ID
 
@@ -54,7 +54,7 @@
 |---|---:|---:|---:|
 | Web 全社区设备/图/证据读取 | 是 | 是 | 否 |
 | 添加、编辑、维护、退役、恢复、受控删除设备 | 是 | 否 | 否 |
-| 修改 GNN、MQTT、抓包和系统配置 | 是 | 否 | 否 |
+| 修改设备档案、移动用户授权及受支持的管理配置 | 是 | 否 | 否 |
 | 确认事件、标记误报、解决事件 | 是 | 是 | 否 |
 | APP 查看授权设备和提醒 | 否 | 否 | 是 |
 | APP “我已知晓”、联系管理员 | 否 | 否 | 是 |
@@ -81,35 +81,16 @@
 时间使用带时区的 ISO 8601 UTC 字符串。任何当前状态对象必须带
 `state_version`、`observed_at`、`received_at` 和 `sources`。
 
-阶段 1～5 按以下边界实现：
+当前 app factory 暴露的 REST 路由分组如下；方法、权限和完整路径以 [当前 API 目录](../05-api-spec.md) 为准：
 
-| 方法与路径 | 权限 | 语义 |
-|---|---|---|
-| `GET /api/v3/monitor` | admin/operator | 系统、全设备、当前 graph 摘要与活动事件完整快照 |
-| `GET /api/v3/events` | admin/operator 或受限 user | SSE；user 只接收授权范围事件 |
-| `GET /api/v3/devices` | admin/operator | 全设备列表与筛选 |
-| `GET /api/v3/devices/{device_id}` | admin/operator，或范围内 user | 角色裁剪后的设备详情 |
-| `GET /api/v3/devices/discovered` | admin | 待确认设备 |
-| `POST /api/v3/devices` | admin | 添加或认领设备 |
-| `PATCH /api/v3/devices/{device_id}` | admin | 修改允许的档案字段 |
-| `POST /api/v3/devices/{device_id}/retire` | admin | 退役并吊销设备凭据 |
-| `POST /api/v3/devices/{device_id}/restore` | admin | 恢复并重新预热 |
-| `DELETE /api/v3/devices/{device_id}` | admin | 仅无历史引用的误添加设备，要求影响检查和名称确认 |
-| `GET /api/v3/devices/{device_id}/traffic` | admin/operator，或范围内 user | user 响应删除 IP、端口和 GNN 特征 |
-| `GET /api/v3/devices/{device_id}/peers` | admin/operator | 完整通信对象、方向和边权 |
-| `GET /api/v3/graph/current` | admin/operator | 当前不可变图快照 |
-| `GET /api/v3/graph/snapshots/{graph_id}` | admin/operator | 历史图快照 |
-| `GET /api/v3/incidents` | admin/operator | 完整事件历史 |
-| `POST /api/v3/incidents/{incident_id}/ack` | admin/operator | 管理员确认 |
-| `POST /api/v3/incidents/{incident_id}/resolve` | admin/operator | 解决事件 |
-| `POST /api/v3/incidents/{incident_id}/false-positive` | admin/operator | 标记误报并保留反馈 |
-| `GET /api/v3/system` | admin/operator | 组件健康与降级原因 |
-| `POST /api/v3/pairing/start` | admin | 创建一次性短期配对码 |
-| `POST /api/v3/pairing/claim` | 匿名持码者 | 一次性换取受限 user 令牌 |
-| `GET /api/v3/mobile/overview` | user | 仅授权设备和裁剪后的提醒 |
-| `POST /api/v3/mobile/notices/{id}/read` | user | 标记本人已知晓 |
-| `POST /api/v3/mobile/help-requests` | user | 联系管理员 |
+- `/api/v3/monitor` 与 `/api/v3/events`：实时快照和持久 SSE。
+- `/api/v3/devices/*`：设备生命周期、发现及设备详情内 traffic/peers。
+- `/api/v3/incidents/*`、`/api/v3/help-requests/*`、`/api/v3/support-contact`：事件处置、移动求助和支持联系人。
+- `/api/v3/mobile-users/*`、`/api/v3/mobile-sessions/*`、`/api/v3/pairing/*`：移动用户、授权范围和配对。
+- `/api/v3/mobile/*`：普通用户本人设备、流量、提醒、求助、支持联系人和 session。
+- `/api/v3/system/health`：admin/operator 只读健康状态。
 
+Graph snapshot 仍属于研究/设计契约；当前没有可用 graph REST endpoint，健康状态固定报告 graph capability unavailable。
 ## 6. SSE 事件信封
 
 ```text

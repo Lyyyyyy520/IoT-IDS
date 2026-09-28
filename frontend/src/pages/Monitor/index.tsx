@@ -106,7 +106,6 @@ export default function MonitorPage() {
         </div>
         <div className="monitor-account">
           <span>{user?.username}</span>
-          <button type="button" onClick={() => navigate('/dashboard')}>旧版功能</button>
           <button type="button" onClick={() => void handleLogout()}>退出</button>
         </div>
       </header>

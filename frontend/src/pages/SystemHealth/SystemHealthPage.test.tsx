@@ -17,7 +17,7 @@ function health(overrides: Partial<SystemHealthResponse> = {}): SystemHealthResp
       reason_code: name === 'graph' ? 'graph_capability_unavailable' : name === 'mqtt' ? 'mqtt_disabled' : null,
       ...(name === 'database' ? { exists: true, readable: true, writable: true } : {}),
       ...(name === 'schema' ? { version: 9, legacy_schema_ready: true, migration_complete: true, migration_checksums_valid: true } : {}),
-      ...(name === 'traffic' ? { aggregation_status: 'ready', capture_status: 'unavailable', capture_reason_code: 'capture_not_started' } : {}),
+      ...(name === 'traffic' ? { aggregation_status: 'ready' } : {}),
       ...(name === 'integrity_check' ? { result: 'ok', checked_at: timestamp } : {}),
       ...(name === 'event_log' ? { retained_events: 12, oldest_event_id: 5, latest_event_id: 16 } : {}),
     }])) as SystemHealthResponse['components'],
@@ -48,7 +48,7 @@ describe('SystemHealthPage', () => {
     expect(screen.getByText(/页面总量/)).toBeInTheDocument();
     expect(screen.getByText(/文件存在 · 读取可用 · 写入可用/)).toBeInTheDocument();
     expect(screen.getByText(/迁移完整 · checksum通过/)).toBeInTheDocument();
-    expect(screen.getByText(/采集未启动；健康页不会启动采集或访问网卡/)).toBeInTheDocument();
+    expect(screen.getByText(/流量聚合：就绪/)).toBeInTheDocument();
     expect(screen.getByText(/维护计划严格只读/)).toBeInTheDocument();
     expect(screen.getAllByText(/更新时间：/).length).toBeGreaterThan(5);
     expect(api.getSystemHealth).toHaveBeenCalledTimes(1);

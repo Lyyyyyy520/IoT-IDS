@@ -191,47 +191,12 @@ def init_db(database_path):
         (admin_username,),
     )
 
-    # Seed demo assets if empty
-    asset_count = conn.execute("SELECT COUNT(*) FROM assets").fetchone()[0]
-    if asset_count == 0:
-        demo_assets = [
-            ('摄像头-01', '192.168.1.10', '00:1a:2b:3c:4d:11', 'camera', 'online', 'low'),
-            ('摄像头-02', '192.168.1.11', '00:1a:2b:3c:4d:12', 'camera', 'online', 'low'),
-            ('门禁系统-01', '192.168.1.20', '00:1a:2b:3c:4d:21', 'door', 'online', 'low'),
-            ('烟感传感器-01', '192.168.1.30', '00:1a:2b:3c:4d:31', 'sensor', 'online', 'low'),
-            ('温湿度传感器-01', '192.168.1.31', '00:1a:2b:3c:4d:32', 'sensor', 'offline', 'low'),
-            ('智能插座-01', '192.168.1.40', '00:1a:2b:3c:4d:41', 'socket', 'online', 'low'),
-            ('智能网关', '192.168.1.40', '00:1a:2b:3c:4d:41', 'hub', 'online', 'low'),
-            ('社区路由器', '192.168.1.1', '00:1a:2b:3c:4d:01', 'router', 'online', 'low'),
-        ]
-        conn.executemany(
-            "INSERT INTO assets (name, ip_address, mac_address, device_type, status, risk_level, last_seen) VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))",
-            demo_assets,
-        )
-
-    # Seed default config
-    defaults = {
-        'detection_mode': 'offline',
-        'confidence_threshold': '0.85',
-        'merge_window_minutes': '5',
-        'auto_block': 'false',
-    }
-    for k, v in defaults.items():
-        conn.execute("INSERT OR IGNORE INTO config (key, value) VALUES (?,?)", (k, v))
-
     conn.commit()
     conn.close()
     print(f'[DB] Initialized: {path}')
 
 
 # ===== Query Helpers =====
-
-def query_all(sql: str, params=()):
-    """Run a SELECT query and return all rows as dicts."""
-    with closing(get_db()) as conn:
-        rows = conn.execute(sql, params).fetchall()
-    return [dict(r) for r in rows]
-
 
 def query_one(sql: str, params=()):
     """Run a SELECT query and return one row as dict, or None."""
@@ -247,21 +212,3 @@ def execute(sql: str, params=()):
         conn.commit()
         last_id = cur.lastrowid
     return last_id
-
-
-def execute_many(sql: str, params_list):
-    """Run executemany."""
-    with closing(get_db()) as conn:
-        conn.executemany(sql, params_list)
-        conn.commit()
-
-
-def get_config(key: str, default=None):
-    """Read a config value."""
-    row = query_one("SELECT value FROM config WHERE key = ?", (key,))
-    return row['value'] if row else default
-
-
-def set_config(key: str, value):
-    """Write a config value."""
-    execute("INSERT OR REPLACE INTO config (key, value) VALUES (?,?)", (key, str(value)))
