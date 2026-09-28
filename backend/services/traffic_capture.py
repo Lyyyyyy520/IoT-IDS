@@ -15,7 +15,6 @@ from uuid import uuid4
 from flask import current_app, has_app_context
 
 from database import execute
-from services.rule_engine import get_rule_engine, FlowRecord
 
 # Try importing Scapy
 try:
@@ -24,22 +23,6 @@ try:
 except ImportError:
     SCAPY_AVAILABLE = False
 
-# Try ONNX inference
-try:
-    from models.inference import get_engine as get_onnx_engine
-    from services.feature_extract import FeatureExtractor
-    ONNX_AVAILABLE = True
-except Exception:
-    ONNX_AVAILABLE = False
-
-# Try GAT flow-based detection (binary)
-try:
-    from services.gat_detector import RealTimeGATDetector
-    from services.cicids_feature_extract import FlowFeatureExtractor
-    GAT_AVAILABLE = True
-except Exception:
-    GAT_AVAILABLE = False
-
 # Try device graph detection (4-level device risk)
 try:
     from services.device_detector import DeviceGraphDetector, FlowAggregator
@@ -47,7 +30,6 @@ try:
 except Exception:
     DEVICE_GNN_AVAILABLE = False
 
-FLOW_PACKET_THRESHOLD = 4   # packets per flow before extraction
 LOGGER = logging.getLogger(__name__)
 
 
@@ -69,14 +51,6 @@ class TrafficCapture:
         self._traffic_source_session_id = uuid4().hex
         self._traffic_sequence = 0
         self._traffic_lock = threading.Lock()
-        # GAT flow-based detection state
-        self.gat_detector = None
-        self.flow_buffers = {}   # flow key -> FlowFeatureExtractor
-        if GAT_AVAILABLE:
-            try:
-                self.gat_detector = RealTimeGATDetector(batch_size=8)
-            except Exception:
-                self.gat_detector = None
         # Device graph detection state (4-level device risk)
         self.device_detector = None
         self.device_aggregator = FlowAggregator() if DEVICE_GNN_AVAILABLE else None
@@ -123,14 +97,6 @@ class TrafficCapture:
     def stop(self):
         """Stop capture."""
         self.running = False
-        # Flush any remaining buffered GAT flows
-        if self.gat_detector:
-            try:
-                leftover = self.gat_detector.flush()
-                if leftover:
-                    self._emit_gat_alerts(leftover)
-            except Exception:
-                pass
         return {'success': True, 'packet_count': self.packet_count, 'alert_count': self.alert_count}
 
     def status(self):
@@ -140,9 +106,6 @@ class TrafficCapture:
             'packet_count': self.packet_count,
             'alert_count': self.alert_count,
             'scapy_available': SCAPY_AVAILABLE,
-            'onnx_available': ONNX_AVAILABLE,
-            'gat_available': GAT_AVAILABLE and self.gat_detector is not None,
-            'gat_loaded': self.gat_detector.model_loaded if self.gat_detector else False,
             'device_gnn_available': DEVICE_GNN_AVAILABLE and self.device_detector is not None,
             'device_gnn_loaded': self.device_detector.model_loaded if self.device_detector else False,
             'mode': self.capture_mode,
@@ -214,140 +177,8 @@ class TrafficCapture:
                 occurred_at=occurred_at,
             )
 
-        # 0. GAT flow-based detection (binary Normal/Attack)
-        self._feed_gat_flow(src_ip, dst_ip, src_port, dst_port, protocol, length, flags)
-
-        # 0.5. Device graph detection (accumulate packets into flows)
+        # Device graph detection (accumulate packets into flows)
         self._feed_device_flow(src_ip, dst_ip, src_port, dst_port, protocol, length, flags)
-
-        # 1. Rule Engine
-        flow = FlowRecord(
-            src_ip=src_ip, dst_ip=dst_ip,
-            src_port=src_port, dst_port=dst_port,
-            protocol=protocol, flags=flags,
-            length=length, payload=payload,
-            timestamp=datetime.now(),
-        )
-        engine = get_rule_engine()
-        matches = engine.evaluate(flow)
-
-        # 2. ONNX深度学习模型推理
-        onnx_label = 'normal'
-        onnx_attack = False
-        if ONNX_AVAILABLE:
-            try:
-                flow_data = {
-                    'protocol_type': 1 if protocol == 'TCP' else 2 if protocol == 'UDP' else 3,
-                    'src_port': src_port, 'dst_port': dst_port,
-                    'min_packet_length': length,
-                    'syn_count': 1 if 'S' in flags else 0,
-                    'ack_count': 1 if 'A' in flags else 0,
-                    'flow_duration': 0.01,
-                    'flow_bytes_per_sec': length * 100,
-                    'flow_packets_per_sec': 100,
-                }
-                extractor = FeatureExtractor()
-                features = extractor.extract_from_flow(flow_data)
-                onnx_engine = get_onnx_engine()
-                result = onnx_engine.predict(features)
-                onnx_label = result['class_name'].lower()
-                onnx_attack = result['is_attack']
-            except Exception:
-                pass  # ONNX推理失败时静默，用规则引擎结果
-
-        # 3. Save traffic log with ONNX label
-        execute(
-            "INSERT INTO traffic_logs (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, onnx_label, source) VALUES (?,?,?,?,?,?,?,?,?)",
-            (src_ip, dst_ip, src_port, dst_port, protocol, length, flags, onnx_label, source_label),
-        )
-
-        # 4. ONNX 检测到攻击 → 生成告警（已知正常流量跳过）
-        if onnx_attack and not known_normal:
-            from database import query_one as _q, get_config
-            window = int(get_config('merge_window_minutes', '5'))
-            dup = _q(
-                "SELECT COUNT(*) as c FROM alerts WHERE attack_type = ? AND src_ip = ? "
-                "AND created_at > datetime('now', ? || ' minutes', 'localtime')",
-                (onnx_label.title(), src_ip, f'-{window}'),
-            )
-            if not dup or dup['c'] == 0:
-                self.alert_count += 1
-
-                # 多因子风险评分
-                attack_scores = {'mirai': 10, 'gafgyt': 8, 'other': 5}
-                base = attack_scores.get(onnx_label, 5) * result.get('confidence', 0.85)
-                base_score = base / 10 * 100
-
-                freq = _q(
-                    "SELECT COUNT(*) as c FROM alerts WHERE src_ip = ? "
-                    "AND created_at > datetime('now', '-5 minutes', 'localtime')",
-                    (src_ip,),
-                )['c']
-                freq_map = {0: 1, 1: 3, 2: 3, 3: 5, 4: 5, 5: 5}
-                freq_score = freq_map.get(freq, 7 if freq <= 10 else 10)
-
-                asset = _q(
-                    "SELECT device_type FROM assets WHERE ip_address = ?", (dst_ip,)
-                )
-                target_map = {'lock': 10, 'door': 10, 'camera': 7, 'hub': 7, 'sensor': 5, 'router': 5}
-                target_score = target_map.get(asset['device_type'] if asset else '', 3)
-
-                total = base_score * 0.4 + freq_score * 10 * 0.35 + target_score * 10 * 0.25
-                if total >= 80: risk_level = 'critical'
-                elif total >= 60: risk_level = 'high'
-                else: risk_level = 'medium'
-
-                # Phase 0 contract: the first release never blocks or powers
-                # off a device automatically.  Keep the legacy branch visible
-                # for later removal, but make it unreachable.
-                should_block = False
-                if should_block:
-                    existing = _q("SELECT id FROM policies WHERE policy_type='blacklist' AND target=? AND enabled=1", (src_ip,))
-                    if not existing or existing['c'] == 0:
-                        execute(
-                            "INSERT INTO policies (policy_type, target, action, description, enabled) "
-                            "VALUES ('blacklist',?,'block',?,1)",
-                            (src_ip, f'自动拉黑: {onnx_label.title()}攻击(风险{total:.0f})'))
-
-                # 匹配目标设备
-                dev_row = _q("SELECT name FROM assets WHERE ip_address = ? AND device_type != 'probe'", (dst_ip,))
-                dev_name = f' 目标:{dev_row["name"]}({dst_ip})' if dev_row else ''
-                if dev_row:
-                    execute("UPDATE assets SET risk_level=?, status='alert', last_seen=datetime('now','localtime') WHERE ip_address=?",
-                            (risk_level, dst_ip))
-
-                execute(
-                    "INSERT INTO alerts (risk_level, attack_type, src_ip, dst_ip, src_port, dst_port, protocol, confidence, description, status) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,'new')",
-                    (risk_level, onnx_label.title(), src_ip, dst_ip,
-                     src_port, dst_port, protocol, round(result['confidence'], 2),
-                     f'[{source_label}]{dev_name} {result["class_name"]} (置信度 {result["confidence"]:.1%})'),
-                )
-
-        # 5. Create deduplicated alerts for rule matches. This provides a
-        # deterministic alert path for remote traffic even when a single
-        # packet does not produce a confident ML classification.
-        if matches and not known_normal:
-            from database import query_one as _q, get_config
-            merge_window = int(get_config('merge_window_minutes', '5'))
-            for match in matches:
-                attack_type = match.get('rule_name') or match.get('category', 'Rule')
-                severity = match.get('severity', 'medium')
-                dup = _q(
-                    "SELECT COUNT(*) as c FROM alerts WHERE attack_type = ? AND src_ip = ? "
-                    "AND created_at > datetime('now', ? || ' minutes', 'localtime')",
-                    (attack_type, src_ip, f'-{merge_window}'),
-                )
-                if dup and dup['c'] > 0:
-                    continue
-                self.alert_count += 1
-                confidence = 0.99 if severity == 'critical' else 0.90 if severity == 'high' else 0.80
-                execute(
-                    "INSERT INTO alerts (risk_level, attack_type, src_ip, dst_ip, src_port, dst_port, protocol, confidence, description, status) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,'new')",
-                    (severity, attack_type, src_ip, dst_ip, src_port, dst_port, protocol,
-                     confidence, f'[{source_label}][Rule:{match.get("rule_id", "")}] {match.get("description", "")}'),
-                )
 
     def process_external_packet(self, src_ip: str, dst_ip: str, src_port: int, dst_port: int,
                                 protocol: str, length: int, flags: str = '',
@@ -449,56 +280,6 @@ class TrafficCapture:
                                          random.choice([53,80]), random.choice(['TCP','UDP']),
                                          random.randint(60,500), known_normal=True)
 
-
-    # ---- GAT flow-based detection --------------------------------------- #
-    def _feed_gat_flow(self, src_ip, dst_ip, src_port, dst_port, protocol, length, flags):
-        """Buffer packets into flows and run GAT detection when a flow completes."""
-        if not self.gat_detector:
-            return
-        proto_num = 1 if protocol == 'TCP' else 2 if protocol == 'UDP' else 3
-        # Broad flow key (src, dst, proto): ports vary per packet in real traffic
-        # and are not part of the 72 GAT features, so grouping by host-pair+proto
-        # lets scan/flood bursts accumulate into a single flow.
-        key = (src_ip, dst_ip, protocol)
-        if key not in self.flow_buffers:
-            self.flow_buffers[key] = FlowFeatureExtractor(proto_num)
-        self.flow_buffers[key].add_packet(time.time(), True, length, flags)
-
-        if len(self.flow_buffers[key].ts) >= FLOW_PACKET_THRESHOLD:
-            feats = self.flow_buffers[key].extract()
-            del self.flow_buffers[key]
-            if feats is not None:
-                results = self.gat_detector.detect_flow(feats, key)
-                if results:
-                    self._emit_gat_alerts(results)
-
-    def _emit_gat_alerts(self, results):
-        """Generate alerts from GAT batch results (attack flows only)."""
-        for r in results:
-            if not r.get('is_attack'):
-                continue
-            flow_id = r.get('flow_id')
-            if not flow_id:
-                continue
-            src_ip, dst_ip, protocol = flow_id
-            conf = r.get('confidence', 0.0)
-            risk_level = 'high' if conf >= 0.95 else 'medium'
-            self.alert_count += 1
-            from database import query_one as _q, get_config
-            window = int(get_config('merge_window_minutes', '5'))
-            dup = _q(
-                "SELECT COUNT(*) as c FROM alerts WHERE attack_type = 'GAT' AND src_ip = ? "
-                "AND created_at > datetime('now', ? || ' minutes', 'localtime')",
-                (src_ip, f'-{window}'),
-            )
-            if dup and dup['c'] > 0:
-                continue  # dedup within merge window
-            execute(
-                "INSERT INTO alerts (risk_level, attack_type, src_ip, dst_ip, src_port, dst_port, protocol, confidence, description, status) "
-                "VALUES (?,?,?,?,?,?,?,?,?,'new')",
-                (risk_level, 'GAT', src_ip, dst_ip, 0, 0, protocol,
-                 round(conf, 2), f'[GAT]{protocol} {src_ip} -> {dst_ip} (置信度 {conf:.1%})'),
-            )
 
     # ---- Device graph detection (4-level device risk) -------------------- #
     def _feed_device_flow(self, src_ip, dst_ip, src_port, dst_port, protocol, length, flags):
