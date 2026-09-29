@@ -34,6 +34,7 @@ Desktop.ini
 
 # Local database (contains user/device/event history; never regenerate from demo seeds)
 backend/data/ids.db
+backend/data/backups/
 
 # Trained models (too large, regenerate from training scripts)
 # Keep ONNX model for demo
