@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 import { useMobile, messageFor } from './MobileContext';
 import { MobileApiError, mobileApi, type MobileDeviceDetail, type MobileDeviceTraffic, type MobileTrafficWindow } from './api';
 import { nativeAppLifecycle, type AppLifecycleAdapter } from './appLifecycle';
-import { palette, ui } from './ui';
+import { design, palette, ui } from './ui';
 
 const WINDOWS: { value: MobileTrafficWindow; label: string }[] = [
   { value: '15m', label: '15 分钟' }, { value: '1h', label: '1 小时' }, { value: '24h', label: '24 小时' },
@@ -20,37 +21,62 @@ const bytes = (value: number): string => {
 const rate = (value: number): string => `${bytes(value)}/秒`;
 const time = (value: string): string => new Date(value).toLocaleString();
 const isForeground = (state: ReturnType<AppLifecycleAdapter['currentState']>): boolean => state !== 'background' && state !== 'inactive';
+const connectionLabels = { online: '在线', stale: '延迟', offline: '离线', unknown: '未知' };
+const connectionColors = {
+  online: { bg: palette.greenSoft, fg: palette.green },
+  stale: { bg: palette.amberSoft, fg: palette.amber },
+  offline: { bg: palette.coralSoft, fg: palette.coral },
+  unknown: { bg: '#F0EFEB', fg: palette.muted },
+};
+function deviceIcon(value: string): React.ComponentProps<typeof Ionicons>['name'] {
+  const name = value.toLocaleLowerCase();
+  if (/camera|摄像/.test(name)) return 'videocam-outline';
+  if (/lock|门禁|门锁/.test(name)) return 'lock-closed-outline';
+  if (/sensor|传感|温湿/.test(name)) return 'thermometer-outline';
+  if (/gateway|router|网关|路由/.test(name)) return 'wifi-outline';
+  return 'hardware-chip-outline';
+}
 
 function Trend({ traffic }: { traffic: MobileDeviceTraffic }) {
+  const [chartWidth, setChartWidth] = useState(0);
   if (traffic.trend.length === 0) return <Text style={ui.muted}>当前范围没有可绘制的趋势点。</Text>;
   const points = traffic.trend;
   const maximum = Math.max(1, ...points.flatMap(point => [point.uploaded_bytes, point.downloaded_bytes]));
-  const expected = traffic.trend_resolution_seconds;
-  let previous = 0;
-  return <View style={{ gap: 10 }}>
-    <ScrollView horizontal accessibilityLabel="流量趋势图，支持横向滚动" contentContainerStyle={{ alignItems: 'flex-end', minHeight: 112, paddingVertical: 8 }}>
-      {points.map((point, index) => {
-        const epoch = Date.parse(point.bucket_start) / 1000;
-        const gapBuckets = index > 0 ? Math.max(0, Math.round((epoch - previous) / expected) - 1) : 0;
-        previous = epoch;
-        const spacerWidth = Math.min(gapBuckets, 4) * 36;
-        const upHeight = point.uploaded_bytes === 0 ? 0 : Math.max(2, point.uploaded_bytes / maximum * 62);
-        const downHeight = point.downloaded_bytes === 0 ? 0 : Math.max(2, point.downloaded_bytes / maximum * 62);
-        return <React.Fragment key={point.bucket_start}>
-          {spacerWidth > 0 && <View accessibilityLabel="此处存在数据缺口" style={{ width: spacerWidth, height: 72, borderBottomWidth: 1, borderStyle: 'dashed', borderColor: palette.border }} />}
-          <View accessibilityLabel={`${time(point.bucket_start)}，上传 ${bytes(point.uploaded_bytes)}，下载 ${bytes(point.downloaded_bytes)}`}
-            style={{ width: 36, minHeight: 84, alignItems: 'center', justifyContent: 'flex-end', marginHorizontal: 2 }}>
-            <View style={{ height: 66, flexDirection: 'row', alignItems: 'flex-end', gap: 3 }}>
-              <View style={{ width: 10, height: upHeight, backgroundColor: '#7B806F', borderRadius: 4 }} />
-              <View style={{ width: 10, height: downHeight, backgroundColor: '#B0A792', borderRadius: 4 }} />
-            </View>
-            <Text style={{ color: palette.muted, fontSize: 10 }} numberOfLines={1}>{new Date(point.bucket_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
-          </View>
-        </React.Fragment>;
-      })}
-    </ScrollView>
-    <Text style={ui.muted}>每条柱代表实际聚合样本；空白间隔表示没有对应数据，不按零流量补齐。</Text>
-    {points.length === 1 && <Text style={ui.body}>单个样本：上传 {bytes(points[0].uploaded_bytes)}，下载 {bytes(points[0].downloaded_bytes)}。</Text>}
+  const chartHeight = 112;
+  const plotWidth = Math.max(0, chartWidth - 24);
+  const xAt = (index: number) => 12 + (points.length === 1 ? plotWidth / 2 : index * plotWidth / (points.length - 1));
+  const yAt = (value: number) => 8 + (1 - value / maximum) * 76;
+  const series = [
+    { key: 'upload', label: '上传', color: palette.green, values: points.map(point => point.uploaded_bytes) },
+    { key: 'download', label: '下载', color: palette.amber, values: points.map(point => point.downloaded_bytes) },
+  ];
+  return <View style={{ gap: 5 }}>
+    <View accessibilityLabel="设备流量趋势图" onLayout={event => setChartWidth(event.nativeEvent.layout.width)}
+      style={{ height: chartHeight, position: 'relative', overflow: 'hidden' }}>
+      {[0, 1, 2, 3].map(line => <View key={line} style={{ position: 'absolute', left: 0, right: 0,
+        top: 9 + line * 25, borderTopWidth: 1, borderStyle: 'dashed', borderColor: '#EAE8E2' }} />)}
+      {chartWidth > 0 && series.map(item => <React.Fragment key={item.key}>
+        {item.values.slice(1).map((value, index) => {
+          const x1 = xAt(index), y1 = yAt(item.values[index]);
+          const x2 = xAt(index + 1), y2 = yAt(value);
+          const length = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+          const angle = Math.atan2(y2 - y1, x2 - x1);
+          return <View key={`${item.key}-line-${index}`} style={{ position: 'absolute', left: (x1 + x2 - length) / 2,
+            top: (y1 + y2) / 2, width: length, height: 2, borderRadius: 2, backgroundColor: item.color,
+            transform: [{ rotate: `${angle}rad` }], zIndex: 1 }} />;
+        })}
+        {item.values.map((value, index) => <View key={`${item.key}-dot-${index}`} accessibilityLabel={`${item.label} ${bytes(value)}`}
+          style={{ position: 'absolute', left: xAt(index) - 3, top: yAt(value) - 3, width: 7, height: 7,
+            borderRadius: 4, backgroundColor: item.color, borderWidth: 1, borderColor: '#FFFFFF', zIndex: 2 }} />)}
+      </React.Fragment>)}
+    </View>
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+      {points.filter((_, index) => index === 0 || index === points.length - 1 || (points.length > 4 && index === Math.floor(points.length / 2)))
+        .map(point => <Text key={point.bucket_start} style={{ color: palette.muted, fontSize: 9 }}>
+          {new Date(point.bucket_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </Text>)}
+    </View>
+    {points.length === 1 && <Text style={ui.muted}>单个样本：上传 {bytes(points[0].uploaded_bytes)}，下载 {bytes(points[0].downloaded_bytes)}。</Text>}
   </View>;
 }
 
@@ -166,7 +192,14 @@ export default function MobileDeviceDetailScreen({ lifecycle = nativeAppLifecycl
   const device = deviceData?.device_id === deviceId ? deviceData : null;
   const traffic = trafficData?.device_id === deviceId && trafficData.window === window ? trafficData : null;
   const capability = device?.security_capability;
-  return <ScrollView style={ui.page} contentContainerStyle={ui.content}>
+  const healthLabel = capability?.available === false ? '安全分析不可用' :
+    (capability?.active_notice_count ?? 0) > 0 ? '需要关注' : device?.connection_status === 'online' ? '未发现活动提醒' : '检查状态';
+  const healthColor = capability?.available === false ? palette.muted :
+    (capability?.active_notice_count ?? 0) > 0 || device?.connection_status !== 'online' ? palette.amber : palette.green;
+  useEffect(() => {
+    navigation.setOptions({ title: device?.display_name ?? '设备详情' });
+  }, [device?.display_name, navigation]);
+  return <ScrollView style={ui.page} contentContainerStyle={design.pageContent}>
     {deviceError && <Text accessibilityRole="alert" style={ui.warning}>设备信息可能已过期：{deviceError}</Text>}
     {trafficError && <Text accessibilityRole="alert" style={ui.warning}>流量信息可能已过期：{trafficError}</Text>}
     {deviceStale && device && <Text accessibilityRole="alert" style={ui.warning}>设备数据连接中断，显示的是本次打开后取得的数据。</Text>}
@@ -174,71 +207,125 @@ export default function MobileDeviceDetailScreen({ lifecycle = nativeAppLifecycl
     {!device && deviceBusy && <ActivityIndicator accessibilityLabel="正在读取设备详情" color={palette.green} />}
     {!device && !deviceBusy && <Text style={ui.muted}>{deviceError ?? (deviceId ? '正在读取授权设备详情…' : '设备编号无效。')}</Text>}
     {device && <>
-      <Text style={ui.title}>{device.display_name}</Text>
-      <Text style={ui.subtitle}>{device.device_type} · {device.area_id ?? '未分配区域'}</Text>
-      <View style={ui.card}>
-        <Text style={ui.cardTitle}>设备状态</Text>
-        <Text style={ui.body}>连接状态：{device.status_text.connection}</Text>
-        <Text style={ui.body}>运行模式：{device.status_text.operation}</Text>
-        {device.retired && <Text style={ui.warning}>设备已退役；以下流量仅供查看历史数据。</Text>}
-        <Text style={ui.muted}>最近更新时间：{device.last_updated_at ? time(device.last_updated_at) : '未知'}</Text>
-        <Text style={ui.muted}>最近收到状态：{device.last_seen_at ? time(device.last_seen_at) : '尚无状态记录'}</Text>
-        <Text style={ui.muted}>{device.availability_text}</Text>
-        <TouchableOpacity accessibilityRole="button" style={ui.secondaryButton}
-          onPress={() => navigation.navigate('提交求助', { deviceId: device.device_id })}>
-          <Text style={ui.secondaryText}>就此设备联系管理员</Text>
+      <View style={design.detailHero}>
+        <View style={{ flex: 1, gap: 8 }}>
+          <Text style={design.eyebrow}>{device.area_id ?? device.device_type}</Text>
+          <Text style={design.heroTitle} numberOfLines={2}>{device.display_name}</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+            <View style={[design.statusPill, { backgroundColor: connectionColors[device.connection_status].bg }]}>
+              <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: connectionColors[device.connection_status].fg }} />
+              <Text style={[design.statusText, { color: connectionColors[device.connection_status].fg }]}>
+                {connectionLabels[device.connection_status]}
+              </Text>
+            </View>
+            <View style={[design.statusPill, { backgroundColor: healthColor === palette.green ? palette.greenSoft : healthColor === palette.amber ? palette.amberSoft : '#F0EFEB' }]}>
+              <Ionicons name={healthColor === palette.green ? 'checkmark-circle' : 'alert-circle'} size={13} color={healthColor} />
+              <Text style={[design.statusText, { color: healthColor }]}>{healthLabel}</Text>
+            </View>
+          </View>
+        </View>
+        <View style={design.detailArt}>
+          <Ionicons name={deviceIcon(`${device.display_name} ${device.device_type}`)} size={53} color="#4E5552" />
+        </View>
+      </View>
+
+      <View style={design.detailSection}>
+        <View style={design.sectionRow}>
+          <Text style={design.detailSectionTitle}>当前流量</Text>
+          <Text style={ui.muted}>(近 {WINDOWS.find(item => item.value === window)?.label ?? '15 分钟'})</Text>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 7 }}>
+          {WINDOWS.map(item => {
+            const active = window === item.value;
+            return <TouchableOpacity key={item.value} accessibilityRole="button" accessibilityState={{ selected: active }}
+              style={[design.filterChip, active && design.filterChipActive, { paddingHorizontal: 12, paddingVertical: 7 }]}
+              onPress={() => setWindow(item.value)}>
+              <Text style={[design.filterText, active && design.filterTextActive]}>{item.label}</Text>
+            </TouchableOpacity>;
+          })}
+        </View>
+        {!device.traffic_capability.available && <Text style={ui.muted}>流量服务暂不可用。</Text>}
+        {!traffic && trafficBusy && <ActivityIndicator accessibilityLabel="正在读取流量摘要" color={palette.green} />}
+        {!traffic && !trafficBusy && <Text style={ui.muted}>{trafficError ?? '正在读取流量摘要…'}</Text>}
+        {traffic && <>
+          {traffic.is_historical && <Text style={ui.warning}>这是已退役设备的历史流量。</Text>}
+          {traffic.availability.status === 'no_samples' ? <>
+            <Text style={ui.body}>此时间范围尚未收到流量样本。</Text>
+            {traffic.current_rate.status === 'warming_up' && <Text style={ui.muted}>实时窗口正在积累数据，暂不显示速率。</Text>}
+          </> : <>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <Text style={design.detailSectionTitle}>{traffic.current_rate.status === 'available' ? rate(traffic.current_rate.downloaded_bytes_per_second!) : '正在采集'}</Text>
+              <View style={design.trafficLegend}>
+                <View style={design.legendItem}><View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: palette.green }} /><Text style={design.legendText}>上传</Text></View>
+                <View style={design.legendItem}><View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: palette.amber }} /><Text style={design.legendText}>下载</Text></View>
+              </View>
+            </View>
+            {traffic.current_rate.status === 'warming_up' && <Text style={ui.muted}>正在积累数据，当前速率暂不可用。</Text>}
+            {traffic.current_rate.status === 'available' && <Text style={ui.muted}>上传 {rate(traffic.current_rate.uploaded_bytes_per_second!)} · 下载 {rate(traffic.current_rate.downloaded_bytes_per_second!)}</Text>}
+            <Trend traffic={traffic} />
+          </>}
+          {traffic.summary && <Text style={ui.body}>所选时段：上传 {bytes(traffic.summary.uploaded_bytes)} / 下载 {bytes(traffic.summary.downloaded_bytes)}</Text>}
+          {traffic.protocols.length > 0 && <View style={{ gap: 8 }}>
+            <Text style={ui.label}>协议流量</Text>
+            {traffic.protocols.map(item => <View key={item.category} style={{ gap: 4 }}>
+              <Text style={design.noticeMeta}>{item.label} · {item.share_percent}%</Text>
+              <View accessibilityLabel={`${item.label} 占 ${item.share_percent}%`} style={{ height: 6, borderRadius: 3, backgroundColor: palette.border }}>
+                <View style={{ width: `${item.share_percent}%`, height: 6, borderRadius: 3, backgroundColor: palette.green }} />
+              </View>
+            </View>)}
+          </View>}
+          <Text style={design.noticeMeta}>{traffic.freshness.latest_sample_at ? `最近样本：${time(traffic.freshness.latest_sample_at)}` : traffic.data_quality.message}</Text>
+        </>}
+      </View>
+
+      <View style={design.detailSection}>
+        <Text style={design.detailSectionTitle}>最近活动</Text>
+        <View style={design.detailRow}>
+          <View style={[design.detailRowIcon, { backgroundColor: '#E8F3EC' }]}><Ionicons name="pulse-outline" size={19} color={palette.green} /></View>
+          <View style={design.detailRowText}><Text style={design.detailRowTitle}>最近连接</Text>
+            <Text style={design.detailRowSubtitle}>{device.last_seen_at ? time(device.last_seen_at) : '尚无状态记录'}</Text></View>
+          <Ionicons name="chevron-forward" size={18} color="#8D9390" />
+        </View>
+        <View style={design.detailRow}>
+          <View style={[design.detailRowIcon, { backgroundColor: '#F0EFEB' }]}><Ionicons name="settings-outline" size={19} color="#606966" /></View>
+          <View style={design.detailRowText}><Text style={design.detailRowTitle}>设备运行状态</Text>
+            <Text style={design.detailRowSubtitle}>{device.status_text.operation} · {device.availability_text}</Text></View>
+          <Ionicons name="chevron-forward" size={18} color="#8D9390" />
+        </View>
+        <TouchableOpacity accessibilityRole="button" style={[design.detailRow, { borderBottomWidth: 0 }]}
+          onPress={() => navigation.navigate('主界面', { screen: '安全提醒' })}>
+          <View style={[design.detailRowIcon, { backgroundColor: palette.coralSoft }]}><Ionicons name="warning" size={19} color={palette.coral} /></View>
+          <View style={design.detailRowText}><Text style={design.detailRowTitle}>安全提醒</Text>
+            <Text style={design.detailRowSubtitle}>{capability?.active_notice_count ?? 0} 条活动提醒</Text></View>
+          <Ionicons name="chevron-forward" size={18} color="#8D9390" />
         </TouchableOpacity>
       </View>
-      <View style={ui.card}>
-        <Text style={ui.cardTitle}>相关安全提醒</Text>
+
+      <View style={design.detailSection}>
+        <View style={design.sectionRow}>
+          <Text style={design.detailSectionTitle}>相关提醒</Text>
+          {capability?.active_notice_count !== null && capability?.active_notice_count !== undefined &&
+            <Text style={design.noticeMeta}>{capability.active_notice_count} 条</Text>}
+        </View>
         {!capability?.available ? <Text style={ui.muted}>安全提醒功能暂不可用，不能据此判断设备是否安全。</Text> :
           capability.active_notice_count === 0 ? <Text style={ui.muted}>当前没有该设备已记录的活动提醒。</Text> :
             capability.recent_notices.map(notice => <TouchableOpacity key={notice.incident_id} accessibilityRole="button"
-              style={ui.secondaryButton} onPress={() => navigation.navigate('提醒详情', { incidentId: notice.incident_id })}>
-              <Text style={ui.secondaryText}>{notice.user_title} · {notice.severity} · {notice.read ? '已读' : '未读'} · {notice.acknowledged ? '我已知晓' : '尚未标记已知晓'}</Text>
+              style={design.detailRow} onPress={() => navigation.navigate('提醒详情', { incidentId: notice.incident_id })}>
+              <View style={[design.detailRowIcon, { backgroundColor: palette.coralSoft }]}><Ionicons name="alert-circle" size={19} color={palette.coral} /></View>
+              <View style={design.detailRowText}><Text style={design.detailRowTitle}>{notice.user_title}</Text>
+                <Text style={design.detailRowSubtitle}>{notice.severity} · {notice.read ? '已读' : '未读'}</Text></View>
+              <Ionicons name="chevron-forward" size={18} color="#8D9390" />
             </TouchableOpacity>)}
         {capability?.available && capability.active_notice_count !== null && capability.active_notice_count > capability.recent_notices.length &&
           <Text style={ui.muted}>另有 {capability.active_notice_count - capability.recent_notices.length} 条活动提醒。</Text>}
         <Text style={ui.muted}>没有已记录提醒不代表设备安全。</Text>
       </View>
-    </>}
 
-    <View style={ui.card}>
-      <Text style={ui.cardTitle}>简化流量</Text>
-      {device && !device.traffic_capability.available && <Text style={ui.muted}>流量服务暂不可用。</Text>}
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        {WINDOWS.map(item => <TouchableOpacity key={item.value} accessibilityRole="button" accessibilityState={{ selected: window === item.value }}
-          style={ui.secondaryButton} onPress={() => setWindow(item.value)}><Text style={ui.secondaryText}>{item.label}</Text></TouchableOpacity>)}
-      </View>
-      {!traffic && trafficBusy && <ActivityIndicator accessibilityLabel="正在读取流量摘要" color={palette.green} />}
-      {!traffic && !trafficBusy && <Text style={ui.muted}>{trafficError ?? '正在读取流量摘要…'}</Text>}
-      {traffic && <>
-        {traffic.is_historical && <Text style={ui.warning}>这是已退役设备的历史流量。</Text>}
-        <Text style={ui.muted}>数据新鲜度：{traffic.freshness.status === 'fresh' ? '较新' : traffic.freshness.status === 'stale' ? '最近样本已过期' : '尚无历史样本'}</Text>
-        <Text style={ui.muted}>最近样本：{traffic.freshness.latest_sample_at ? time(traffic.freshness.latest_sample_at) : '未知'}</Text>
-        {traffic.availability.status === 'no_samples' ? <>
-          <Text style={ui.body}>此时间范围尚未收到流量样本。</Text>
-          {traffic.current_rate.status === 'warming_up' && <Text style={ui.muted}>实时窗口正在积累数据，暂不显示速率。</Text>}
-        </> : <>
-          <Text style={ui.label}>当前速率 · {traffic.current_rate.label}</Text>
-          {traffic.current_rate.status === 'warming_up' ? <Text style={ui.muted}>正在积累数据，当前速率暂不可用。</Text> : <>
-            <Text style={ui.body}>上传 {rate(traffic.current_rate.uploaded_bytes_per_second!)} · 下载 {rate(traffic.current_rate.downloaded_bytes_per_second!)}</Text>
-            <Text style={ui.muted}>上传 {traffic.current_rate.uploaded_packets_per_second!.toFixed(2)} 包/秒 · 下载 {traffic.current_rate.downloaded_packets_per_second!.toFixed(2)} 包/秒</Text>
-          </>}
-          {traffic.summary && <Text style={ui.body}>所选时段：上传 {bytes(traffic.summary.uploaded_bytes)} / {traffic.summary.uploaded_packets} 包；下载 {bytes(traffic.summary.downloaded_bytes)} / {traffic.summary.downloaded_packets} 包</Text>}
-        </>}
-        <Text style={ui.label}>实际聚合趋势</Text>
-        <Trend traffic={traffic} />
-        <Text style={ui.label}>协议大类</Text>
-        {traffic.protocols.length === 0 ? <Text style={ui.muted}>此时间范围没有协议样本。</Text> : traffic.protocols.map(item => <View key={item.category} style={{ gap: 4 }}>
-          <Text style={ui.body}>{item.label} · {item.share_percent}% · {bytes(item.bytes)}</Text>
-          <View accessibilityLabel={`${item.label} 占 ${item.share_percent}%`} style={{ height: 8, borderRadius: 4, backgroundColor: palette.border }}>
-            <View style={{ width: `${item.share_percent}%`, height: 8, borderRadius: 4, backgroundColor: '#7B806F' }} />
-          </View>
-        </View>)}
-        <Text style={ui.muted}>{traffic.data_quality.message}</Text>
-        <Text style={ui.muted}>最近查询：{time(traffic.generated_at)}</Text>
-      </>}
-    </View>
+      <TouchableOpacity accessibilityRole="button" style={design.ctaPurple}
+        onPress={() => navigation.navigate('提交求助', { deviceId: device.device_id })}>
+        <Text style={design.ctaPurpleText}>联系管理员 · 查看处理进度</Text>
+      </TouchableOpacity>
+      <Text style={[design.noticeMeta, { textAlign: 'center' }]}>详细分析由管理员在 Web 端处理</Text>
+    </>}
   </ScrollView>;
 }

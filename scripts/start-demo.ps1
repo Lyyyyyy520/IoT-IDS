@@ -6,6 +6,7 @@ $BackendApp = Join-Path $BackendDir 'app.py'
 $FrontendDir = Join-Path $ProjectRoot 'frontend'
 $ViteCli = Join-Path $FrontendDir 'node_modules\vite\bin\vite.js'
 $BootstrapScript = Join-Path $ProjectRoot 'scripts\bootstrap-demo-database.py'
+$BundledDatabasePath = Join-Path $ProjectRoot 'data\demo.sqlite'
 $LoginUrl = 'http://127.0.0.1:3000/login'
 $ApiRoot = 'http://127.0.0.1:5000'
 $KnownLocalAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
@@ -194,6 +195,32 @@ function Initialize-MissingDemoDatabase {
             Where-Object { [IO.File]::Exists($_) }
         if ($sidecars.Count -gt 0) {
             throw "SQLite sidecar files appeared during bootstrap: $($sidecars -join ', '). No database was touched."
+        }
+
+        if ([IO.File]::Exists($BundledDatabasePath)) {
+            $stagingPath = "$DatabasePath.seed-$([guid]::NewGuid().ToString('N')).tmp"
+            try {
+                [IO.File]::Copy($BundledDatabasePath, $stagingPath, $false)
+                $seedPlan = Invoke-V3UpgradeCli -Arguments @(
+                    'plan', '--database', $stagingPath, '--json'
+                )
+                if ($seedPlan.integrity_ok -ne $true -or
+                    $seedPlan.current_schema_version -ne 9 -or
+                    @($seedPlan.pending_migrations).Count -ne 0 -or
+                    @($seedPlan.migration_ledger_issues).Count -gt 0 -or
+                    @($seedPlan.schema_drift).Count -gt 0) {
+                    throw 'The bundled demo database failed its read-only integrity and schema checks.'
+                }
+                [IO.File]::Move($stagingPath, $DatabasePath)
+            } finally {
+                if ([IO.File]::Exists($stagingPath)) {
+                    Remove-Item -LiteralPath $stagingPath -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            $script:DemoDatabaseBootstrapped = $true
+            Write-Status "Copied the bundled demo database to $DatabasePath."
+            return
         }
 
         Write-Status "No demo database exists at the configured path. Creating a fresh local database."

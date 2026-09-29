@@ -26,10 +26,19 @@ function MainTabs() {
     ? auth.notices.filter(item => !item.read && item.status !== 'false_positive').length
     : auth.overview?.security_capability.available ? auth.overview.security_capability.unread_count : undefined;
   return <Tab.Navigator screenOptions={({ route }) => ({
+    headerShown: route.name !== '首页',
+    headerTitle: route.name === '本人设备' ? '设备' : route.name === '设置' ? '我的' : route.name,
     headerStyle: { backgroundColor: palette.card }, headerTintColor: palette.text,
-    tabBarStyle: { backgroundColor: palette.card }, tabBarActiveTintColor: palette.green,
-    tabBarIcon: ({ color, size }) => <Ionicons name={route.name === '首页' ? 'home-outline' :
-      route.name === '安全提醒' ? 'notifications-outline' : route.name === '本人设备' ? 'cube-outline' : 'settings-outline'} size={size} color={color} />,
+    headerShadowVisible: false,
+    headerTitleStyle: { color: palette.text, fontSize: 17, fontWeight: '700' },
+    tabBarStyle: { backgroundColor: palette.card, borderTopColor: palette.border,
+      paddingTop: 5, paddingBottom: 3 },
+    tabBarActiveTintColor: palette.green, tabBarInactiveTintColor: '#858B88',
+    tabBarLabel: route.name === '设置' ? '我的' : route.name === '安全提醒' ? '提醒' : route.name === '本人设备' ? '设备' : '首页',
+    tabBarLabelStyle: { fontSize: 10, fontWeight: '600' },
+    tabBarIcon: ({ color, size, focused }) => <Ionicons name={route.name === '首页' ? (focused ? 'home' : 'home-outline') :
+      route.name === '安全提醒' ? (focused ? 'notifications' : 'notifications-outline') :
+        route.name === '本人设备' ? (focused ? 'cube' : 'cube-outline') : (focused ? 'person' : 'person-outline')} size={size + 2} color={color} />,
   })}>
     <Tab.Screen name="首页" component={HomeScreen} />
     <Tab.Screen name="安全提醒" component={NoticeListScreen} options={{ tabBarBadge: unreadNotices && unreadNotices > 0 ? unreadNotices : undefined }} />
