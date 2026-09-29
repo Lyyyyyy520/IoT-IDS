@@ -300,7 +300,34 @@ class TrafficCapture:
         if result:
             self.device_risk_cache = result
             self._emit_device_alerts(result)
+            self._persist_device_risk(result)
         return result
+
+    def _persist_device_risk(self, result):
+        """把设备风险写进 v3_device_current_state（IP → device_id 映射）。"""
+        if self.application is None:
+            return
+        try:
+            from pathlib import Path
+            from runtime_services import get_service_container
+            from services.device_state import DeviceStateService
+
+            container = get_service_container(self.application)
+            database_path = container.database_path
+            if database_path is None or not Path(database_path).is_file():
+                return
+            state = DeviceStateService(database_path, create_if_missing=False)
+            for ip, r in result.items():
+                device_id = state.device_id_for_ip(ip)
+                if device_id:
+                    state.update_device_risk(
+                        device_id=device_id,
+                        risk_level=r['level'],
+                        risk_name=r['name'],
+                        risk_confidence=float(max(r['probs'])),
+                    )
+        except Exception:
+            pass  # 风险落库失败不影响检测主流程
 
     def _emit_device_alerts(self, result):
         """对高危设备（红/橙）生成告警。"""

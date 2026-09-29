@@ -879,6 +879,19 @@ V3_DEVICE_DISCOVERY_MIGRATION = SchemaMigration(
     statements=V3_DEVICE_DISCOVERY_STATEMENTS,
 )
 
+V3_DEVICE_RISK_STATEMENTS = (
+    "ALTER TABLE v3_device_current_state ADD COLUMN risk_level INTEGER",
+    "ALTER TABLE v3_device_current_state ADD COLUMN risk_name TEXT",
+    "ALTER TABLE v3_device_current_state ADD COLUMN risk_confidence REAL",
+    "ALTER TABLE v3_device_current_state ADD COLUMN risk_detected_at TEXT",
+)
+
+V3_DEVICE_RISK_MIGRATION = SchemaMigration(
+    version=10,
+    name="device_risk_state",
+    statements=V3_DEVICE_RISK_STATEMENTS,
+)
+
 V3_MIGRATIONS = (
     V3_DEVICE_STATE_MIGRATION,
     V3_MQTT_HEARTBEAT_MIGRATION,
@@ -889,6 +902,7 @@ V3_MIGRATIONS = (
     V3_MOBILE_USER_ADMIN_MIGRATION,
     V3_INCIDENT_WORKFLOW_MIGRATION,
     V3_DEVICE_DISCOVERY_MIGRATION,
+    V3_DEVICE_RISK_MIGRATION,
 )
 
 V3_DEVICE_STATE_TABLES = frozenset(

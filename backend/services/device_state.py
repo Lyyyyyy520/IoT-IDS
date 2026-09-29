@@ -201,6 +201,33 @@ class DeviceStateService:
 
         return self.get_device_state(device_id)
 
+    def update_device_risk(
+        self, *, device_id: str, risk_level: int, risk_name: str, risk_confidence: float
+    ) -> None:
+        """写入设备 GNN 检测的风险等级（0=正常 1=侦察 2=DoS 3=僵尸网络）。"""
+        now = _iso(self._now())
+        with self._connection() as connection:
+            connection.execute(
+                "UPDATE v3_device_current_state "
+                "SET risk_level = ?, risk_name = ?, risk_confidence = ?, "
+                "risk_detected_at = ? WHERE device_id = ?",
+                (risk_level, risk_name, risk_confidence, now, device_id),
+            )
+
+    def device_id_for_ip(self, ip_address: str) -> str | None:
+        """按 IP 查当前活跃绑定的 device_id（无绑定则返回 None）。"""
+        normalized = _normalize_ip(ip_address)
+        if normalized is None:
+            return None
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT device_id FROM v3_device_ip_bindings "
+                "WHERE ip_address = ? AND valid_to IS NULL "
+                "ORDER BY valid_from DESC LIMIT 1",
+                (normalized,),
+            ).fetchone()
+            return row["device_id"] if row else None
+
     def record_observation(
         self,
         *,
