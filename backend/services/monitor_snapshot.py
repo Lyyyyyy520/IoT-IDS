@@ -62,7 +62,8 @@ class MonitorSnapshotService:
                 device_rows = connection.execute(
                     "SELECT p.device_id, p.display_name, p.device_type, p.area_id, "
                     "p.operation_mode, c.connection_status, c.ip_address, "
-                    "c.state_version, c.last_observed_at, c.last_received_at "
+                    "c.state_version, c.last_observed_at, c.last_received_at, "
+                    "c.risk_level, c.risk_name, c.risk_confidence, c.risk_detected_at "
                     "FROM v3_device_profiles p "
                     "JOIN v3_device_current_state c ON c.device_id = p.device_id "
                     "ORDER BY p.device_id"
@@ -102,6 +103,10 @@ class MonitorSnapshotService:
                 "state_version": row["state_version"],
                 "observed_at": row["last_observed_at"],
                 "received_at": row["last_received_at"],
+                "risk_level": row["risk_level"],
+                "risk_name": row["risk_name"],
+                "risk_confidence": row["risk_confidence"],
+                "risk_detected_at": row["risk_detected_at"],
                 "sources": sources_by_device.get(row["device_id"], []),
             }
             for row in device_rows

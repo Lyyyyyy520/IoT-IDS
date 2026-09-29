@@ -26,6 +26,10 @@ export interface MonitorDevice {
   state_version: number;
   observed_at: string | null;
   received_at: string | null;
+  risk_level: number | null;
+  risk_name: string | null;
+  risk_confidence: number | null;
+  risk_detected_at: string | null;
   sources: string[];
 }
 
@@ -280,6 +284,19 @@ function integer(value: unknown, label: string, minimum = 0): number {
   return value as number;
 }
 
+function nullableInteger(value: unknown, label: string, minimum = 0): number | null {
+  if (value === null) return null;
+  return integer(value, label, minimum);
+}
+
+function nullableNumber(value: unknown, label: string): number | null {
+  if (value === null) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new MonitorApiError('invalid_response', `${label} 必须是有限数字`);
+  }
+  return value;
+}
+
 function timestamp(value: unknown, label: string, nullable = false): string | null {
   if (nullable && value === null) return null;
   const parsed = text(value, label);
@@ -325,6 +342,10 @@ function parseDevice(value: unknown, index: number): MonitorDevice {
     state_version: integer(row.state_version, `devices[${index}].state_version`),
     observed_at: timestamp(row.observed_at, `devices[${index}].observed_at`, true),
     received_at: timestamp(row.received_at, `devices[${index}].received_at`, true),
+    risk_level: nullableInteger(row.risk_level, `devices[${index}].risk_level`),
+    risk_name: nullableText(row.risk_name, `devices[${index}].risk_name`),
+    risk_confidence: nullableNumber(row.risk_confidence, `devices[${index}].risk_confidence`),
+    risk_detected_at: timestamp(row.risk_detected_at, `devices[${index}].risk_detected_at`, true),
     sources: stringArray(row.sources, `devices[${index}].sources`),
   };
 }

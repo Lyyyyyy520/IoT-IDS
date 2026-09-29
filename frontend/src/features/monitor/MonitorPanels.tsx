@@ -287,6 +287,7 @@ export function DeviceDetailsPanel({ device }: { device: MonitorDevice | null })
           </div>
           <dl className="detail-grid">
             <div><dt>连接</dt><dd className={`status-${device.connection_status}`}>{STATUS_LABELS[device.connection_status]}</dd></div>
+            <div><dt>风险等级</dt><dd className={device.risk_level !== null ? `risk-l${device.risk_level}` : ''}>{device.risk_level !== null ? `${device.risk_name ?? '未命名'}${device.risk_confidence !== null ? ` ${(device.risk_confidence * 100).toFixed(0)}%` : ''}` : '未检测'}</dd></div>
             <div><dt>运行模式</dt><dd>{MODE_LABELS[device.operation_mode]}</dd></div>
             <div><dt>类型</dt><dd>{device.device_type}</dd></div>
             <div><dt>区域</dt><dd>{device.area_id ?? '未分区'}</dd></div>

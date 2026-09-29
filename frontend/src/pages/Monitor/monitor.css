@@ -120,6 +120,11 @@
 .status-offline { color: #e46c64 !important; }
 .status-unknown { color: #8897a0 !important; }
 
+.risk-l0 { color: #38c87d !important; font-weight: 650; }
+.risk-l1 { color: #d8ad45 !important; font-weight: 650; }
+.risk-l2 { color: #e8924e !important; font-weight: 650; }
+.risk-l3 { color: #e46c64 !important; font-weight: 650; }
+
 .graph-heading, .recent-heading { min-height: 58px; }
 .capability-badge { border: 1px solid #41515b; border-radius: 12px; padding: 4px 8px; color: #8b9aa2; font-size: 10px; white-space: nowrap; }
 .capability-badge.available { border-color: #2c7653; color: #59c58d; }
