@@ -35,7 +35,6 @@ DEFAULT_BATCH_LIMIT = 1000
 MAX_BATCH_LIMIT = 100000
 
 RETENTION_DEFAULTS = {
-    "legacy_traffic_logs": 30,
     "realtime_events": 30,
     "device_observations": 90,
     "mqtt_boot_sessions": 180,
@@ -126,10 +125,6 @@ class RetentionRule:
 
 
 RULES = (
-    RetentionRule(
-        "legacy_traffic_logs", "traffic_logs", "timestamp",
-        description="expired_raw_traffic",
-    ),
     RetentionRule(
         "device_observations", "v3_device_state_observations", "received_at",
         "NOT EXISTS (SELECT 1 FROM v3_device_current_state s "

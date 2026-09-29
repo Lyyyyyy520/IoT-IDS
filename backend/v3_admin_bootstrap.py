@@ -26,12 +26,9 @@ LEGACY_TABLES = frozenset(
     {
         "users",
         "alerts",
-        "traffic_logs",
         "audit_logs",
         "assets",
-        "policies",
         "config",
-        "rules",
     }
 )
 MIN_PASSWORD_LENGTH = 12
