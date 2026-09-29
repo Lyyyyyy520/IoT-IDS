@@ -515,7 +515,8 @@ class DeviceStateService:
                 "p.display_name, p.device_type, p.area_id, p.operation_mode, "
                 "c.connection_status, c.ip_address, c.last_observed_at, "
                 "c.last_received_at, c.last_observation_id, c.state_version, "
-                "c.updated_at FROM v3_device_profiles p "
+                "c.updated_at, c.risk_level, c.risk_name, c.risk_confidence, "
+                "c.risk_detected_at FROM v3_device_profiles p "
                 "JOIN v3_device_current_state c ON c.device_id = p.device_id "
                 "WHERE p.device_id = ?",
                 (device_id,),
