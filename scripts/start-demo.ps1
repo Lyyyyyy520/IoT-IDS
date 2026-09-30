@@ -417,15 +417,30 @@ try {
         }
         $ownerId = [int]$frontendOwners[0]
         $record = Get-ProcessRecord $ownerId
-        $validOwner = $record -and
+        $projectViteProcess = $record -and
             (Test-CommandContains ([string]$record.CommandLine) $ViteCli) -and
-            (Test-CommandContains ([string]$record.CommandLine) '--port 3000') -and
+            (Test-CommandContains ([string]$record.CommandLine) '--port 3000')
+        $lanOwner = $projectViteProcess -and
+            (Test-CommandContains ([string]$record.CommandLine) '--host 0.0.0.0')
+        $legacyLoopbackOwner = $projectViteProcess -and
             (Test-CommandContains ([string]$record.CommandLine) '--host 127.0.0.1')
-        if (-not $validOwner -or -not (Test-FrontendHealth)) {
+        if ($legacyLoopbackOwner) {
+            Write-Status 'Restarting the verified project Vite process to enable LAN access.'
+            Stop-Process -Id $ownerId -Force -ErrorAction Stop
+            for ($attempt = 0; $attempt -lt 20; $attempt++) {
+                if (@(Get-ListenPids 3000).Count -eq 0) { break }
+                Start-Sleep -Milliseconds 500
+            }
+            $frontendOwners = @(Get-ListenPids 3000)
+            if ($frontendOwners.Count -gt 0) {
+                throw 'The verified project Vite process did not release port 3000 during LAN restart.'
+            }
+        } elseif (-not $lanOwner -or -not (Test-FrontendHealth)) {
             throw 'Port 3000 is occupied by an unverified process. It was left running; inspect it before retrying.'
+        } else {
+            $frontendReady = $true
+            Write-Status 'Reusing the verified project frontend discovered on port 3000.'
         }
-        $frontendReady = $true
-        Write-Status 'Reusing the verified project frontend discovered on port 3000.'
     }
     if (-not $backendReady) {
         $oldEnvironment = @{}
@@ -453,7 +468,7 @@ try {
     }
 
     if (-not $frontendReady) {
-        $arguments = '"' + $ViteCli + '" --host 127.0.0.1 --port 3000 --strictPort'
+        $arguments = '"' + $ViteCli + '" --host 0.0.0.0 --port 3000 --strictPort'
         $StartedFrontend = Start-Process -FilePath $node.Source -ArgumentList $arguments -WorkingDirectory $FrontendDir -WindowStyle Hidden -RedirectStandardOutput $FrontendLog -RedirectStandardError $FrontendErrorLog -PassThru
         Write-Status "Started frontend (PID $($StartedFrontend.Id)); waiting for Vite."
         if (-not (Wait-ForFrontend $StartedFrontend.Id)) { throw "Frontend did not become ready. See $FrontendErrorLog" }
