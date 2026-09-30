@@ -14,8 +14,6 @@ from typing import Optional, Callable
 from uuid import uuid4
 from flask import current_app, has_app_context
 
-from database import execute
-
 # Try importing Scapy
 try:
     from scapy.all import sniff, IP, TCP, UDP, ICMP
@@ -55,6 +53,7 @@ class TrafficCapture:
         self.device_detector = None
         self.device_aggregator = FlowAggregator() if DEVICE_GNN_AVAILABLE else None
         self.device_risk_cache = {}
+        self._last_device_detect = time.time()
         if DEVICE_GNN_AVAILABLE:
             try:
                 self.device_detector = DeviceGraphDetector(
@@ -216,6 +215,7 @@ class TrafficCapture:
 
         # 持续抓包，直到 stop() 设置 running=False（之前 timeout=1 只抓 1 秒就停了）
         while self.running:
+            self._maybe_device_detect()
             try:
                 sniff(iface=iface, prn=packet_handler, store=False, timeout=1)
             except Exception as e:
@@ -235,6 +235,7 @@ class TrafficCapture:
         attackers = ['10.99.1.100', '10.99.1.200', '172.20.0.50', '45.33.32.156']
 
         while self.running:
+            self._maybe_device_detect()
             time.sleep(random.uniform(0.05, 0.3))
             r = random.random()
 
@@ -289,6 +290,15 @@ class TrafficCapture:
         self.device_aggregator.add_packet(
             src_ip, dst_ip, src_port, dst_port, protocol, length, flags)
 
+    def _maybe_device_detect(self):
+        """按检测窗口周期自动触发设备级检测（后端本地模式闭环）。"""
+        if not self.device_detector or not self.device_aggregator:
+            return
+        period = getattr(self.device_detector, 'window_seconds', 60.0)
+        if time.time() - self._last_device_detect >= period:
+            self._last_device_detect = time.time()
+            self.device_detect()
+
     def device_detect(self):
         """冲刷聚合的流，运行设备图检测，返回 {设备IP: {level, name, probs}}。"""
         if not self.device_detector or not self.device_aggregator:
@@ -299,61 +309,31 @@ class TrafficCapture:
         result = self.device_detector.detect_window()
         if result:
             self.device_risk_cache = result
-            self._emit_device_alerts(result)
-            self._persist_device_risk(result)
+            summary = self._persist_device_risk(result)
+            if summary:
+                self.alert_count += summary.get("incidents_created", 0)
         return result
 
     def _persist_device_risk(self, result):
-        """把设备风险写进 v3_device_current_state（IP → device_id 映射）。"""
+        """把设备风险写进 v3_device_current_state + 高危生成 v3 incident（共享入口）。"""
         if self.application is None:
-            return
+            return None
         try:
             from pathlib import Path
             from runtime_services import get_service_container
-            from services.device_state import DeviceStateService
+            from services.device_risk_ingest import ingest_device_risks
 
             container = get_service_container(self.application)
             database_path = container.database_path
             if database_path is None or not Path(database_path).is_file():
-                return
-            state = DeviceStateService(database_path, create_if_missing=False)
-            for ip, r in result.items():
-                device_id = state.device_id_for_ip(ip)
-                if device_id:
-                    state.update_device_risk(
-                        device_id=device_id,
-                        risk_level=r['level'],
-                        risk_name=r['name'],
-                        risk_confidence=float(max(r['probs'])),
-                    )
+                return None
+            incident_service = self.application.extensions.get("iot_ids_incident_workflow")
+            return ingest_device_risks(
+                database_path, incident_service, result,
+                source_id="local-detection",
+            )
         except Exception:
-            pass  # 风险落库失败不影响检测主流程
-
-    def _emit_device_alerts(self, result):
-        """对高危设备（红/橙）生成告警。"""
-        for ip, r in result.items():
-            level = r['level']
-            if level < 2:  # 绿/黄 不告警
-                continue
-            conf = float(max(r['probs']))
-            risk = 'critical' if level == 3 else 'high'
-            attack_type = 'Botnet' if level == 3 else 'DoS'
-            from database import query_one as _q, get_config
-            window = int(get_config('merge_window_minutes', '5'))
-            dup = _q(
-                "SELECT COUNT(*) as c FROM alerts WHERE attack_type = ? AND src_ip = ? "
-                "AND created_at > datetime('now', ? || ' minutes', 'localtime')",
-                (attack_type, ip, f'-{window}'),
-            )
-            if dup and dup['c'] > 0:
-                continue  # 合并窗口内去重
-            self.alert_count += 1
-            execute(
-                "INSERT INTO alerts (risk_level, attack_type, src_ip, dst_ip, src_port, dst_port, protocol, confidence, description, status) "
-                "VALUES (?,?,?,?,?,?,?,?,?,'new')",
-                (risk, attack_type, ip, '', 0, 0, '', round(conf, 2),
-                 f'[设备图]设备 {ip} 风险等级: {r["name"]} (置信度 {conf:.1%})'),
-            )
+            return None  # 风险落库失败不影响检测主流程
 
 
 def get_capture() -> TrafficCapture:

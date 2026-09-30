@@ -17,7 +17,7 @@ from backend.models.device_gnn_inference import DeviceGNNInference
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, 'training', 'data', 'ciciot2023', 'flows_sample.csv')
-ONNX = os.path.join(ROOT, 'backend', 'data', 'device_gnn.onnx')
+ONNX = os.path.join(ROOT, 'backend', 'data', 'device_gnn_hetero.onnx')
 NORM = os.path.join(ROOT, 'backend', 'data', 'device_gnn_norm.npz')
 
 LABEL_TO_LEVEL = {
