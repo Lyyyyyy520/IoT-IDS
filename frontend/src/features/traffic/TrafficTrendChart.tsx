@@ -21,11 +21,12 @@ export default function TrafficTrendChart({ response, metric }: Props) {
   const rxSeries = buildTrendSeries(response, metric, 'rx');
   const option = {
     animation: !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
-    grid: { left: 56, right: 18, top: 38, bottom: 45 },
-    legend: { data: ['TX 上传', 'RX 下载'], textStyle: { color: '#9db4bf' } },
+    grid: { left: 96, right: 24, top: 52, bottom: 68 },
+    legend: { data: ['TX 上传', 'RX 下载'], textStyle: { color: '#9db4bf', fontSize: 16 } },
     tooltip: {
       trigger: 'axis',
       renderMode: 'richText',
+      textStyle: { fontSize: 16, lineHeight: 24 },
       formatter: (items: Array<{ seriesName: string; value: [string, number | null] }>) => {
         const timestamp = items[0]?.value?.[0];
         if (!timestamp) return '';
@@ -46,15 +47,16 @@ export default function TrafficTrendChart({ response, metric }: Props) {
     xAxis: {
       type: 'time',
       axisLine: { lineStyle: { color: '#31505d' } },
-      axisLabel: { color: '#78919d', hideOverlap: true },
+      axisLabel: { color: '#78919d', fontSize: 16, hideOverlap: true },
       splitLine: { show: false },
     },
     yAxis: {
       type: 'value', min: 0,
       name: metric === 'bytes' ? '字节/秒' : '包/秒',
-      nameTextStyle: { color: '#78919d' },
+      nameTextStyle: { color: '#78919d', fontSize: 16 },
       axisLabel: {
         color: '#78919d',
+        fontSize: 16,
         formatter: (value: number) => metric === 'bytes'
           ? formatRate(value, 'bytes').replace('/s', '')
           : `${value}`,
@@ -79,7 +81,7 @@ export default function TrafficTrendChart({ response, metric }: Props) {
       option={option}
       notMerge
       lazyUpdate
-      style={{ width: '100%', height: 300 }}
+      style={{ width: '100%', height: 340, minHeight: 340 }}
       opts={{ renderer: 'canvas' }}
     />
   );

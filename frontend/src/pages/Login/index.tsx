@@ -86,7 +86,7 @@ export default function LoginPage() {
           <Title level={3} style={{ color: 'var(--text-primary)', margin: 0 }}>
             IoT IDS
           </Title>
-          <Text style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+          <Text style={{ color: 'var(--text-secondary)', fontSize: 18, lineHeight: 1.5 }}>
             智慧社区入侵检测管理平台
           </Text>
         </div>
@@ -118,7 +118,7 @@ export default function LoginPage() {
               htmlType="submit"
               loading={loading}
               block
-              style={{ height: 44, fontSize: 15 }}
+              style={{ height: 52, fontSize: 18 }}
             >
               登 录
             </Button>
@@ -129,7 +129,7 @@ export default function LoginPage() {
           style={{
             textAlign: 'center',
             color: 'var(--text-muted)',
-            fontSize: 12,
+            fontSize: 16,
             marginTop: 16,
           }}
         >
@@ -144,7 +144,7 @@ export default function LoginPage() {
           position: 'absolute',
           bottom: 20,
           color: 'var(--text-muted)',
-          fontSize: 11,
+          fontSize: 16,
           textAlign: 'center',
         }}
       >
