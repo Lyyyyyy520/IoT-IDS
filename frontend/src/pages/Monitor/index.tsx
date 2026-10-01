@@ -76,7 +76,7 @@ export default function MonitorPage() {
         <div className="monitor-brand">
           <span className="brand-mark" aria-hidden="true">ID</span>
           <div>
-            <strong>IoT IDS 实时监视</strong>
+            <strong>IoT IDS<span className="monitor-title-space"> </span><br className="monitor-title-break" />实时监视</strong>
             <span>管理员与值守人员工作区</span>
           </div>
         </div>
