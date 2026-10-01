@@ -41,6 +41,8 @@ export interface DeviceDetail extends Omit<DeviceListItem, 'last_received_at'> {
   updated_at: string;
   observed_at: string | null;
   received_at: string | null;
+  firmware_version: string | null;
+  uptime_ms: number | null;
   sources: string[];
   references: DeviceReferences;
   can_delete: boolean;
@@ -254,6 +256,15 @@ export function parseDeviceDetail(value: unknown): DeviceDetail {
     updated_at: timestamp(raw.updated_at, 'device.updated_at') as string,
     observed_at: timestamp(raw.observed_at, 'device.observed_at', true),
     received_at: timestamp(raw.received_at, 'device.received_at', true),
+    // These runtime fields were added after the original device-detail contract.
+    // Older backend processes can omit them; the detail view already treats
+    // missing runtime data as "not provided".
+    firmware_version: raw.firmware_version === undefined
+      ? null
+      : nullableText(raw.firmware_version, 'device.firmware_version'),
+    uptime_ms: raw.uptime_ms === undefined || raw.uptime_ms === null
+      ? null
+      : integer(raw.uptime_ms, 'device.uptime_ms'),
     sources: stringArray(raw.sources, 'device.sources'),
     references: parseReferences(raw.references),
     can_delete: boolean(raw.can_delete, 'device.can_delete'),
