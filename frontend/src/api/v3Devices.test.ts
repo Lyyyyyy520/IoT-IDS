@@ -43,6 +43,22 @@ describe('v3 devices runtime contract', () => {
     });
   });
 
+  it('loads the selected device detail when older backends omit runtime fields', async () => {
+    const legacyDetail: Record<string, unknown> = { ...deviceDetail };
+    delete legacyDetail.firmware_version;
+    delete legacyDetail.uptime_ms;
+    const fetchMock = vi.fn().mockResolvedValue(response(200, { device: legacyDetail }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new V3DevicesClient().getDevice('camera-01');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v3/devices/camera-01');
+    expect(result).toMatchObject({
+      firmware_version: null,
+      uptime_ms: null,
+    });
+  });
+
   it('rejects malformed success responses instead of crashing the page', () => {
     expect(() => parseDeviceListResponse({ items: [{}], total: 1, limit: 24, offset: 0 }))
       .toThrow(DeviceApiError);
