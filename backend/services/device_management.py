@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
 import re
 import sqlite3
@@ -884,6 +885,214 @@ class DeviceManagementService:
         device_id = _device_id(device_id)
         with self._connection() as connection:
             return self._detail(connection, device_id)
+
+    @staticmethod
+    def _sensor_values(payload_json: str | None) -> tuple[float | None, float | None]:
+        if not payload_json:
+            return None, None
+        try:
+            payload = json.loads(payload_json)
+        except (TypeError, json.JSONDecodeError):
+            return None, None
+        telemetry = payload.get("telemetry") if isinstance(payload, dict) else None
+        if not isinstance(telemetry, dict) and isinstance(payload, dict):
+            # MQTT ingestion stores the validated telemetry object itself.
+            telemetry = payload
+        if not isinstance(telemetry, dict):
+            return None, None
+
+        def finite_number(key: str) -> float | None:
+            value = telemetry.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return None
+            return float(value) if math.isfinite(value) else None
+
+        return finite_number("temp"), finite_number("humidity")
+
+    def get_sensor_history(
+        self, device_id: str, *, start: datetime, end: datetime,
+    ) -> dict:
+        """Return real temperature and humidity fields from retained sensor observations."""
+        device_id = _device_id(device_id)
+        start, end = _utc(start), _utc(end)
+        if end <= start:
+            raise DeviceManagementError("telemetry end must be after start")
+        if (end - start).total_seconds() > 30 * 24 * 60 * 60:
+            raise DeviceManagementError("telemetry window cannot exceed 30 days")
+        maximum_points = 100_000
+        with self._connection() as connection:
+            profile = connection.execute(
+                "SELECT device_type FROM v3_device_profiles WHERE device_id = ?",
+                (device_id,),
+            ).fetchone()
+            if profile is None:
+                raise DeviceNotFoundError(f"unknown device_id {device_id!r}")
+            if str(profile["device_type"]).casefold() != "sensor":
+                return {
+                    "device_id": device_id,
+                    "window": {"from": _iso(start), "to": _iso(end)},
+                    "availability": {"available": False, "reason": "device_not_sensor"},
+                    "latest": None,
+                    "series": [],
+                    "truncated": False,
+                }
+
+            latest_row = connection.execute(
+                "SELECT observation_id, observed_at, received_at, payload_json "
+                "FROM v3_device_state_observations WHERE device_id = ? "
+                "ORDER BY received_at DESC, observation_id DESC LIMIT 1",
+                (device_id,),
+            ).fetchone()
+            latest = None
+            if latest_row is not None:
+                temperature, humidity = self._sensor_values(latest_row["payload_json"])
+                latest = {
+                    "observation_id": int(latest_row["observation_id"]),
+                    "observed_at": latest_row["observed_at"],
+                    "received_at": latest_row["received_at"],
+                    "temperature_c": temperature,
+                    "humidity_percent": humidity,
+                }
+
+            count = int(connection.execute(
+                "SELECT COUNT(*) FROM v3_device_state_observations "
+                "WHERE device_id = ? AND received_at >= ? AND received_at < ?",
+                (device_id, _iso(start), _iso(end)),
+            ).fetchone()[0])
+            rows = connection.execute(
+                "SELECT observation_id, observed_at, received_at, payload_json "
+                "FROM v3_device_state_observations WHERE device_id = ? "
+                "AND received_at >= ? AND received_at < ? "
+                "ORDER BY received_at DESC, observation_id DESC LIMIT ?",
+                (device_id, _iso(start), _iso(end), maximum_points),
+            ).fetchall()
+
+        series = []
+        for item in reversed(rows):
+            temperature, humidity = self._sensor_values(item["payload_json"])
+            if temperature is None and humidity is None:
+                continue
+            series.append({
+                "observation_id": int(item["observation_id"]),
+                "observed_at": item["observed_at"],
+                "received_at": item["received_at"],
+                "temperature_c": temperature,
+                "humidity_percent": humidity,
+            })
+        return {
+            "device_id": device_id,
+            "window": {"from": _iso(start), "to": _iso(end)},
+            "availability": {
+                "available": bool(series),
+                "reason": None if series else "no_sensor_samples",
+            },
+            "latest": latest,
+            "series": series,
+            "truncated": count > maximum_points,
+        }
+
+    @staticmethod
+    def _observed_telemetry(payload_json: str | None) -> dict:
+        if not payload_json:
+            return {}
+        try:
+            payload = json.loads(payload_json)
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        telemetry = payload.get("telemetry")
+        if not isinstance(telemetry, dict):
+            telemetry = payload
+
+        omitted_fields = {
+            "device_type", "device_id", "boot_id", "sequence", "schema_version",
+            "firmware_version", "uptime_ms", "ip", "mac",
+        }
+        sensitive_fragments = (
+            "password", "passwd", "token", "secret", "credential",
+            "auth", "jwt", "api_key", "apikey", "signature",
+        )
+        safe: dict = {}
+        for key, value in telemetry.items():
+            if not isinstance(key, str) or not key or len(key) > 64:
+                continue
+            normalized_key = key.casefold()
+            if normalized_key in omitted_fields or any(
+                fragment in normalized_key for fragment in sensitive_fragments
+            ):
+                continue
+            if isinstance(value, str):
+                if len(value) <= 256:
+                    safe[key] = value
+            elif value is None or isinstance(value, bool):
+                safe[key] = value
+            elif isinstance(value, int):
+                safe[key] = value
+            elif isinstance(value, float) and math.isfinite(value):
+                safe[key] = value
+        return safe
+
+    def get_device_state_history(
+        self, device_id: str, *, start: datetime, end: datetime,
+    ) -> dict:
+        """Read retained, safe scalar telemetry for a device and time window."""
+        device_id = _device_id(device_id)
+        start, end = _utc(start), _utc(end)
+        if end <= start:
+            raise DeviceManagementError("state history end must be after start")
+        if (end - start).total_seconds() > 30 * 24 * 60 * 60:
+            raise DeviceManagementError("state history window cannot exceed 30 days")
+
+        maximum_points = 1000
+        with self._connection() as connection:
+            profile = connection.execute(
+                "SELECT 1 FROM v3_device_profiles WHERE device_id = ?",
+                (device_id,),
+            ).fetchone()
+            if profile is None:
+                raise DeviceNotFoundError(f"unknown device_id {device_id!r}")
+            latest_row = connection.execute(
+                "SELECT observation_id, observed_at, received_at, payload_json "
+                "FROM v3_device_state_observations WHERE device_id = ? "
+                "ORDER BY received_at DESC, observation_id DESC LIMIT 1",
+                (device_id,),
+            ).fetchone()
+            count = int(connection.execute(
+                "SELECT COUNT(*) FROM v3_device_state_observations "
+                "WHERE device_id = ? AND received_at >= ? AND received_at < ?",
+                (device_id, _iso(start), _iso(end)),
+            ).fetchone()[0])
+            rows = connection.execute(
+                "SELECT observation_id, observed_at, received_at, payload_json "
+                "FROM v3_device_state_observations WHERE device_id = ? "
+                "AND received_at >= ? AND received_at < ? "
+                "ORDER BY received_at DESC, observation_id DESC LIMIT ?",
+                (device_id, _iso(start), _iso(end), maximum_points),
+            ).fetchall()
+
+        def observation(row) -> dict:
+            return {
+                "observation_id": int(row["observation_id"]),
+                "observed_at": row["observed_at"],
+                "received_at": row["received_at"],
+                "telemetry": self._observed_telemetry(row["payload_json"]),
+            }
+
+        latest = observation(latest_row) if latest_row is not None else None
+        series = [observation(row) for row in reversed(rows)]
+        has_telemetry = any(item["telemetry"] for item in series)
+        reason = None if has_telemetry else (
+            "no_state_observations" if count == 0 else "no_telemetry_fields"
+        )
+        return {
+            "device_id": device_id,
+            "window": {"from": _iso(start), "to": _iso(end)},
+            "availability": {"available": has_telemetry, "reason": reason},
+            "latest": latest,
+            "series": series,
+            "truncated": count > maximum_points,
+        }
 
     def list_devices(
         self,

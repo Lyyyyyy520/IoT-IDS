@@ -51,6 +51,45 @@ export interface DeviceDetail extends Omit<DeviceListItem, 'last_received_at'> {
   credential_reverification_required?: boolean;
 }
 
+export interface SensorReading {
+  observation_id: number;
+  observed_at: string;
+  received_at: string;
+  temperature_c: number | null;
+  humidity_percent: number | null;
+}
+
+export interface SensorTelemetryResponse {
+  api_version: 'v3';
+  generated_at: string;
+  device_id: string;
+  window: { from: string; to: string };
+  availability: { available: boolean; reason: string | null };
+  latest: SensorReading | null;
+  series: SensorReading[];
+  truncated: boolean;
+}
+
+export type DeviceTelemetryValue = string | number | boolean | null;
+
+export interface DeviceStateObservation {
+  observation_id: number;
+  observed_at: string;
+  received_at: string;
+  telemetry: Record<string, DeviceTelemetryValue>;
+}
+
+export interface DeviceStateHistoryResponse {
+  api_version: 'v3';
+  generated_at: string;
+  device_id: string;
+  window: { from: string; to: string };
+  availability: { available: boolean; reason: string | null };
+  latest: DeviceStateObservation | null;
+  series: DeviceStateObservation[];
+  truncated: boolean;
+}
+
 export interface DeviceListResponse {
   items: DeviceListItem[];
   total: number;
@@ -285,6 +324,92 @@ export function parseDeviceDetail(value: unknown): DeviceDetail {
   return result;
 }
 
+function nullableFiniteNumber(value: unknown, label: string): number | null {
+  if (value === null) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) invalid(`${label} 必须是有限数字或 null`);
+  return value as number;
+}
+
+function parseSensorReading(value: unknown): SensorReading {
+  const raw = object(value, 'sensor reading');
+  return {
+    observation_id: integer(raw.observation_id, 'observation_id', 1),
+    observed_at: timestamp(raw.observed_at, 'observed_at') as string,
+    received_at: timestamp(raw.received_at, 'received_at') as string,
+    temperature_c: nullableFiniteNumber(raw.temperature_c, 'temperature_c'),
+    humidity_percent: nullableFiniteNumber(raw.humidity_percent, 'humidity_percent'),
+  };
+}
+
+export function parseSensorTelemetry(value: unknown): SensorTelemetryResponse {
+  const raw = object(value, 'sensor telemetry');
+  const window = object(raw.window, 'window');
+  const availability = object(raw.availability, 'availability');
+  if (!Array.isArray(raw.series)) invalid('series 必须是数组');
+  return {
+    api_version: oneOf(raw.api_version, ['v3'] as const, 'api_version'),
+    generated_at: timestamp(raw.generated_at, 'generated_at') as string,
+    device_id: text(raw.device_id, 'device_id'),
+    window: {
+      from: timestamp(window.from, 'window.from') as string,
+      to: timestamp(window.to, 'window.to') as string,
+    },
+    availability: {
+      available: boolean(availability.available, 'availability.available'),
+      reason: nullableText(availability.reason, 'availability.reason'),
+    },
+    latest: raw.latest === null ? null : parseSensorReading(raw.latest),
+    series: raw.series.map(parseSensorReading),
+    truncated: boolean(raw.truncated, 'truncated'),
+  };
+}
+
+function parseTelemetryFields(value: unknown): Record<string, DeviceTelemetryValue> {
+  const raw = object(value, 'telemetry');
+  const result: Record<string, DeviceTelemetryValue> = {};
+  for (const [key, entry] of Object.entries(raw)) {
+    if (!key || key.length > 64) invalid('telemetry 字段名无效');
+    if (entry === null) result[key] = null;
+    else if (typeof entry === 'string' || typeof entry === 'boolean') result[key] = entry;
+    else if (typeof entry === 'number' && Number.isFinite(entry)) result[key] = entry;
+    else invalid(`telemetry.${key} 必须是标量值`);
+  }
+  return result;
+}
+
+function parseDeviceStateObservation(value: unknown): DeviceStateObservation {
+  const raw = object(value, 'device state observation');
+  return {
+    observation_id: integer(raw.observation_id, 'observation_id', 1),
+    observed_at: timestamp(raw.observed_at, 'observed_at') as string,
+    received_at: timestamp(raw.received_at, 'received_at') as string,
+    telemetry: parseTelemetryFields(raw.telemetry),
+  };
+}
+
+export function parseDeviceStateHistory(value: unknown): DeviceStateHistoryResponse {
+  const raw = object(value, 'device state history');
+  const window = object(raw.window, 'window');
+  const availability = object(raw.availability, 'availability');
+  if (!Array.isArray(raw.series)) invalid('series 必须是数组');
+  return {
+    api_version: oneOf(raw.api_version, ['v3'] as const, 'api_version'),
+    generated_at: timestamp(raw.generated_at, 'generated_at') as string,
+    device_id: text(raw.device_id, 'device_id'),
+    window: {
+      from: timestamp(window.from, 'window.from') as string,
+      to: timestamp(window.to, 'window.to') as string,
+    },
+    availability: {
+      available: boolean(availability.available, 'availability.available'),
+      reason: nullableText(availability.reason, 'availability.reason'),
+    },
+    latest: raw.latest === null ? null : parseDeviceStateObservation(raw.latest),
+    series: raw.series.map(parseDeviceStateObservation),
+    truncated: boolean(raw.truncated, 'truncated'),
+  };
+}
+
 export function parseDeviceListResponse(value: unknown): DeviceListResponse {
   const raw = object(value, 'device list');
   if (!Array.isArray(raw.items)) invalid('device list.items 必须是数组');
@@ -473,6 +598,24 @@ export class V3DevicesClient implements DevicesApi {
     return this.read(
       `${DEVICES_ENDPOINT}/${encodeURIComponent(deviceId)}`,
       parseDeviceEnvelope,
+      signal,
+    );
+  }
+
+  getSensorTelemetry(deviceId: string, query: { from: Date; to: Date }, signal?: AbortSignal): Promise<SensorTelemetryResponse> {
+    const params = new URLSearchParams({ from: query.from.toISOString(), to: query.to.toISOString() });
+    return this.read(
+      `${DEVICES_ENDPOINT}/${encodeURIComponent(deviceId)}/telemetry?${params.toString()}`,
+      parseSensorTelemetry,
+      signal,
+    );
+  }
+
+  getDeviceStateHistory(deviceId: string, query: { from: Date; to: Date }, signal?: AbortSignal): Promise<DeviceStateHistoryResponse> {
+    const params = new URLSearchParams({ from: query.from.toISOString(), to: query.to.toISOString() });
+    return this.read(
+      `${DEVICES_ENDPOINT}/${encodeURIComponent(deviceId)}/state-history?${params.toString()}`,
+      parseDeviceStateHistory,
       signal,
     );
   }
