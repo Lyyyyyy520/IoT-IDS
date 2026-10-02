@@ -1,0 +1,13 @@
+# Copy this file to a protected gateway path and replace every placeholder.
+# The backend identity is read-only and can subscribe only to device status.
+user CHANGE_ME_BACKEND_SUBSCRIBER_USERNAME
+topic read community/+/status
+
+# Repeat one explicit block per provisioned device. Device accounts can publish
+# only their own status and read only their own control topic.
+user CHANGE_ME_DEVICE_ID
+topic write community/CHANGE_ME_DEVICE_ID/status
+topic read community/CHANGE_ME_DEVICE_ID/control
+
+# Do not add a backend write rule for community/+/control. A future controller
+# must use a separate identity and separately reviewed ACL.

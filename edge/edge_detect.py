@@ -1,18 +1,19 @@
 """
 Raspberry Pi Edge Detection Program
 
-Runs ONNX inference locally with optional Scapy packet capture.
+Runs local ONNX inference with optional tcpdump live capture.
 Designed for Raspberry Pi 4B (4GB) with Raspberry Pi OS Bullseye 64-bit.
 
 Usage:
-  python edge_detect.py                      # Run with mock data demo
-  python edge_detect.py --pcap test.pcap     # Analyze a PCAP file
+  python edge_detect.py --demo               # Run with mock data demo
   python edge_detect.py --live               # Live capture (requires sudo + Scapy)
 """
 import os
 import sys
 import time
 import argparse
+from datetime import datetime, timezone
+from uuid import uuid4
 import numpy as np
 
 # Add parent to path for backend imports (works on Windows and Pi)
@@ -62,25 +63,12 @@ def detect_demo(engine: InferenceEngine, extractor: FeatureExtractor):
     print(f'  Throughput:  {n_runs/elapsed:.0f} samples/sec')
 
 
-def detect_pcap(engine: InferenceEngine, extractor: FeatureExtractor, pcap_path: str):
-    """Analyze a PCAP file."""
-    print(f'\nAnalyzing PCAP: {pcap_path}')
-    features_list = extractor.extract_from_pcap(pcap_path)
-    print(f'Extracted {len(features_list)} flow records')
-
-    attack_count = 0
-    for feat in features_list:
-        result = engine.predict(feat)
-        if result['is_attack']:
-            attack_count += 1
-            print(f'  ⚠ {result["class_name"]} — Confidence: {result["confidence"]:.2%}')
-
-    print(f'\nSummary: {attack_count}/{len(features_list)} flows flagged as attack')
-
-
-def detect_live(engine: InferenceEngine, extractor: FeatureExtractor, server_url: str = None):
-    """Real-time packet capture using tcpdump pipe and ONNX detection."""
-    import subprocess, re, threading, requests, json
+def detect_live(engine: InferenceEngine, extractor: FeatureExtractor,
+                server_url: str = None, probe_token: str = None):
+    """Capture live packets; report privacy-safe v2 traffic batches to v3."""
+    import re
+    import subprocess
+    import requests
 
     print('\n' + '=' * 60)
     print('  IoT IDS Edge Detection - Live Capture Mode')
@@ -95,87 +83,106 @@ def detect_live(engine: InferenceEngine, extractor: FeatureExtractor, server_url
 
     packet_count = [0]
     alert_count = [0]
-
-    # Use tcpdump to capture packets, parse with regex
+    source_session_id = str(uuid4())
+    batch_sequence = 0
     proc = subprocess.Popen(
         ['sudo', 'tcpdump', '-i', 'eth0', '-l', '-n', '-tt', 'ip'],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=0
     )
-
     ip_re = re.compile(r'(\d+\.\d+\.\d+\.\d+)\.(\d+)\s*>\s*(\d+\.\d+\.\d+\.\d+)\.(\d+)')
+    length_re = re.compile(r'\blength\s+(\d+)')
 
     print('Capture started. Press Ctrl+C to stop.\n')
     try:
         for line in iter(proc.stdout.readline, ''):
-            m = ip_re.search(line)
-            if not m:
+            match = ip_re.search(line)
+            if not match:
                 continue
             packet_count[0] += 1
-            src_ip, sport, dst_ip, dport = m.group(1), int(m.group(2)), m.group(3), int(m.group(4))
-            proto = 1 if 'TCP' in line.upper() else 2 if 'UDP' in line.upper() else 0
-            if proto == 0:
+            src_ip, sport, dst_ip, dport = match.group(1), int(match.group(2)), match.group(3), int(match.group(4))
+            protocol = 'TCP' if 'TCP' in line.upper() else 'UDP' if 'UDP' in line.upper() else None
+            if protocol is None:
                 continue
+            length_match = length_re.search(line)
+            packet_bytes = int(length_match.group(1)) if length_match else 0
 
+            # Keep the local research model visible in the terminal. Its current
+            # feature adapter uses placeholder flow statistics, so these scores
+            # are deliberately not promoted into real v3 security incidents.
             flow_data = {
-                'protocol_type': proto, 'src_port': sport, 'dst_port': dport,
-                'min_packet_length': 100, 'flow_duration': 0.01,
-                'flow_bytes_per_sec': 10000, 'flow_packets_per_sec': 100,
-                'syn_count': 1, 'ack_count': 1,
+                'protocol_type': 1 if protocol == 'TCP' else 2,
+                'src_port': sport,
+                'dst_port': dport,
+                'min_packet_length': packet_bytes,
+                'flow_duration': 0.0,
+                'flow_bytes_per_sec': 0.0,
+                'flow_packets_per_sec': 0.0,
+                'syn_count': int(protocol == 'TCP' and 'S' in line),
+                'ack_count': int(protocol == 'TCP' and 'A' in line),
             }
-            feat = extractor.extract_from_flow(flow_data)
-            result = engine.predict(feat)
+            result = engine.predict(extractor.extract_from_flow(flow_data))
 
-            # Push ALL traffic to backend as flow logs
-            if server_url and packet_count[0] % 5 == 0:  # Only push every 5th packet to avoid flooding
+            if server_url and packet_count[0] % 5 == 0:
+                batch_sequence += 1
+                payload = {
+                    'schema_version': 2,
+                    'source_id': 'probe:edge-detect',
+                    'source_session_id': source_session_id,
+                    'batch_id': str(uuid4()),
+                    'batch_sequence': batch_sequence,
+                    'alerts': [],
+                    'flows': [{
+                        'sample_id': str(uuid4()),
+                        'occurred_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+                        'src_ip': src_ip,
+                        'dst_ip': dst_ip,
+                        'src_port': sport,
+                        'dst_port': dport,
+                        'network_protocol': protocol,
+                        'bytes': packet_bytes,
+                        'packets': 1,
+                        'flow_count': 0,
+                    }],
+                }
                 try:
-                    r = requests.post(f'{server_url}/api/probe/push', json={
-                        'probe_name': 'Pi-Probe',
-                        'alerts': ([{
-                            'risk_level': result['risk_level'],
-                            'attack_type': result['class_name'],
-                            'src_ip': src_ip, 'dst_ip': dst_ip,
-                            'src_port': sport, 'dst_port': dport,
-                            'protocol': 'TCP' if proto == 1 else 'UDP',
-                            'confidence': result['confidence'],
-                            'description': '[Pi] ' + result['class_name'] + ' real-time',
-                        }] if result['is_attack'] else []),
-                        'flows': [{
-                            'src_ip': src_ip, 'dst_ip': dst_ip,
-                            'src_port': sport, 'dst_port': dport,
-                            'protocol': 'TCP' if proto == 1 else 'UDP',
-                            'length': 100, 'flags': '',
-                            'source': '真实',
-                        }]
-                    }, timeout=3)
-                except Exception as e:
-                    print('Push err:', e)
+                    response = requests.post(
+                        f'{server_url}/api/probe/push',
+                        headers={'X-Probe-Token': probe_token},
+                        json=payload,
+                        timeout=3,
+                    )
+                    response.raise_for_status()
+                except requests.RequestException as exc:
+                    print('Push failed:', type(exc).__name__)
 
             if result['is_attack']:
                 alert_count[0] += 1
-                print('  [%4d] %s %-8s | %s:%s -> %s:%s | %.0f%%' % (
-                    packet_count[0], result['risk_level'], result['class_name'],
-                    src_ip, sport, dst_ip, dport, result['confidence']*100))
+                print('  [%4d] local-model %-8s | %s:%s -> %s:%s | %.0f%% (not sent as incident)' % (
+                    packet_count[0], result['class_name'],
+                    src_ip, sport, dst_ip, dport, result['confidence'] * 100))
     except KeyboardInterrupt:
         pass
     finally:
         proc.terminate()
-        print(f'\nStopped. {packet_count[0]} packets, {alert_count[0]} alerts.')
+        print(f'\nStopped. {packet_count[0]} packets, {alert_count[0]} local model flags.')
 
 
 def main():
     parser = argparse.ArgumentParser(description='IoT IDS Edge Detection')
-    parser.add_argument('--pcap', help='Path to PCAP file for analysis')
-    parser.add_argument('--live', action='store_true', help='Live capture mode')
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--live', action='store_true', help='Live capture mode')
+    mode.add_argument('--demo', action='store_true', help='Run the explicit mock-data demonstration')
     parser.add_argument('--server', help='Management server URL (e.g. http://192.168.0.100:5000)')
+    parser.add_argument('--probe-token', default=os.getenv('IOT_IDS_PROBE_TOKEN', ''), help='Probe credential')
     args = parser.parse_args()
 
     engine = InferenceEngine(MODEL_PATH)
     extractor = FeatureExtractor(SCALER_PATH)
 
-    if args.pcap:
-        detect_pcap(engine, extractor, args.pcap)
-    elif args.live:
-        detect_live(engine, extractor, args.server)
+    if args.live:
+        if args.server and not args.probe_token:
+            raise SystemExit('Missing probe credential: set IOT_IDS_PROBE_TOKEN or pass --probe-token')
+        detect_live(engine, extractor, args.server, args.probe_token)
     else:
         detect_demo(engine, extractor)
 

@@ -1,3 +1,5 @@
+> 历史参考：本文记录旧版规划或部署方案，不代表当前产品需求或可用 API。当前范围见 [README](../README.md)、[API 目录](05-api-spec.md) 与 [v3 清理清单](rebuild/legacy-cleanup-inventory.md)。
+
 # 树莓派选购 + 部署完整指南（小白专用）
 
 > 从零开始，不需要任何硬件经验，每一步都有截图级描述。

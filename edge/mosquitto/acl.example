@@ -1,0 +1,9 @@
+# Device username must equal its stable device_id.
+pattern write community/%u/status
+pattern read community/%u/control
+
+# The backend consumes all status messages and may publish explicit lab
+# control commands.  It does not use a device credential.
+user iot-ids-backend
+topic read community/+/status
+topic write community/+/control

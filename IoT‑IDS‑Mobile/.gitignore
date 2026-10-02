@@ -32,3 +32,9 @@ yarn-error.*
 
 # Expo export test output
 .expo-export-test/
+
+/android/
+/.android-sdk/
+/.android-cli-win.zip
+/.android-cli-tail.zip
+/.android-cli-extract/

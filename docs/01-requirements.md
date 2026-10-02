@@ -1,3 +1,5 @@
+> 历史参考：本文记录旧版规划或部署方案，不代表当前产品需求或可用 API。当前范围见 [README](../README.md)、[API 目录](05-api-spec.md) 与 [v3 清理清单](rebuild/legacy-cleanup-inventory.md)。
+
 # 项目需求规格
 
 > 基于轻量化深度学习的智慧社区 IoT 僵尸网络入侵检测系统

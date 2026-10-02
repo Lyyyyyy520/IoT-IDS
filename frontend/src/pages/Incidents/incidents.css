@@ -1,0 +1,155 @@
+.incident-workspace{min-height:100%;padding:24px;color:var(--text-primary);background:radial-gradient(circle at 50% 0,rgba(23,98,125,.12),transparent 38%),var(--bg-base)}
+.incident-page-header,.incident-panel-heading,.incident-detail-header,.workspace-notice,.incident-header-actions,.pagination,.realtime-strip{display:flex;align-items:center;justify-content:space-between;gap:16px}.incident-page-header{margin-bottom:16px}.incident-page-header p,.incident-panel-heading p{margin:0;color:var(--accent-cyan);font-size: 16px;letter-spacing:.14em}.incident-page-header h1{margin:3px 0;font-size:28px}.incident-page-header span{color:var(--text-secondary)}.incident-header-actions{justify-content:flex-end}.incident-header-actions small{color:var(--text-muted)}
+.workspace-tabs{display:flex;gap:6px;border-bottom:1px solid var(--border-color);margin-bottom:16px}.workspace-tabs button{border:0;border-bottom:2px solid transparent;background:transparent;color:var(--text-secondary);padding:11px 16px;cursor:pointer}.workspace-tabs button.active{color:var(--accent-cyan);border-color:var(--accent-cyan)}
+.primary-button,.ghost-button,.danger-button,.danger-outline,.pagination button,.text-link{border-radius:6px;padding:8px 12px;cursor:pointer;font:inherit}.primary-button{border:1px solid #22c7dc;background:#11798b;color:#fff}.ghost-button,.pagination button{border:1px solid var(--border-color);background:#101f2c;color:var(--text-primary)}.danger-button{border:1px solid #ff6b61;background:#9d302d;color:#fff}.danger-outline{border:1px solid #ff766c;background:transparent;color:#ff9b94}.text-link{padding:0;border:0;background:transparent;color:var(--accent-cyan);text-decoration:underline}.primary-button:disabled,.ghost-button:disabled,.pagination button:disabled{opacity:.45;cursor:not-allowed}
+.workspace-notice,.workspace-stale,.workspace-inline-error{border:1px solid #806f2b;background:#28250f;color:#f1df84;padding:10px 12px;border-radius:7px;margin-bottom:12px}.workspace-inline-error{border-color:#853c42;background:#2a1519;color:#ffb0ad}.workspace-notice button{border:0;background:transparent;color:inherit;font-size:18px}.realtime-strip{justify-content:flex-start;margin-bottom:10px;color:var(--text-secondary);font-size: 16px}.realtime-dot{width:8px;height:8px;border-radius:50%;background:#65717b}.realtime-dot.connected{background:#34c986}.realtime-dot.connecting{background:#d8b449}.realtime-dot.disconnected{background:#ee756d}
+.incident-main-grid,.support-grid{display:grid;grid-template-columns:minmax(390px,38fr) minmax(0,62fr);gap:14px;align-items:start}.incident-panel{border:1px solid rgba(66,154,181,.35);background:rgba(8,19,29,.94);border-radius:10px;box-shadow:0 10px 32px rgba(0,0,0,.16);min-width:0}.incident-list-panel,.support-list-panel{padding:14px;position:sticky;top:12px;max-height:calc(100vh - 160px);display:flex;flex-direction:column}.incident-detail-panel,.help-detail-panel,.contact-panel{padding:18px}.incident-panel-heading{margin-bottom:12px}.incident-panel-heading h2{margin:2px 0;font-size:18px}.incident-panel-heading>span{color:var(--text-secondary);font-size: 16px}
+.incident-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px}.incident-filters label,.workspace-form label{display:flex;flex-direction:column;gap:5px;color:var(--text-secondary);font-size: 16px}.incident-filters input,.incident-filters select,.workspace-form input,.workspace-form select,.workspace-form textarea{width:100%;box-sizing:border-box;border:1px solid var(--border-color);border-radius:6px;background:#091723;color:var(--text-primary);padding:8px}.incident-filters .filter-wide{grid-column:1/-1}.incident-filters .clear-filter{align-self:end}.list-meta{display:flex;justify-content:space-between;color:var(--text-muted);font-size: 16px;margin:4px 0 8px}.incident-list,.help-list{overflow:auto;min-height:180px}.incident-list-row,.help-row{width:100%;border:1px solid transparent;border-top-color:rgba(90,130,150,.18);background:transparent;color:inherit;padding:11px 7px;display:grid;grid-template-columns:auto 1fr auto;gap:10px;text-align:left;cursor:pointer}.incident-list-row:hover,.incident-list-row.selected,.help-row:hover,.help-row.selected{border-color:rgba(35,199,220,.55);background:rgba(26,114,135,.14)}.severity-marker{align-self:start;border:1px solid currentColor;border-radius:4px;padding:2px 5px;font-size: 16px}.severity-info,.severity-low{color:#76b9d4}.severity-medium{color:#e0bc55}.severity-high{color:#ef9468}.severity-critical{color:#ff6d68}.incident-list-copy,.incident-list-side,.help-row>div{display:flex;flex-direction:column;gap:4px;min-width:0}.incident-list-copy small,.incident-list-side small,.incident-list-side time,.help-row span,.help-row small,.help-row time{color:var(--text-muted);font-size: 16px}.incident-list-copy span,.help-row p{color:var(--text-secondary);font-size: 16px;margin:0;overflow:hidden;text-overflow:ellipsis}.incident-list-side{text-align:right;align-items:flex-end}.status-pill,.detail-badges b,.incident-detail-header>b{border:1px solid currentColor;border-radius:999px;padding:3px 7px;font-size: 16px}.status-open{color:#ef9c68}.status-acknowledged,.status-in_progress{color:#59c6de}.status-recovering,.status-waiting_for_user{color:#e0bc55}.status-resolved,.status-closed{color:#57c98d}.status-false_positive{color:#a9b2ba}.pagination{margin-top:10px;justify-content:center;color:var(--text-muted);font-size: 16px}
+.workspace-empty{min-height:140px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;text-align:center;color:var(--text-muted)}.workspace-empty strong{color:var(--text-primary)}.incident-detail-header{align-items:flex-start;border-bottom:1px solid var(--border-color);padding-bottom:14px}.incident-detail-header p{margin:0;color:var(--accent-cyan);font-size: 16px}.incident-detail-header h2{margin:5px 0}.incident-detail-header span{color:var(--text-secondary)}.detail-badges{display:flex;gap:7px}.incident-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px;margin:16px 0}.incident-facts div{border-bottom:1px solid rgba(90,130,150,.17);padding:7px 0}.incident-facts dt{color:var(--text-muted);font-size: 16px}.incident-facts dd{margin:4px 0 0}.incident-actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.incident-actions>span,.terminal-note{color:var(--text-muted);padding:8px}.detail-sections{display:grid;gap:13px}.detail-sections>section,.plain-message,.response-boundaries>section{border:1px solid rgba(90,130,150,.25);border-radius:7px;padding:13px;background:rgba(14,32,45,.55)}.detail-sections h3,.plain-message h3,.timeline-section h3{margin:0 0 10px;font-size: 16px}.role-group h4{font-size: 16px;color:var(--text-secondary);margin:10px 0 5px}.role-group article{display:flex;justify-content:space-between;gap:12px;padding:8px;border-top:1px solid rgba(90,130,150,.16)}.role-group article>div{display:flex;flex-direction:column;gap:3px}.role-group span{font-size: 16px;color:var(--text-muted)}.role-group button{border:0;background:transparent;color:var(--accent-cyan);cursor:pointer}.boundary-label{display:inline-block;font-size: 16px;border-radius:4px;padding:2px 6px;margin-bottom:7px}.boundary-label.public{color:#75dfad;border:1px solid #327c59}.boundary-label.admin{color:#efbf73;border:1px solid #80642e}.timeline-entry{position:relative;display:grid;grid-template-columns:14px 1fr;gap:9px;padding:8px 0}.timeline-dot{width:8px;height:8px;border-radius:50%;background:var(--accent-cyan);margin-top:6px}.timeline-entry header{display:flex;justify-content:space-between}.timeline-entry time,.timeline-entry p{color:var(--text-muted);font-size: 16px}.timeline-public,.timeline-admin{padding:7px;border-radius:5px;margin-top:5px;font-size: 16px}.timeline-public{background:rgba(35,150,104,.13)}.timeline-admin{background:rgba(180,126,39,.13)}
+.workspace-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}.workspace-modal{width:min(760px,100%);max-height:90vh;overflow:auto;background:#0b1924;border:1px solid rgba(55,190,211,.55);border-radius:10px;padding:18px}.workspace-modal>header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border-color);margin-bottom:14px}.workspace-modal>header button{border:0;background:transparent;color:var(--text-primary);font-size:24px}.workspace-form{display:flex;flex-direction:column;gap:12px}.workspace-form textarea{min-height:74px;resize:vertical}.workspace-form footer{display:flex;justify-content:flex-end;gap:8px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.checkbox-line{flex-direction:row!important;align-items:center}.checkbox-line input{width:auto}.checkbox-line small{display:block;color:var(--text-muted)}.form-boundary-note{border-left:3px solid var(--accent-cyan);padding-left:10px;color:var(--text-secondary)}.device-role-fieldset{border:1px solid var(--border-color);border-radius:7px;max-height:250px;overflow:auto}.device-role-row{display:grid;grid-template-columns:minmax(180px,1fr) 170px 110px;gap:8px;align-items:center;padding:8px;border-top:1px solid rgba(90,130,150,.15)}.danger-confirm{color:#ffaca5!important}
+.support-grid{grid-template-columns:minmax(380px,42fr) minmax(0,58fr)}.help-filters{grid-template-columns:repeat(3,minmax(0,1fr))}.help-row{grid-template-columns:1fr auto}.help-row>div:last-child{text-align:right;align-items:flex-end}.help-row p{max-width:420px;white-space:nowrap}.response-boundaries{display:grid;grid-template-columns:1fr 1fr;gap:10px}.compact-form{margin-top:14px}.contact-panel{max-width:900px}.contact-form{max-width:720px}.contact-readonly{max-width:720px}
+@media(max-width:1100px){.incident-main-grid,.support-grid{grid-template-columns:1fr}.incident-list-panel,.support-list-panel{position:static;max-height:none}.incident-list{max-height:440px}.incident-page-header{align-items:flex-start}.help-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:720px){.incident-workspace{padding:12px}.incident-page-header,.incident-header-actions{align-items:flex-start;flex-direction:column}.incident-filters,.form-grid,.incident-facts,.response-boundaries{grid-template-columns:1fr}.device-role-row{grid-template-columns:1fr}.workspace-modal-backdrop{padding:8px}}
+@media(prefers-reduced-motion:reduce){.incident-workspace *{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+.privacy-warning{margin:0;color:var(--text-muted);font-size: 16px}.privacy-warning.is-invalid{color:#ffb0ad}
+.incident-replay{min-width:0}
+.incident-heading-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
+.incident-report-export{display:flex;flex-wrap:wrap;align-items:center;gap:5px 8px;min-width:0}
+.incident-report-export>span{max-width:180px;color:var(--text-muted);font-size: 16px}
+.incident-report-export>p{flex-basis:100%;margin:0;color:#ffb0ad;font-size: 16px;line-height:1.4}
+.replay-heading h3{margin:0 0 4px}
+.replay-heading p,.replay-hint{margin:0;color:var(--text-secondary);font-size: 16px;line-height:1.5}
+.replay-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr)) auto;align-items:end;gap:9px;margin:12px 0 7px}
+.replay-controls label{display:flex;flex-direction:column;gap:5px;color:var(--text-secondary);font-size: 16px}
+.replay-controls input{min-width:0;min-height:38px;border:1px solid var(--border-color);border-radius:6px;background:#091723;color:var(--text-primary);padding:7px 8px;font:inherit}
+.replay-hint{margin-bottom:9px}
+.replay-capabilities,.replay-current-state{display:flex;flex-wrap:wrap;gap:7px 14px;margin:10px 0;padding:10px;border:1px solid rgba(90,130,150,.25);border-radius:6px;background:rgba(14,32,45,.55);color:var(--text-secondary);font-size: 16px}
+.replay-current-state{flex-direction:column;gap:4px}
+.replay-current-state strong{color:var(--text-primary)}
+.replay-gap-note{margin:9px 0;padding:9px 11px;border-left:3px solid var(--risk-medium);background:var(--risk-medium-bg);color:var(--text-primary);font-size: 16px;line-height:1.5}
+.replay-timeline{display:grid;gap:0;max-height:520px;overflow:auto;margin:12px 0;padding:0 4px;list-style:none}
+.replay-event{position:relative;display:grid;grid-template-columns:17px minmax(0,1fr);gap:10px;padding:9px 0}
+.replay-event:not(:last-child)::before{content:"";position:absolute;left:6px;top:20px;bottom:-4px;width:2px;background:var(--border-color)}
+.replay-marker{z-index:1;width:13px;height:13px;margin-top:4px;border:2px solid var(--accent-cyan);border-radius:50%;background:var(--bg-base)}
+.replay-network .replay-marker{border-color:var(--accent-blue)}
+.replay-gap .replay-marker{border-color:var(--risk-medium);border-style:dashed}
+.replay-event header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px}
+.replay-event time,.replay-event p{margin:3px 0 0;color:var(--text-secondary);font-size: 16px;line-height:1.45;overflow-wrap:anywhere}
+.replay-event time{color:var(--text-muted)}
+.replay-gap p{color:var(--risk-medium)}
+@media(max-width:720px){.incident-heading-actions{align-items:flex-start;flex-direction:column}.incident-report-export>span{max-width:none}.replay-controls{grid-template-columns:minmax(0,1fr)}.incident-list-row{grid-template-columns:1fr}.incident-list-side{align-items:flex-start;text-align:left}.incident-detail-header{flex-direction:column}.detail-badges{flex-wrap:wrap}.incident-list-panel,.support-list-panel{max-height:none}.incident-filters{grid-template-columns:minmax(0,1fr)}}
+
+/* The workspace rules below are scoped to the real incident and replay
+   components; helper text remains 14px while investigation content is larger. */
+.incident-workspace { font-size: var(--font-body); }
+.incident-page-header h1 { font-size: var(--font-page-title); line-height: 1.2; }
+.incident-panel-heading h2, .incident-detail-header h2 { font-size: var(--font-section-title); line-height: 1.3; }
+.detail-sections h3, .plain-message h3, .timeline-section h3,
+.replay-heading h3 { font-size: 18px; line-height: 1.35; }
+.incident-page-header p, .incident-panel-heading p, .incident-detail-header p,
+.incident-panel-heading > span, .incident-filters label, .workspace-form label,
+.list-meta, .severity-marker, .incident-list-copy small,
+.incident-list-side small, .incident-list-side time, .help-row span,
+.help-row small, .help-row time, .status-pill, .detail-badges b,
+.incident-detail-header > b, .pagination, .incident-facts dt,
+.role-group h4, .role-group span, .boundary-label, .timeline-entry time,
+.privacy-warning, .incident-report-export > span,
+.incident-report-export > p, .replay-heading p, .replay-hint,
+.replay-controls label, .replay-capabilities, .replay-current-state,
+.replay-gap-note, .replay-event time { font-size: var(--font-secondary); }
+.workspace-tabs button, .primary-button, .ghost-button, .danger-button,
+.danger-outline, .pagination button, .incident-filters input,
+.incident-filters select, .workspace-form input, .workspace-form select,
+.workspace-form textarea, .role-group button, .replay-controls input { font-size: var(--font-control); line-height: 1.4; }
+.workspace-tabs button, .primary-button, .ghost-button, .danger-button,
+.danger-outline, .pagination button, .incident-filters input,
+.incident-filters select, .workspace-form input, .workspace-form select,
+.replay-controls input { min-height: 42px; }
+.incident-list-copy > strong, .help-row > div > strong,
+.incident-detail-header h2, .incident-facts dd, .role-group article,
+.timeline-entry p, .replay-current-state strong { font-size: 16px; line-height: 1.5; }
+.incident-list-copy span, .help-row p {
+  display: block;
+  max-width: 100%;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+  line-height: 1.45;
+}
+.incident-list-copy small, .incident-list-side small, .incident-list-side time,
+.help-row small, .help-row time { max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
+.incident-list-row, .help-row { align-items: start; min-height: 74px; }
+.incident-panel-heading { align-items: flex-start; flex-wrap: wrap; }
+.incident-heading-actions { flex: 1 1 100%; justify-content: flex-start; flex-wrap: wrap; }
+.incident-report-export { flex: 1 1 auto; }
+.incident-report-export > span { flex: 1 1 auto; max-width: none; }
+.incident-panel-heading .ghost-button { flex: 0 0 auto; min-width: 72px; white-space: nowrap; }
+.incident-detail-panel, .help-detail-panel { line-height: 1.5; }
+.incident-facts dd, .timeline-entry p, .replay-event p { overflow-wrap: anywhere; }
+.replay-controls input { padding: 8px 10px; }
+.replay-event time, .replay-event p { font-size: 16px; line-height: 1.5; }
+
+@media (max-width: 720px) {
+  .incident-workspace { padding: 14px; }
+  .incident-page-header h1 { font-size: 28px; }
+  .incident-heading-actions { width: 100%; }
+  .incident-report-export { width: 100%; }
+  .incident-report-export > button { flex: 1 1 100%; }
+  .incident-list-copy span, .help-row p { max-width: none; }
+}
+
+/* Investigation text stays readable in list, detail, and replay states. */
+.incident-workspace { font-size: 18px; line-height: 1.55; }
+.incident-page-header h1 { font-size: 36px; line-height: 1.2; }
+.incident-panel-heading h2, .incident-detail-header h2 { font-size: 24px; line-height: 1.3; }
+.detail-sections h3, .plain-message h3, .timeline-section h3,
+.replay-heading h3 { font-size: 22px; line-height: 1.35; }
+.incident-page-header p, .incident-panel-heading p, .incident-detail-header p,
+.incident-panel-heading > span, .incident-filters label, .workspace-form label,
+.list-meta, .severity-marker, .incident-list-copy small,
+.incident-list-side small, .incident-list-side time, .help-row span,
+.help-row small, .help-row time, .status-pill, .detail-badges b,
+.incident-detail-header > b, .pagination, .incident-facts dt,
+.role-group h4, .role-group span, .boundary-label, .timeline-entry time,
+.privacy-warning, .incident-report-export > span,
+.incident-report-export > p, .replay-heading p, .replay-hint,
+.replay-controls label, .replay-capabilities, .replay-current-state,
+.replay-gap-note, .replay-event time { font-size: 16px; line-height: 1.5; }
+.workspace-tabs button, .primary-button, .ghost-button, .danger-button,
+.danger-outline, .pagination button, .incident-filters input,
+.incident-filters select, .workspace-form input, .workspace-form select,
+.workspace-form textarea, .role-group button, .replay-controls input { font-size: 18px; line-height: 1.45; }
+.workspace-tabs button, .primary-button, .ghost-button, .danger-button,
+.danger-outline, .pagination button, .incident-filters input,
+.incident-filters select, .workspace-form input, .workspace-form select,
+.replay-controls input { min-height: 48px; }
+.incident-list-row { min-height: 96px; padding: 14px 10px; gap: 12px; }
+.incident-list-copy > strong, .help-row > div > strong { font-size: 20px; line-height: 1.4; }
+.incident-list-copy span, .help-row p, .incident-facts dd,
+.role-group article, .timeline-entry p, .replay-current-state strong,
+.replay-event p { font-size: 18px; line-height: 1.5; }
+.incident-facts div { padding-block: 10px; }
+.detail-sections > section, .plain-message, .response-boundaries > section { padding: 16px; }
+.timeline-entry { padding-block: 11px; }
+.replay-controls { gap: 12px; }
+.replay-event { padding-block: 12px; }
+.replay-event time, .replay-event p { font-size: 16px; line-height: 1.55; }
+.incident-detail-panel, .help-detail-panel { line-height: 1.55; }
+
+@media (max-width: 720px) {
+  .incident-workspace { padding: 16px; }
+  .incident-page-header h1 { font-size: 30px; }
+  .incident-list-row { grid-template-columns: auto minmax(0, 1fr); }
+  .incident-list-side { grid-column: 2; align-items: flex-start; text-align: left; }
+  .incident-panel-heading { gap: 10px; }
+  .incident-report-export > button { min-height: 48px; }
+  .incident-facts { gap: 4px; }
+}
+
+.replay-event p { font-size: 18px; line-height: 1.5; }
+@media (max-width: 720px) {
+  .replay-event time { font-size: 16px; line-height: 1.55; }
+  .replay-event p { font-size: 18px; line-height: 1.5; }
+}
+

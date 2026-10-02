@@ -1,3 +1,5 @@
+> 历史参考：本文记录旧版规划或部署方案，不代表当前产品需求或可用 API。当前范围见 [README](../README.md)、[API 目录](05-api-spec.md) 与 [v3 清理清单](rebuild/legacy-cleanup-inventory.md)。
+
 # 06 - 现场演示方案设计（数字孪生智慧社区 + 社区安全机器人）
 
 > 状态：设计稿（讨论定稿）
