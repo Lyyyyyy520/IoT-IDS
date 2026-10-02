@@ -25,6 +25,8 @@
 | `GET` | `/api/v3/devices` | admin/operator | 设备列表与筛选 |
 | `POST` | `/api/v3/devices` | admin | 手动登记 |
 | `GET` | `/api/v3/devices/{device_id}` | admin/operator | 设备详情 |
+| `GET` | `/api/v3/devices/{device_id}/telemetry?from=&to=` | admin/operator | 已留存传感器温湿度观测；目前只公开固件已上报的 `temp` 与 `humidity` |
+| `GET` | `/api/v3/devices/{device_id}/state-history?from=&to=` | admin/operator | 设备最近上报的安全标量字段和所选时间范围内的历史观测 |
 | `PATCH/DELETE` | `/api/v3/devices/{device_id}` | admin | 编辑或受控删除 |
 | `POST` | `/api/v3/devices/{device_id}/retire` | admin | 退役并保留历史 |
 | `POST` | `/api/v3/devices/{device_id}/restore` | admin | 恢复设备 |

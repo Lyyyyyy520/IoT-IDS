@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMonitorStore } from '../../features/monitor/monitorStore';
+import CommunityDeviceDetailDialog from '../../features/devices/CommunityDeviceDetailDialog';
 import {
   CapabilityPanel,
   DeviceDetailsPanel,
@@ -36,6 +37,8 @@ export default function MonitorPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailDeviceId, setDetailDeviceId] = useState<string | null>(null);
+  const closeDeviceDetail = useCallback(() => setDetailDeviceId(null), []);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<DeviceFilter>('all');
   const devices = monitor.snapshot?.devices ?? [];
@@ -141,7 +144,7 @@ export default function MonitorPage() {
           <DeviceListPanel
             devices={visibleDevices}
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={(deviceId) => { setSelectedId(deviceId); setDetailDeviceId(deviceId); }}
             search={search}
             onSearch={setSearch}
             filter={filter}
@@ -163,6 +166,11 @@ export default function MonitorPage() {
           </div>
         </div>
       ) : null}
+      <CommunityDeviceDetailDialog
+        deviceId={detailDeviceId}
+        summary={devices.find((device) => device.device_id === detailDeviceId) ?? null}
+        onClose={closeDeviceDetail}
+      />
     </main>
   );
 }

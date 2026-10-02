@@ -1,0 +1,150 @@
+.community-device-overlay {
+  position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center;
+  padding: 22px; overflow: auto; background: rgba(2, 8, 13, .82); backdrop-filter: blur(4px);
+}
+.community-device-dialog {
+  width: min(1040px, 100%); max-height: min(94vh, 1120px); overflow-y: auto;
+  border: 1px solid #315369; border-radius: 10px; background: #0c1721;
+  color: #dceaf2; box-shadow: 0 24px 70px rgba(0, 0, 0, .5);
+}
+.community-device-dialog-heading {
+  position: sticky; z-index: 2; top: 0; display: flex; justify-content: space-between;
+  align-items: flex-start; gap: 16px; padding: 19px 22px; border-bottom: 1px solid #233f51;
+  background: rgba(10, 20, 30, .97); backdrop-filter: blur(8px);
+}
+.community-device-dialog-heading h2 { margin: 5px 0 2px; color: #e0edf3; font-size: 28px; line-height: 1.25; overflow-wrap: anywhere; }
+.community-device-id { color: #8ea7b5; font: 16px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+.community-device-close {
+  flex: none; width: 44px; height: 44px; border: 1px solid #3a5667; border-radius: 7px;
+  background: #10212d; color: #dceaf2; font: 32px/1 Arial, sans-serif; cursor: pointer;
+}
+.community-device-close:hover { border-color: #56bac4; background: #14313c; }
+.community-device-close:focus-visible,
+.community-device-dialog button:focus-visible,
+.community-device-dialog a:focus-visible { outline: 3px solid #71d6df; outline-offset: 2px; }
+.community-device-status-strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 22px 0; }
+.community-device-status-strip > span { display: inline-flex; align-items: center; min-height: 34px; padding: 4px 10px; border: 1px solid #345164; border-radius: 16px; background: #101f2a; font-size: 16px; }
+.community-device-status-strip .mode-active { color: #78cfa1; border-color: #2d654b; }
+.community-device-status-strip .mode-maintenance { color: #e2c274; border-color: #6e5d31; }
+.community-device-status-strip .mode-disabled,
+.community-device-status-strip .retired-pill { color: #f0a09a; border-color: #773d3b; }
+.community-device-profile-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px;
+  margin: 0; padding: 5px 22px 12px;
+}
+.community-device-profile-grid > div { min-width: 0; display: grid; grid-template-columns: minmax(130px, .8fr) minmax(0, 1.2fr); gap: 12px; padding: 10px 2px; border-bottom: 1px solid #1b3342; }
+.community-device-profile-grid dt { color: #8ca5b3; font-size: 16px; }
+.community-device-profile-grid dd { margin: 0; color: #d1e1e8; font-size: 18px; text-align: right; overflow-wrap: anywhere; }
+.community-device-profile-wide { grid-column: 1 / -1; }
+.community-device-message { margin: 16px 22px; padding: 13px 15px; border: 1px solid #315369; border-radius: 6px; color: #b9d1dc; background: #101f2a; font-size: 17px; line-height: 1.55; }
+.community-device-message.error { border-color: #7b403e; color: #f1b2ac; background: #29191a; }
+.community-device-state-note { margin: 14px 22px 0; padding: 10px 12px; border-left: 3px solid #bd9842; color: #e3ce92; background: #211d13; font-size: 16px; line-height: 1.5; }
+.community-device-state-note.error { border-color: #d56b65; color: #f0b0aa; background: #29191a; }
+
+.community-device-dialog .sensor-history-panel,
+.community-device-dialog .camera-preview-panel,
+.observed-state-panel {
+  margin: 14px 22px 20px; padding: 16px; border: 1px solid #294657;
+  border-radius: 8px; background: #0a141d;
+}
+.community-device-dialog .sensor-history-heading,
+.observed-state-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
+.community-device-dialog .sensor-history-heading h3,
+.observed-state-heading h3 { margin: 0; color: #dceaf2; font-size: 20px; }
+.community-device-dialog .sensor-history-heading > div:first-child span,
+.observed-state-heading > div:first-child span { display: block; margin-top: 4px; color: #8da5b2; font-size: 16px; }
+.community-device-dialog .sensor-history-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.community-device-dialog .sensor-history-controls label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: #a7bdc8; font-size: 16px; }
+.community-device-dialog .sensor-history-controls select,
+.community-device-dialog .sensor-history-controls button,
+.observed-state-heading button {
+  min-height: 42px; border: 1px solid #36576a; border-radius: 6px; padding: 7px 10px;
+  color: #d7e8ee; background: #10202c; font: inherit; font-size: 16px;
+}
+.community-device-dialog .sensor-history-controls button,
+.observed-state-heading button { cursor: pointer; }
+.community-device-dialog .sensor-history-controls button:disabled,
+.observed-state-heading button:disabled { cursor: wait; opacity: .55; }
+.community-device-dialog .sensor-current-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; margin: 14px 0; }
+.community-device-dialog .sensor-current-values > div { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 13px; border: 1px solid #284556; border-radius: 6px; background: #101e29; }
+.community-device-dialog .sensor-current-values span { color: #9cb1bc; font-size: 16px; }
+.community-device-dialog .sensor-current-values strong { color: #e2eef3; font-size: 28px; overflow-wrap: anywhere; }
+.community-device-dialog .sensor-current-values small { color: #9cb1bc; font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
+.community-device-dialog .sensor-current-values .sensor-reading-time strong { font-size: 16px; }
+.community-device-dialog .sensor-trend-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.community-device-dialog .sensor-trend { min-width: 0; margin: 0; padding: 12px; border: 1px solid #294657; border-radius: 6px; background: #101e29; }
+.community-device-dialog .sensor-trend figcaption { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 7px; color: #9fb4bf; font-size: 16px; }
+.community-device-dialog .sensor-trend figcaption strong { color: #dceaf2; font-size: 18px; }
+.community-device-dialog .sensor-trend svg { display: block; width: 100%; height: auto; margin-top: 8px; overflow: visible; }
+.community-device-dialog .sensor-trend svg text { fill: #92aab7; font-size: 16px; }
+.community-device-dialog .sensor-chart-grid { stroke: #294453; stroke-width: 1; }
+.community-device-dialog .sensor-chart-line { fill: none; stroke: #4ac5cf; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.community-device-dialog .sensor-trend-humidity .sensor-chart-line { stroke: #6f9dff; }
+.community-device-dialog .sensor-chart-point { fill: #0c1721; stroke: #64e0e3; stroke-width: 2.5; vector-effect: non-scaling-stroke; cursor: help; }
+.community-device-dialog .sensor-chart-point:focus { outline: none; stroke: #fff; stroke-width: 4; }
+.community-device-dialog .sensor-trend-humidity .sensor-chart-point { stroke: #9bbaff; }
+.community-device-dialog .sensor-chart-axis { display: flex; justify-content: space-between; gap: 10px; color: #92aab7; font-size: 16px; line-height: 1.45; }
+.community-device-dialog .sensor-state-note,
+.community-device-dialog .camera-frame-time { margin: 9px 0; padding: 9px 11px; color: #d4c28e; background: #211d13; font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+.community-device-dialog .sensor-state-note.error { color: #f0b0aa; background: #29191a; }
+.community-device-dialog .sensor-error,
+.community-device-dialog .sensor-empty-inline,
+.community-device-dialog .camera-empty { padding: 13px; border: 1px solid #294657; border-radius: 6px; color: #a8bfca; background: #101e29; font-size: 16px; line-height: 1.55; }
+.community-device-dialog .sensor-error { border-color: #7b403e; color: #f1b2ac; }
+.community-device-dialog .camera-connection { display: inline-block; padding: 5px 9px; border: 1px solid currentColor; border-radius: 14px; font-size: 16px; }
+.community-device-dialog .camera-connected { color: #55c58d; }
+.community-device-dialog .camera-connecting { color: #75b9e8; }
+.community-device-dialog .camera-offline,
+.community-device-dialog .camera-failed { color: #ee8179; }
+.community-device-dialog .camera-unavailable { color: #9bb0bc; }
+.community-device-dialog .camera-empty { display: flex; flex-direction: column; gap: 8px; }
+.community-device-dialog .camera-empty strong { color: #dceaf2; font-size: 17px; }
+.community-device-dialog .camera-image-frame { position: relative; display: grid; place-items: center; min-height: 230px; overflow: hidden; border: 1px solid #294657; border-radius: 6px; background: #000; }
+.community-device-dialog .camera-image-frame img { display: block; width: 100%; max-height: 520px; object-fit: contain; }
+.community-device-dialog .camera-image-loading { position: absolute; inset: auto 0 0; padding: 9px; color: #e7f0f4; background: rgba(0, 0, 0, .75); text-align: center; font-size: 16px; }
+.community-device-dialog .camera-frame-time { margin: 9px 0 0; padding: 0; color: #9eb2be; background: transparent; }
+
+.observed-state-heading button { flex: none; }
+.observed-state-empty { margin: 0; padding: 12px; border: 1px solid #294657; border-radius: 6px; color: #a7bdc8; background: #101e29; font-size: 16px; line-height: 1.55; }
+.observed-state-error { border-color: #7b403e; color: #f1b2ac; background: #29191a; }
+.observed-telemetry-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.observed-telemetry-grid > div { min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 11px; border: 1px solid #294657; border-radius: 6px; background: #101e29; }
+.observed-telemetry-grid span { color: #9cb1bc; font-size: 16px; overflow-wrap: anywhere; }
+.observed-telemetry-grid strong { color: #dceaf2; font-size: 20px; overflow-wrap: anywhere; }
+.observed-state-time,.observed-state-note { margin: 9px 0 0; color: #93aab6; font-size: 16px; line-height: 1.5; }
+.observed-state-note { padding: 9px 11px; border-left: 3px solid #987d3c; color: #d7c58e; background: #211d13; }
+.observed-change-section { margin-top: 15px; }
+.observed-change-section h4 { margin: 0 0 9px; color: #dceaf2; font-size: 18px; }
+.observed-change-list { display: grid; gap: 8px; max-height: 340px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.observed-change-list > li { padding: 10px 12px; border: 1px solid #223d4d; border-radius: 6px; background: #0e1a24; }
+.observed-change-list time { color: #a9c1cc; font-size: 16px; }
+.observed-change-list ul { display: grid; gap: 5px; margin: 7px 0; padding: 0; list-style: none; }
+.observed-change-list ul li { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 16px; }
+.observed-change-list ul strong { color: #d5e5eb; }
+.observed-change-list ul span { color: #8fd2d6; overflow-wrap: anywhere; }
+.observed-change-list small { color: #8299a6; font-size: 16px; }
+
+@media (max-width: 720px) {
+  .community-device-overlay { place-items: start center; padding: 8px; }
+  .community-device-dialog { max-height: 96dvh; border-radius: 8px; }
+  .community-device-dialog-heading { padding: 15px; }
+  .community-device-dialog-heading h2 { font-size: 24px; }
+  .community-device-status-strip { padding-inline: 15px; }
+  .community-device-profile-grid { grid-template-columns: minmax(0, 1fr); padding-inline: 15px; }
+  .community-device-profile-wide { grid-column: auto; }
+  .community-device-profile-grid > div { grid-template-columns: minmax(100px, .8fr) minmax(0, 1.2fr); gap: 9px; }
+  .community-device-message,.community-device-state-note { margin-inline: 15px; }
+  .community-device-dialog .sensor-history-panel,
+  .community-device-dialog .camera-preview-panel,
+  .observed-state-panel { margin: 12px 12px 15px; padding: 12px; }
+  .community-device-dialog .sensor-current-values { grid-template-columns: 1fr 1fr; }
+  .community-device-dialog .sensor-current-values .sensor-reading-time { grid-column: 1 / -1; }
+  .community-device-dialog .sensor-trend-grid { grid-template-columns: minmax(0, 1fr); }
+  .observed-telemetry-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .community-device-dialog .camera-image-frame { min-height: 180px; }
+}
+
+
+.sensor-chart-point { fill: var(--bg-elevated); stroke: var(--accent-cyan); stroke-width: 2.5; vector-effect: non-scaling-stroke; cursor: help; }
+.sensor-chart-point:focus { outline: none; stroke: var(--text-primary); stroke-width: 4; }
+.sensor-trend-humidity .sensor-chart-point { stroke: var(--accent-blue); }

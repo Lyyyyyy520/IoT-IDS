@@ -1,4 +1,5 @@
 """Authenticated v3 device inventory and lifecycle API."""
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from hashlib import sha256
 import hmac
@@ -193,6 +194,20 @@ def _query_retired() -> bool | None:
     raise ApiInputError("invalid_query", "retired 必须是 true 或 false")
 
 
+def _query_time(name: str, default: datetime) -> datetime:
+    raw = _single_query(name)
+    if raw is None:
+        return default
+    value_text = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    try:
+        value = datetime.fromisoformat(value_text)
+    except ValueError as exc:
+        raise ApiInputError("invalid_timestamp", f"{name} 不是有效的 ISO 8601 时间") from exc
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ApiInputError("timezone_required", f"{name} 必须包含时区")
+    return value.astimezone(timezone.utc)
+
+
 def create_v3_devices_blueprint(
     database_path: str | Path | None,
     *,
@@ -248,6 +263,46 @@ def create_v3_devices_blueprint(
     @_require_device_access(write=False)
     def get_device(device_id: str):
         return _handle(lambda: jsonify({"device": service.get_device(device_id)}))
+
+    @blueprint.get("/api/v3/devices/<device_id>/telemetry")
+    @_require_device_access(write=False)
+    def device_telemetry(device_id: str):
+        def execute():
+            unknown = sorted(set(request.args) - {"from", "to"})
+            if unknown:
+                raise ApiInputError("unknown_query_parameters", "存在不支持的查询参数")
+            now = clock() if clock else datetime.now(timezone.utc)
+            if now.tzinfo is None or now.utcoffset() is None:
+                raise RuntimeError("device API clock must include a timezone")
+            end = _query_time("to", now.astimezone(timezone.utc))
+            start = _query_time("from", end - timedelta(hours=24))
+            return jsonify({
+                "api_version": "v3",
+                "generated_at": now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                **service.get_sensor_history(device_id, start=start, end=end),
+            })
+
+        return _handle(execute)
+
+    @blueprint.get("/api/v3/devices/<device_id>/state-history")
+    @_require_device_access(write=False)
+    def device_state_history(device_id: str):
+        def execute():
+            unknown = sorted(set(request.args) - {"from", "to"})
+            if unknown:
+                raise ApiInputError("unknown_query_parameters", "存在不支持的查询参数")
+            now = clock() if clock else datetime.now(timezone.utc)
+            if now.tzinfo is None or now.utcoffset() is None:
+                raise RuntimeError("device API clock must include a timezone")
+            end = _query_time("to", now.astimezone(timezone.utc))
+            start = _query_time("from", end - timedelta(days=7))
+            return jsonify({
+                "api_version": "v3",
+                "generated_at": now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                **service.get_device_state_history(device_id, start=start, end=end),
+            })
+
+        return _handle(execute)
 
     @blueprint.post("/api/v3/devices")
     @_require_device_access(write=True)
