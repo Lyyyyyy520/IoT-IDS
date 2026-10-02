@@ -19,6 +19,8 @@ export const deviceDetail: DeviceDetail = {
   state_version: 5,
   observed_at: '2026-09-20T02:00:00Z',
   received_at: '2026-09-20T02:00:00Z',
+  firmware_version: null,
+  uptime_ms: null,
   sources: ['mqtt'],
   lifecycle_status: 'active',
   references: {
