@@ -1,5 +1,6 @@
 import { mobileApi, MobileApiError, parseHelpRequest, parseNotice, parseNoticeCollection, parseSupportContact,
-  parseMobileDeviceDetail, parseMobileDeviceTraffic } from './api';
+  parseMobileDeviceDetail, parseMobileDeviceTraffic, parseMobileDeviceHistory, parseMobileTopology,
+  parseMobileNoticeReplay } from './api';
 import { safeEmailUrl, safePhoneUrl } from './supportContactUtils';
 
 const config = { baseUrl: 'https://mobile.example.test', insecureLan: false };
@@ -118,6 +119,59 @@ it('accepts a real zero counter but rejects contradictory no-sample and warming 
     availability: { status: 'no_samples', available: false, reason: 'no_samples' } })).toThrow();
   expect(() => parseMobileDeviceTraffic({ ...emptyTraffic,
     current_rate: { ...emptyTraffic.current_rate, uploaded_bytes_per_second: 1 } })).toThrow();
+});
+
+it('parses real mobile sensor history and rejects unsafe or unbounded fields', () => {
+  const history = {
+    device_id: 'sensor-01', window: '24h', query_window: { from: '2026-09-23T00:00:00Z', to: '2026-09-24T00:00:00Z' },
+    generated_at: '2026-09-24T00:00:00Z', availability: { available: true, reason: null },
+    data_source: 'v3_device_state_observations',
+    latest: { observation_id: 2, observed_at: '2026-09-23T23:59:58Z', received_at: '2026-09-24T00:00:00Z',
+      telemetry: { temp: -2.5, humidity: 42.1, state: 'open' } },
+    series: [{ observation_id: 2, observed_at: '2026-09-23T23:59:58Z', received_at: '2026-09-24T00:00:00Z',
+      telemetry: { temp: -2.5, humidity: 42.1, state: 'open' } }],
+    truncated: false, bucket_seconds: 173, connection_history_available: true,
+    connection_status_changes: [{ event_id: 3, occurred_at: '2026-09-23T23:59:00Z', from_status: 'stale', to_status: 'online', source: 'report' }],
+    connection_history_truncated: false, connection_history_note: '状态变化只在刷新连接状态时记录。',
+  };
+  expect(parseMobileDeviceHistory(history).latest?.telemetry.temp).toBe(-2.5);
+  expect(() => parseMobileDeviceHistory({ ...history, series: [{ ...history.series[0], telemetry: { ip: '192.0.2.2' } }] })).toThrow();
+  expect(() => parseMobileDeviceHistory({ ...history, risk_score: 0.9 })).toThrow();
+});
+
+it('accepts only topology edges within the returned node scope', () => {
+  const topology = {
+    generated_at: '2026-09-24T00:00:00Z',
+    window: { from: '2026-09-23T00:00:00Z', to: '2026-09-24T00:00:00Z', range: '24h' },
+    nodes: [{ device_id: 'sensor-01', display_name: '温湿度传感器', device_type: 'sensor', area_id: 'home',
+      connection_status: 'online', last_received_at: '2026-09-23T23:59:00Z', retired: false,
+      active_alert_count: 0, highest_alert_severity: null },
+    { device_id: 'door-01', display_name: '门禁', device_type: 'door', area_id: 'home',
+      connection_status: 'offline', last_received_at: null, retired: false, active_alert_count: 1, highest_alert_severity: 'high' }],
+    edges: [{ source_device_id: 'sensor-01', target_device_id: 'door-01', bytes: 32, packets: 1, flows: 1,
+      protocols: ['TCP'], last_seen: '2026-09-23T23:58:00Z' }],
+    availability: { available: true, reason: null, source: 'v3_device_traffic_peer_minutes' },
+    alert_capability: { available: true, reason: null },
+  };
+  expect(parseMobileTopology(topology).edges).toHaveLength(1);
+  expect(() => parseMobileTopology({ ...topology, edges: [{ ...topology.edges[0], target_device_id: 'hidden-device' }] })).toThrow();
+});
+
+it('keeps mobile replay public and scoped, and rejects admin replay fields', () => {
+  const replay = {
+    incident_id: 'inc-1', generated_at: '2026-09-24T00:00:00Z',
+    window: { from: '2026-09-23T00:00:00Z', to: '2026-09-24T00:00:00Z' },
+    notice: { user_title: '提醒', user_summary: '公开摘要', severity: 'high', status: 'open',
+      first_seen_at: '2026-09-23T18:00:00Z', public_progress: '正在核查。' },
+    incident_timeline: [{ occurred_at: '2026-09-23T18:01:00Z', resulting_status: 'open', public_progress: '正在核查。' }],
+    devices: [{ device_id: 'sensor-01', display_name: '传感器', device_type: 'sensor', area_id: 'home',
+      current_connection_status: 'stale', current_last_received_at: '2026-09-23T17:59:00Z', observations: [] }],
+    relationships: [], connection_status_changes: [], gaps: [{ device_id: 'sensor-01', from: '2026-09-23T00:00:00Z',
+      to: '2026-09-23T01:00:00Z', reason: 'no_retained_observation' }], truncated: false, traffic_available: true,
+    capabilities: { connection_status_history: true, camera_media: false, reason: '摄像头影像未留存。' },
+  };
+  expect(parseMobileNoticeReplay(replay).capabilities.camera_media).toBe(false);
+  expect(() => parseMobileNoticeReplay({ ...replay, devices: [{ ...replay.devices[0], admin_details: 'private' }] })).toThrow();
 });
 
 it('encodes mobile device IDs and fixed traffic windows and forwards AbortSignal', async () => {

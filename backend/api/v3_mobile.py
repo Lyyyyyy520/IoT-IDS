@@ -27,10 +27,12 @@ from services.mobile_access import (
     MobileRateLimited,
 )
 from services.mobile_device import (
+    MobileDeviceHistoryWindowError,
     MobileDeviceReadService,
     MobileDeviceTrafficUnavailable,
     MobileDeviceTrafficWindowError,
     MobileDeviceUnavailable,
+    MobileTopologyWindowError,
 )
 
 
@@ -229,6 +231,10 @@ def create_v3_mobile_blueprint(
         except MobileDeviceUnavailable as exc:
             return _error(exc.code, "设备不可用或不在当前授权范围", 404)
         except MobileDeviceTrafficWindowError as exc:
+            return _error(exc.code, str(exc), 400)
+        except MobileDeviceHistoryWindowError as exc:
+            return _error(exc.code, str(exc), 400)
+        except MobileTopologyWindowError as exc:
             return _error(exc.code, str(exc), 400)
         except MobileDeviceTrafficUnavailable as exc:
             return _error(exc.code, "流量服务暂时不可用", 503)
@@ -444,6 +450,40 @@ def create_v3_mobile_blueprint(
                 limit=60,
             )
             return device_service.traffic(g.mobile_principal, device_id, window)
+
+        return handle_mobile_device_read(execute)
+
+    @blueprint.get("/api/v3/mobile/devices/<device_id>/history")
+    @secure
+    @mobile
+    def mobile_device_history(device_id: str):
+        def execute():
+            if set(request.args) - {"window"} or len(request.args.getlist("window")) > 1:
+                raise ApiInputError("invalid_query", "仅支持 window=1h、24h 或 7d")
+            window = request.args.get("window", "24h")
+            service.consume_scoped_read_limit(
+                g.mobile_principal,
+                action="mobile_device_history",
+                limit=60,
+            )
+            return device_service.history(g.mobile_principal, device_id, window)
+
+        return handle_mobile_device_read(execute)
+
+    @blueprint.get("/api/v3/mobile/topology")
+    @secure
+    @mobile
+    def mobile_topology():
+        def execute():
+            if set(request.args) - {"window"} or len(request.args.getlist("window")) > 1:
+                raise ApiInputError("invalid_query", "仅支持 window=1h、24h 或 7d")
+            window = request.args.get("window", "24h")
+            service.consume_scoped_read_limit(
+                g.mobile_principal,
+                action="mobile_device_topology",
+                limit=30,
+            )
+            return device_service.topology(g.mobile_principal, window)
 
         return handle_mobile_device_read(execute)
 

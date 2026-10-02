@@ -492,6 +492,76 @@ def create_v3_incidents_blueprint(
             )
         ))
 
+    @blueprint.get("/api/v3/mobile/notices/<incident_id>/replay")
+    @mobile
+    def mobile_notice_replay(incident_id: str):
+        def execute():
+            if set(request.args) - {"from", "to"}:
+                raise ApiInputError(
+                    "unknown_query_parameters", "只支持 from 和 to 时间参数"
+                )
+            mobile_service.consume_scoped_read_limit(
+                g.mobile_principal, action="mobile_device_replay", limit=30,
+            )
+            # This scoped lookup is the gate: a global incident replay is never
+            # served unless its user-visible mobile notice is currently in scope.
+            notice = service.get_mobile_notice(
+                g.mobile_principal, incident_id
+            )
+            start_value = _timestamp(one("from"), "from")
+            end_value = _timestamp(one("to"), "to")
+            replay = service.get_incident_replay(
+                incident_id, start=start_value, end=end_value,
+            )
+            visible_devices = {
+                item["device_id"]: item for item in notice["affected_devices"]
+            }
+            visible_ids = set(visible_devices)
+            timeline = [{
+                "occurred_at": item["occurred_at"],
+                "resulting_status": item["resulting_status"],
+                "public_progress": item["public_progress"],
+            } for item in replay["incident_timeline"] if item["public_progress"]]
+            devices = []
+            for item in replay["devices"]:
+                public_device = visible_devices.get(item["device_id"])
+                if public_device is None:
+                    continue
+                devices.append({
+                    **public_device,
+                    "current_connection_status": item["current_connection_status"],
+                    "current_last_received_at": item["current_last_received_at"],
+                    "observations": item["observations"],
+                })
+            relationships = [item for item in replay["relationships"]
+                if item["source_device_id"] in visible_ids
+                and item["target_device_id"] in visible_ids]
+            status_changes = [item for item in replay["connection_status_changes"]
+                if item["device_id"] in visible_ids]
+            gaps = [item for item in replay["gaps"] if item["device_id"] in visible_ids]
+            return jsonify({
+                "incident_id": replay["incident_id"],
+                "generated_at": replay["generated_at"],
+                "window": replay["window"],
+                "notice": {
+                    "user_title": notice["user_title"],
+                    "user_summary": notice["user_summary"],
+                    "severity": notice["severity"],
+                    "status": notice["status"],
+                    "first_seen_at": notice["first_seen_at"],
+                    "public_progress": notice["public_progress"],
+                },
+                "incident_timeline": timeline,
+                "devices": devices,
+                "relationships": relationships,
+                "connection_status_changes": status_changes,
+                "gaps": gaps,
+                "truncated": replay["truncated"],
+                "traffic_available": replay["traffic_available"],
+                "capabilities": replay["capabilities"],
+            })
+        return handle(execute)
+
     def mark_notice(incident_id: str, acknowledged: bool):
         def execute():
             _json_body(allowed=set(), required=set())

@@ -63,13 +63,16 @@
 | `POST` | `/api/v3/pairing/claim` | 持有效配对码者 | 领取受限 APP 会话 |
 | `GET` | `/api/v3/mobile/session`、`/api/v3/mobile/overview` | 已配对 user | 当前会话与本人设备/提醒 |
 | `GET` | `/api/v3/mobile/devices/{device_id}`、`/api/v3/mobile/devices/{device_id}/traffic` | 范围内 user | 本人设备详情及裁剪流量 |
+| `GET` | `/api/v3/mobile/devices/{device_id}/history?window=1h|24h|7d` | 当前范围内 user | 按实时授权范围读取真实 scalar telemetry 与保留的连接状态变化 |
+| `GET` | `/api/v3/mobile/topology?window=1h|24h|7d` | 已配对 user | 返回授权设备节点；仅返回发送端和接收端都在该用户范围内的真实 TX peer 聚合 |
 | `GET` | `/api/v3/mobile/notices[/{incident_id}]` | 已配对 user | 本人事件提醒 |
+| `GET` | `/api/v3/mobile/notices/{incident_id}/replay?from=&to=` | 当前可见提醒 user | 公开提醒时间线，以及关联且已授权设备的状态/传感器/通信留存；不返回内部处置记录 |
 | `POST` | `/api/v3/mobile/notices/{incident_id}/read|acknowledge` | 本人事件范围 user | 阅读或知晓提醒 |
 | `GET/POST` | `/api/v3/mobile/help-requests[/{help_request_id}]` | 本人范围 user | 创建、查询本人求助 |
 | `GET` | `/api/v3/mobile/support-contact` | 已配对 user | 获取支持联系人 |
 | `POST` | `/api/v3/mobile/token/refresh`、`/api/v3/mobile/logout` | 已配对 user | 刷新或注销令牌 |
 
-移动令牌不能替代浏览器 session、探针凭据或 MQTT 设备身份。服务端对列表、详情、流量和提醒逐项应用设备/区域范围。
+移动令牌不能替代浏览器 session、探针凭据或 MQTT 设备身份。服务端对列表、详情、历史、流量、拓扑、回放和提醒逐项应用当前设备/区域范围，并对新增只读端点按会话限频。拓扑连线来自 `v3_device_traffic_peer_minutes`，没有样本时返回空边；事件回放只公开移动提醒摘要，并且只保留当前范围内的受影响设备及双方均可见的关系。普通用户接口不提供摄像头图像、管理员检测依据或逐设备基线。
 
 ## Probe 与设备状态上报
 
