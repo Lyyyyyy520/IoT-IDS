@@ -374,6 +374,22 @@ def create_v3_incidents_blueprint(
             lambda: jsonify(service.get_incident(incident_id))
         )
 
+    @blueprint.get("/api/v3/incidents/<incident_id>/replay")
+    @admin(write=False)
+    def replay_incident(incident_id: str):
+        def execute():
+            if set(request.args) - {"from", "to"}:
+                raise ApiInputError(
+                    "unknown_query_parameters",
+                    "只支持 from 和 to 时间参数",
+                )
+            start_value = _timestamp(one("from"), "from")
+            end_value = _timestamp(one("to"), "to")
+            return jsonify(service.get_incident_replay(
+                incident_id, start=start_value, end=end_value,
+            ))
+        return handle(execute)
+
     @blueprint.post("/api/v3/incidents")
     @admin(write=True, admin_only=True)
     def create_incident():
