@@ -304,7 +304,31 @@ def test_incident_replay_reads_retained_observations_relationships_and_gaps(cont
         f"&to={NOW.isoformat().replace('+00:00', 'Z')}"
     )
     assert response.status_code == 200
-    assert response.get_json()["relationships"][0]["target_device_id"] == "lock-01"
+    payload = response.get_json()
+    assert payload["incident_id"] == incident["incident_id"]
+    assert {
+        "generated_at", "window", "incident_timeline", "devices",
+        "relationships", "connection_status_changes", "gaps",
+        "truncated", "traffic_available", "capabilities",
+    } <= set(payload)
+    assert payload["relationships"][0]["target_device_id"] == "lock-01"
+
+
+def test_incident_replay_requires_web_auth_and_hides_missing_incidents(context):
+    path = f"/api/v3/incidents/{'inc_' + '0' * 32}/replay"
+    anonymous = context.client.get(path)
+    assert anonymous.status_code == 401
+    assert anonymous.get_json()["error"]["code"] == "unauthenticated"
+
+    _login(context.client, "user", 3)
+    forbidden = context.client.get(path)
+    assert forbidden.status_code == 403
+    assert forbidden.get_json()["error"]["code"] == "incident_admin_forbidden"
+
+    _login(context.client, "admin", 1)
+    missing = context.client.get(path)
+    assert missing.status_code == 404
+    assert missing.get_json()["error"]["code"] == "incident_not_found"
 
 
 def _login(client, role="admin", user_id=1):
