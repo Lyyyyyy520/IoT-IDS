@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import json
 import sqlite3
 from types import SimpleNamespace
 
@@ -1095,6 +1096,110 @@ def test_mobile_device_detail_is_allowlisted_dynamic_and_scope_hidden_is_not_fou
     }
     assert "mac" not in repr(body).lower()
     assert "192.0.2." not in repr(body)
+
+
+def test_mobile_device_history_returns_scoped_real_scalar_observations_and_connection_changes(
+    mobile_context,
+):
+    claimed = _device_pair(mobile_context, {
+        "scope_kind": "area", "scope_value": "area-a",
+    })
+    observed_at = mobile_context.clock.value - timedelta(minutes=3)
+    received_at = observed_at + timedelta(seconds=2)
+    with sqlite3.connect(mobile_context.database_path) as connection:
+        connection.execute(
+            "INSERT INTO v3_device_state_observations "
+            "(device_id,source,sequence,observed_at,received_at,payload_json) "
+            "VALUES(?,?,?,?,?,?)",
+            ("sensor-01", "mqtt", 1, observed_at.isoformat().replace("+00:00", "Z"),
+             received_at.isoformat().replace("+00:00", "Z"), json.dumps({
+                 "telemetry": {"temp": 21.5, "humidity": 46.2, "state": "open",
+                     "wifi_token": "must-not-leak", "ip": "192.0.2.77"},
+             })),
+        )
+        connection.execute(
+            "INSERT INTO v3_realtime_events "
+            "(event_type,occurred_at,device_id,state_version,payload_json) "
+            "VALUES('device.connection_changed',?,?,?,?)",
+            (received_at.isoformat().replace("+00:00", "Z"), "sensor-01", 3,
+             json.dumps({"from": "stale", "to": "online", "source": "report"})),
+        )
+
+    response = _mobile_get(
+        mobile_context, "/api/v3/mobile/devices/sensor-01/history?window=24h",
+        claimed["access_token"],
+    )
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["data_source"] == "v3_device_state_observations"
+    assert body["availability"] == {"available": True, "reason": None}
+    assert body["latest"]["telemetry"] == {
+        "temp": 21.5, "humidity": 46.2, "state": "open",
+    }
+    assert body["series"][0]["telemetry"]["temp"] == 21.5
+    assert body["connection_status_changes"] == [{
+        "event_id": 1, "occurred_at": received_at.isoformat().replace("+00:00", "Z"),
+        "from_status": "stale", "to_status": "online", "source": "report",
+    }]
+    assert "must-not-leak" not in repr(body)
+    assert "192.0.2.77" not in repr(body)
+    assert _mobile_get(
+        mobile_context, "/api/v3/mobile/devices/lock-01/history?window=1h",
+        claimed["access_token"],
+    ).status_code == 404
+    invalid = _mobile_get(
+        mobile_context, "/api/v3/mobile/devices/sensor-01/history?window=2h",
+        claimed["access_token"],
+    )
+    assert invalid.status_code == 400
+    assert invalid.get_json()["error"]["code"] == "invalid_mobile_history_window"
+
+
+def test_mobile_topology_contains_only_real_edges_inside_current_scope_and_public_alert_markers(
+    mobile_context,
+):
+    claimed = _device_pair(mobile_context, {
+        "scope_kind": "area", "scope_value": "area-a",
+    })
+    sample_at = mobile_context.clock.value - timedelta(minutes=1)
+    stamp = sample_at.replace(second=0, microsecond=0).isoformat().replace("+00:00", "Z")
+    with sqlite3.connect(mobile_context.database_path) as connection:
+        connection.executemany(
+            "INSERT INTO v3_device_traffic_peer_minutes "
+            "(device_id,bucket_start,direction,peer_key,peer_device_id,peer_ip,protocol,bytes,packets,"
+            "flow_count,first_sample_at,last_sample_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                ("camera-01", stamp, "tx", "device:sensor-01", "sensor-01", "192.0.2.33", "TCP",
+                 512, 4, 1, stamp, stamp, stamp),
+                ("camera-01", stamp, "tx", "device:lock-01", "lock-01", "192.0.2.44", "UDP",
+                 1024, 2, 1, stamp, stamp, stamp),
+            ],
+        )
+    incident = mobile_context.app.extensions["iot_ids_incident_workflow"]
+    incident.create_incident(
+        incident_type="device_anomaly", severity="high", source="manual",
+        admin_title="私有管理标题", admin_summary="不得向移动端返回。",
+        user_title="设备需要留意", user_summary="请留意管理员公开处理进度。",
+        devices=[{"device_id": "camera-01", "incident_role": "affected", "user_visible": True}],
+        publish_to_mobile=True, first_seen_at=mobile_context.clock.value,
+        actor=IncidentActor(1, "admin-test", "admin"), request_id="mobile-topology-test",
+    )
+    response = _mobile_get(mobile_context, "/api/v3/mobile/topology?window=24h", claimed["access_token"])
+    assert response.status_code == 200
+    body = response.get_json()
+    assert {node["device_id"] for node in body["nodes"]} == {"camera-01", "sensor-01"}
+    assert body["edges"] == [{
+        "source_device_id": "camera-01", "target_device_id": "sensor-01",
+        "bytes": 512, "packets": 4, "flows": 1, "protocols": ["TCP"], "last_seen": stamp,
+    }]
+    camera = next(node for node in body["nodes"] if node["device_id"] == "camera-01")
+    assert camera["active_alert_count"] == 1
+    assert camera["highest_alert_severity"] == "high"
+    assert "私有管理标题" not in repr(body)
+    assert "192.0.2." not in repr(body)
+    invalid = _mobile_get(mobile_context, "/api/v3/mobile/topology?window=30d", claimed["access_token"])
+    assert invalid.status_code == 400
+    assert invalid.get_json()["error"]["code"] == "invalid_mobile_topology_window"
 
 
 def test_mobile_device_area_scope_is_dynamic_and_revocation_takes_effect_immediately(

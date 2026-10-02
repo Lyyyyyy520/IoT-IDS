@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import json
 import sqlite3
 from types import SimpleNamespace
 
@@ -25,6 +26,7 @@ from services.incident_workflow import (
     SupportVersionConflict,
 )
 from services.mobile_access import MobileActor
+from services.realtime_events import append_realtime_event
 from v3_db_maintenance import RETENTION_DEFAULTS, RetentionSettings, apply_retention
 from v3_database import (
     V3_INCIDENT_WORKFLOW_INDEXES,
@@ -216,6 +218,93 @@ def _create(service, *, source="manual", actor=ADMIN, devices=None):
         actor=actor,
         request_id="incident-create",
     )
+
+
+def test_incident_replay_reads_retained_observations_relationships_and_gaps(context):
+    incident = _create(context.incident, devices=[{
+        "device_id": "camera-01",
+        "incident_role": "affected",
+        "user_visible": True,
+    }])
+    observed_at = NOW - timedelta(seconds=60)
+    latest_at = NOW - timedelta(seconds=30)
+    with sqlite3.connect(context.database_path) as connection:
+        connection.execute(
+            "INSERT INTO v3_device_state_observations "
+            "(device_id,source,sequence,ip_address,observed_at,received_at,payload_json) "
+            "VALUES('camera-01','test-replay',1,NULL,?,?,?)",
+            (observed_at.isoformat().replace("+00:00", "Z"),
+             observed_at.isoformat().replace("+00:00", "Z"),
+             json.dumps({"telemetry": {"temp": 22.5, "humidity": 48, "secret": "omit"}})),
+        )
+        connection.execute(
+            "INSERT INTO v3_device_state_observations "
+            "(device_id,source,sequence,ip_address,observed_at,received_at,payload_json) "
+            "VALUES('camera-01','test-replay',2,NULL,?,?,?)",
+            (latest_at.isoformat().replace("+00:00", "Z"),
+             latest_at.isoformat().replace("+00:00", "Z"),
+             json.dumps({"telemetry": {"temp": 22.7, "humidity": 49}})),
+        )
+        connection.execute(
+            "INSERT INTO v3_device_traffic_peer_minutes "
+            "(device_id,bucket_start,direction,peer_key,peer_device_id,peer_ip,protocol,"
+            "bytes,packets,flow_count,first_sample_at,last_sample_at,updated_at) "
+            "VALUES('camera-01',?,'tx','device:lock-01','lock-01','10.1.1.2','tcp',"
+            "120,3,1,?,?,?)",
+            tuple(value.isoformat().replace("+00:00", "Z") for value in (
+                observed_at.replace(second=0), observed_at, latest_at, latest_at,
+            )),
+        )
+    with sqlite3.connect(context.database_path) as connection:
+        append_realtime_event(
+            connection,
+            event_type="device.connection_changed",
+            occurred_at=latest_at,
+            device_id="camera-01",
+            state_version=4,
+            payload={
+                "from": "online", "to": "offline", "source": "timeout",
+                "sensitive_detail": "must not be returned",
+            },
+        )
+
+    replay = context.incident.get_incident_replay(
+        incident["incident_id"], start=NOW - timedelta(minutes=5), end=NOW,
+    )
+    assert replay["devices"][0]["device_id"] == "camera-01"
+    assert [point["temperature_c"] for point in replay["devices"][0]["observations"]] == [22.5, 22.7]
+    assert "secret" not in str(replay)
+    assert replay["relationships"] == [{
+        "source_device_id": "camera-01", "target_device_id": "lock-01",
+        "bucket_start": observed_at.replace(second=0).isoformat().replace("+00:00", "Z"),
+        "direction": "tx", "protocol": "tcp", "bytes": 120, "packets": 3,
+        "flows": 1, "first_seen": observed_at.isoformat().replace("+00:00", "Z"),
+        "last_seen": latest_at.isoformat().replace("+00:00", "Z"),
+    }]
+    assert any(gap["reason"] == "observation_gap_over_stale_threshold" for gap in replay["gaps"])
+    assert replay["capabilities"]["connection_status_history"] is True
+    assert len(replay["connection_status_changes"]) == 1
+    change = replay["connection_status_changes"][0]
+    assert change["event_id"] > 0
+    assert {key: value for key, value in change.items() if key != "event_id"} == {
+        "device_id": "camera-01",
+        "occurred_at": latest_at.isoformat().replace("+00:00", "Z"),
+        "state_version": 4,
+        "from_status": "online",
+        "to_status": "offline",
+        "source": "timeout",
+    }
+    assert "sensitive_detail" not in str(replay)
+    assert replay["capabilities"]["camera_media"] is False
+
+    _login(context.client, "admin", 1)
+    response = context.client.get(
+        f"/api/v3/incidents/{incident['incident_id']}/replay?from="
+        f"{(NOW - timedelta(minutes=5)).isoformat().replace('+00:00', 'Z')}"
+        f"&to={NOW.isoformat().replace('+00:00', 'Z')}"
+    )
+    assert response.status_code == 200
+    assert response.get_json()["relationships"][0]["target_device_id"] == "lock-01"
 
 
 def _login(client, role="admin", user_id=1):
@@ -477,6 +566,31 @@ def test_mobile_scope_redaction_read_ack_and_scope_revocation(context):
         context.incident.get_mobile_notice(
             context.principal, incident["incident_id"]
         )
+
+
+def test_mobile_notice_replay_is_scoped_to_visible_affected_devices_and_public_timeline(context):
+    incident = _create(context.incident, devices=[
+        {"device_id": "camera-01", "incident_role": "affected", "user_visible": True},
+        {"device_id": "lock-01", "incident_role": "suspected_source", "user_visible": False},
+    ])
+    response = context.client.get(
+        f"/api/v3/mobile/notices/{incident['incident_id']}/replay?from=2026-09-23T00:30:00Z&to=2026-09-23T02:00:00Z",
+        headers={"Authorization": f"Bearer {context.tokens['access_token']}"},
+    )
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["incident_id"] == incident["incident_id"]
+    assert [device["device_id"] for device in body["devices"]] == ["camera-01"]
+    assert body["capabilities"]["camera_media"] is False
+    assert "管理端证据摘要" not in repr(body)
+    assert "admin_details" not in repr(body)
+    assert "actor_username" not in repr(body)
+    assert "lock-01" not in repr(body)
+    hidden = context.client.get(
+        "/api/v3/mobile/notices/inc_" + "f" * 32 + "/replay",
+        headers={"Authorization": f"Bearer {context.tokens['access_token']}"},
+    )
+    assert hidden.status_code == 404
 
 
 def test_area_scope_is_dynamic_and_suspected_source_never_expands_scope(context):

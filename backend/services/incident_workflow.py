@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import hmac
 import json
+import math
 from pathlib import Path
 import re
 import sqlite3
@@ -19,6 +20,8 @@ from services.mobile_access import MobilePrincipal
 from services.realtime_events import append_realtime_event
 from v3_database import (
     V3_INCIDENT_WORKFLOW_MIGRATION,
+    V3_REALTIME_EVENT_MIGRATION,
+    V3_DEVICE_TRAFFIC_MIGRATION,
     connect_v3_existing,
     read_applied_migrations,
 )
@@ -713,6 +716,204 @@ class IncidentWorkflowService:
         incident_id = self._validate_incident_id(incident_id)
         with self._read() as connection:
             return self._admin_detail(connection, incident_id)
+
+    def get_incident_replay(
+        self, incident_id: str, *, start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> dict:
+        """Read retained device observations and peer aggregates for an incident."""
+        incident_id = self._validate_incident_id(incident_id)
+        with self._read() as connection:
+            incident = self._incident_row(connection, incident_id)
+            links = self._device_links(connection, incident_id)
+            timeline = [dict(row) for row in connection.execute(
+                "SELECT timeline_id,action,actor_user_id,actor_username,actor_role,"
+                "occurred_at,request_id,public_progress,admin_details,resulting_status,incident_version "
+                "FROM v3_incident_timeline WHERE incident_id=? ORDER BY timeline_id",
+                (incident_id,),
+            ).fetchall()]
+            device_ids = sorted({item["device_id"] for item in links})
+            now = self._now()
+            start_at = _utc(start) if start else datetime.fromisoformat(
+                incident["first_seen_at"].replace("Z", "+00:00")
+            ) - timedelta(hours=1)
+            end_at = _utc(end) if end else datetime.fromisoformat(
+                incident["last_seen_at"].replace("Z", "+00:00")
+            ) + timedelta(hours=1)
+            if end is None:
+                end_at = min(end_at, now)
+            if end_at <= start_at:
+                raise IncidentWorkflowError("replay to must be after from")
+            if end_at - start_at > timedelta(days=7):
+                raise IncidentWorkflowError("replay window cannot exceed 7 days")
+            if end_at > now + timedelta(minutes=5):
+                raise IncidentWorkflowError("replay to is too far in the future")
+
+            observations = []
+            edges = []
+            traffic_migration = connection.execute(
+                "SELECT name,checksum FROM v3_schema_migrations WHERE version=?",
+                (V3_DEVICE_TRAFFIC_MIGRATION.version,),
+            ).fetchone()
+            traffic_table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='v3_device_traffic_peer_minutes'"
+            ).fetchone()
+            traffic_available = bool(
+                traffic_migration
+                and traffic_migration["name"] == V3_DEVICE_TRAFFIC_MIGRATION.name
+                and traffic_migration["checksum"] == V3_DEVICE_TRAFFIC_MIGRATION.checksum
+                and traffic_table
+            )
+            status_migration = connection.execute(
+                "SELECT name,checksum FROM v3_schema_migrations WHERE version=?",
+                (V3_REALTIME_EVENT_MIGRATION.version,),
+            ).fetchone()
+            status_table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='v3_realtime_events'"
+            ).fetchone()
+            status_history_available = bool(
+                status_migration
+                and status_migration["name"] == V3_REALTIME_EVENT_MIGRATION.name
+                and status_migration["checksum"] == V3_REALTIME_EVENT_MIGRATION.checksum
+                and status_table
+            )
+            if device_ids:
+                placeholders = ",".join("?" for _ in device_ids)
+                observations = connection.execute(
+                    "SELECT observation_id,device_id,observed_at,received_at,payload_json "
+                    "FROM v3_device_state_observations WHERE device_id IN (" + placeholders + ") "
+                    "AND received_at>=? AND received_at<=? "
+                    "ORDER BY received_at,observation_id LIMIT 20001",
+                    (*device_ids, _iso(start_at), _iso(end_at)),
+                ).fetchall()
+                if traffic_available:
+                    edges = connection.execute(
+                        "SELECT t.device_id AS source_device_id,t.peer_device_id AS target_device_id,"
+                        "t.bucket_start,t.direction,t.protocol,t.bytes,t.packets,t.flow_count AS flows,"
+                        "t.first_sample_at AS first_seen,t.last_sample_at AS last_seen "
+                        "FROM v3_device_traffic_peer_minutes t "
+                        "WHERE t.peer_device_id IS NOT NULL AND (t.device_id IN (" + placeholders + ") "
+                        "OR t.peer_device_id IN (" + placeholders + ")) "
+                        "AND t.bucket_start>=? AND t.bucket_start<=? "
+                        "ORDER BY t.bucket_start,t.device_id,t.peer_device_id,t.direction,t.protocol LIMIT 10001",
+                        (*device_ids, *device_ids, _iso(start_at), _iso(end_at)),
+                    ).fetchall()
+
+            status_changes = []
+            status_truncated = False
+            if status_history_available and device_ids:
+                placeholders = ",".join("?" for _ in device_ids)
+                status_rows = connection.execute(
+                    "SELECT event_id,device_id,occurred_at,state_version,payload_json "
+                    "FROM v3_realtime_events WHERE event_type='device.connection_changed' "
+                    "AND device_id IN (" + placeholders + ") AND occurred_at>=? AND occurred_at<=? "
+                    "ORDER BY occurred_at,event_id LIMIT 10001",
+                    (*device_ids, _iso(start_at), _iso(end_at)),
+                ).fetchall()
+                status_truncated = len(status_rows) > 10000
+                valid_statuses = {"unknown", "online", "stale", "offline"}
+                for row in status_rows[:10000]:
+                    try:
+                        payload = json.loads(row["payload_json"] or "{}")
+                    except (TypeError, json.JSONDecodeError):
+                        payload = {}
+                    previous = payload.get("from") if isinstance(payload, dict) else None
+                    current = payload.get("to") if isinstance(payload, dict) else None
+                    if previous not in valid_statuses or current not in valid_statuses:
+                        continue
+                    status_changes.append({
+                        "event_id": int(row["event_id"]),
+                        "device_id": row["device_id"],
+                        "occurred_at": row["occurred_at"],
+                        "state_version": int(row["state_version"])
+                        if row["state_version"] is not None else None,
+                        "from_status": previous,
+                        "to_status": current,
+                        "source": "timeout" if payload.get("source") == "timeout" else "report",
+                    })
+
+            by_id = {item["device_id"]: item for item in links}
+            observations_by_device: dict[str, list[dict]] = {device_id: [] for device_id in device_ids}
+            for row in observations[:20000]:
+                try:
+                    payload = json.loads(row["payload_json"] or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    payload = {}
+                telemetry = payload.get("telemetry") if isinstance(payload, dict) else None
+                telemetry = telemetry if isinstance(telemetry, dict) else {}
+
+                def finite_number(value):
+                    return value if type(value) in {int, float} and math.isfinite(value) else None
+
+                point = {
+                    "observation_id": int(row["observation_id"]),
+                    "device_id": row["device_id"],
+                    "observed_at": row["observed_at"],
+                    "received_at": row["received_at"],
+                    "temperature_c": finite_number(telemetry.get("temp")),
+                    "humidity_percent": finite_number(telemetry.get("humidity")),
+                }
+                observations_by_device[row["device_id"]].append(point)
+
+            gaps = []
+            stale_after = timedelta(seconds=15)
+            for device_id, points in observations_by_device.items():
+                if not points:
+                    gaps.append({
+                        "device_id": device_id, "from": _iso(start_at), "to": _iso(end_at),
+                        "reason": "no_observations_in_window",
+                    })
+                    continue
+                first = datetime.fromisoformat(points[0]["received_at"].replace("Z", "+00:00"))
+                last = datetime.fromisoformat(points[-1]["received_at"].replace("Z", "+00:00"))
+                if first - start_at > stale_after:
+                    gaps.append({"device_id": device_id, "from": _iso(start_at), "to": _iso(first), "reason": "no_retained_observation"})
+                previous = first
+                for point in points[1:]:
+                    current = datetime.fromisoformat(point["received_at"].replace("Z", "+00:00"))
+                    if current - previous > stale_after:
+                        gaps.append({"device_id": device_id, "from": _iso(previous), "to": _iso(current), "reason": "observation_gap_over_stale_threshold"})
+                    previous = current
+                if end_at - last > stale_after:
+                    gaps.append({"device_id": device_id, "from": _iso(last), "to": _iso(end_at), "reason": "no_retained_observation"})
+
+            current_states = connection.execute(
+                "SELECT device_id,connection_status,last_received_at FROM v3_device_current_state "
+                "WHERE device_id IN (" + ",".join("?" for _ in device_ids) + ") ORDER BY device_id",
+                device_ids,
+            ).fetchall() if device_ids else []
+
+            return {
+                "incident_id": incident_id,
+                "generated_at": _iso(now),
+                "window": {"from": _iso(start_at), "to": _iso(end_at)},
+                "incident_timeline": timeline,
+                "devices": [{
+                    **by_id[device_id],
+                    "current_connection_status": next((state["connection_status"] for state in current_states if state["device_id"] == device_id), "unknown"),
+                    "current_last_received_at": next((state["last_received_at"] for state in current_states if state["device_id"] == device_id), None),
+                    "observations": observations_by_device[device_id],
+                } for device_id in device_ids],
+                "relationships": [{
+                    "source_device_id": row["source_device_id"],
+                    "target_device_id": row["target_device_id"],
+                    "bucket_start": row["bucket_start"], "direction": row["direction"],
+                    "protocol": row["protocol"], "bytes": int(row["bytes"]),
+                    "packets": int(row["packets"]), "flows": int(row["flows"]),
+                    "first_seen": row["first_seen"], "last_seen": row["last_seen"],
+                } for row in edges[:10000]],
+                "connection_status_changes": status_changes,
+                "gaps": gaps,
+                "truncated": len(observations) > 20000 or len(edges) > 10000 or status_truncated,
+                "traffic_available": traffic_available,
+                "capabilities": {
+                    "connection_status_history": status_history_available,
+                    "camera_media": False,
+                    "reason": "Connection changes are recorded when the backend refreshes device state and are subject to explicit event retention; camera footage is not stored.",
+                },
+            }
 
     def transition_incident(
         self, incident_id: str, *, target_status: str,

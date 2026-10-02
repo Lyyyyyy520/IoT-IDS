@@ -3,12 +3,17 @@ import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } fr
 import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useMobile, messageFor } from './MobileContext';
-import { MobileApiError, mobileApi, type MobileDeviceDetail, type MobileDeviceTraffic, type MobileTrafficWindow } from './api';
+import { MobileApiError, mobileApi, type MobileDeviceDetail, type MobileDeviceHistory, type MobileDeviceTraffic,
+  type MobileHistoryWindow, type MobileTrafficWindow } from './api';
 import { nativeAppLifecycle, type AppLifecycleAdapter } from './appLifecycle';
 import { design, palette, ui } from './ui';
+import MobileSensorCharts from './MobileSensorCharts';
 
 const WINDOWS: { value: MobileTrafficWindow; label: string }[] = [
   { value: '15m', label: '15 分钟' }, { value: '1h', label: '1 小时' }, { value: '24h', label: '24 小时' },
+];
+const HISTORY_WINDOWS: { value: MobileHistoryWindow; label: string }[] = [
+  { value: '1h', label: '1 小时' }, { value: '24h', label: '24 小时' }, { value: '7d', label: '7 天' },
 ];
 
 const bytes = (value: number): string => {
@@ -41,10 +46,20 @@ function Trend({ traffic }: { traffic: MobileDeviceTraffic }) {
   const [chartWidth, setChartWidth] = useState(0);
   if (traffic.trend.length === 0) return <Text style={ui.muted}>当前范围没有可绘制的趋势点。</Text>;
   const points = traffic.trend;
+  const times = points.map(point => Date.parse(point.bucket_start));
+  const startTime = times[0];
+  const endTime = times[times.length - 1];
+  const timeSpan = Math.max(1, endTime - startTime);
+  const gapIndexes = points.slice(1).flatMap((point, index) => {
+    const previousTime = times[index];
+    const currentTime = times[index + 1];
+    const expectedStepMs = Math.max(1, traffic.trend_resolution_seconds) * 1000;
+    return currentTime - previousTime > expectedStepMs * 1.5 ? [index + 1] : [];
+  });
   const maximum = Math.max(1, ...points.flatMap(point => [point.uploaded_bytes, point.downloaded_bytes]));
   const chartHeight = 112;
   const plotWidth = Math.max(0, chartWidth - 24);
-  const xAt = (index: number) => 12 + (points.length === 1 ? plotWidth / 2 : index * plotWidth / (points.length - 1));
+  const xAt = (index: number) => 12 + (points.length === 1 ? plotWidth / 2 : ((times[index] - startTime) / timeSpan) * plotWidth);
   const yAt = (value: number) => 8 + (1 - value / maximum) * 76;
   const series = [
     { key: 'upload', label: '上传', color: palette.green, values: points.map(point => point.uploaded_bytes) },
@@ -55,8 +70,14 @@ function Trend({ traffic }: { traffic: MobileDeviceTraffic }) {
       style={{ height: chartHeight, position: 'relative', overflow: 'hidden' }}>
       {[0, 1, 2, 3].map(line => <View key={line} style={{ position: 'absolute', left: 0, right: 0,
         top: 9 + line * 25, borderTopWidth: 1, borderStyle: 'dashed', borderColor: '#EAE8E2' }} />)}
+      {chartWidth > 0 && gapIndexes.map(index => {
+        const x = (xAt(index - 1) + xAt(index)) / 2;
+        return <View key={`gap-${index}`} accessible accessibilityLabel="此处存在数据缺口" style={{ position: 'absolute',
+          left: x, top: 5, bottom: 5, borderLeftWidth: 2, borderStyle: 'dashed', borderColor: palette.muted, zIndex: 3 }} />;
+      })}
       {chartWidth > 0 && series.map(item => <React.Fragment key={item.key}>
         {item.values.slice(1).map((value, index) => {
+          if (gapIndexes.includes(index + 1)) return null;
           const x1 = xAt(index), y1 = yAt(item.values[index]);
           const x2 = xAt(index + 1), y2 = yAt(value);
           const length = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
@@ -72,10 +93,11 @@ function Trend({ traffic }: { traffic: MobileDeviceTraffic }) {
     </View>
     <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
       {points.filter((_, index) => index === 0 || index === points.length - 1 || (points.length > 4 && index === Math.floor(points.length / 2)))
-        .map(point => <Text key={point.bucket_start} style={{ color: palette.muted, fontSize: 9 }}>
+        .map(point => <Text key={point.bucket_start} style={{ flex: 1, textAlign: 'center', color: palette.muted, fontSize: 14, lineHeight: 20 }}>
           {new Date(point.bucket_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </Text>)}
     </View>
+    {gapIndexes.length > 0 && <Text accessibilityLabel="此处存在数据缺口" style={ui.muted}>空白间隔表示没有对应数据样本，趋势线不会跨越缺口连接。</Text>}
     {points.length === 1 && <Text style={ui.muted}>单个样本：上传 {bytes(points[0].uploaded_bytes)}，下载 {bytes(points[0].downloaded_bytes)}。</Text>}
   </View>;
 }
@@ -90,15 +112,21 @@ export default function MobileDeviceDetailScreen({ lifecycle = nativeAppLifecycl
   // foreground default in that initialization window, while explicit inactive/background pause work.
   const [foreground, setForeground] = useState(isForeground(lifecycle.currentState()));
   const [deviceData, setDevice] = useState<MobileDeviceDetail | null>(null);
+  const [historyData, setHistory] = useState<MobileDeviceHistory | null>(null);
   const [trafficData, setTraffic] = useState<MobileDeviceTraffic | null>(null);
   const [window, setWindow] = useState<MobileTrafficWindow>('15m');
+  const [historyWindow, setHistoryWindow] = useState<MobileHistoryWindow>('24h');
   const [deviceBusy, setDeviceBusy] = useState(false);
+  const [historyBusy, setHistoryBusy] = useState(false);
   const [trafficBusy, setTrafficBusy] = useState(false);
   const [deviceStale, setDeviceStale] = useState(false);
+  const [historyStale, setHistoryStale] = useState(false);
   const [trafficStale, setTrafficStale] = useState(false);
   const [deviceError, setDeviceError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [trafficError, setTrafficError] = useState<string | null>(null);
   const detailAbort = useRef<AbortController | null>(null);
+  const historyAbort = useRef<AbortController | null>(null);
   const trafficAbort = useRef<AbortController | null>(null);
   const scopeLossHandled = useRef(false);
 
@@ -108,8 +136,8 @@ export default function MobileDeviceDetailScreen({ lifecycle = nativeAppLifecycl
   }, [lifecycle]);
 
   useEffect(() => {
-    setDevice(null); setTraffic(null); setDeviceError(null); setTrafficError(null);
-    setDeviceStale(false); setTrafficStale(false); scopeLossHandled.current = false;
+    setDevice(null); setHistory(null); setTraffic(null); setDeviceError(null); setHistoryError(null); setTrafficError(null);
+    setDeviceStale(false); setHistoryStale(false); setTrafficStale(false); scopeLossHandled.current = false;
   }, [deviceId]);
 
   useEffect(() => {
@@ -156,6 +184,43 @@ export default function MobileDeviceDetailScreen({ lifecycle = nativeAppLifecycl
     const load = async () => {
       if (busy) return;
       busy = true;
+      const abort = new AbortController(); historyAbort.current = abort;
+      setHistoryBusy(true);
+      try {
+        const value = await auth.requestAuthorized((server, token) => mobileApi.deviceHistory(server, token, deviceId, historyWindow, abort.signal));
+        if (!disposed && !abort.signal.aborted && value.device_id === deviceId && value.window === historyWindow) {
+          setHistory(value); setHistoryStale(false); setHistoryError(null);
+        }
+      } catch (error) {
+        if (disposed || abort.signal.aborted) return;
+        if (error instanceof MobileApiError && error.status === 404) {
+          if (!scopeLossHandled.current) {
+            scopeLossHandled.current = true; setDevice(null); setHistory(null); setTraffic(null);
+            void auth.sync();
+            Alert.alert('授权范围已变化', '该设备已不在当前授权范围内，详情已清除。');
+            navigation.goBack();
+          }
+          return;
+        }
+        setHistoryStale(true); setHistoryError(messageFor(error));
+      } finally {
+        if (!disposed && !abort.signal.aborted) setHistoryBusy(false);
+        if (historyAbort.current === abort) historyAbort.current = null;
+        busy = false;
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), 30_000);
+    return () => { disposed = true; clearInterval(timer); historyAbort.current?.abort(); };
+  }, [auth.requestAuthorized, auth.sync, deviceId, focused, foreground, historyWindow, navigation]);
+
+  useEffect(() => {
+    if (!focused || !foreground || !deviceId) return;
+    let disposed = false;
+    let busy = false;
+    const load = async () => {
+      if (busy) return;
+      busy = true;
       const abort = new AbortController(); trafficAbort.current = abort;
       setTrafficBusy(true);
       try {
@@ -186,10 +251,11 @@ export default function MobileDeviceDetailScreen({ lifecycle = nativeAppLifecycl
     return () => { disposed = true; clearInterval(timer); trafficAbort.current?.abort(); };
   }, [auth.requestAuthorized, auth.sync, deviceId, focused, foreground, navigation, window]);
 
-  useEffect(() => () => { detailAbort.current?.abort(); trafficAbort.current?.abort(); }, []);
+  useEffect(() => () => { detailAbort.current?.abort(); historyAbort.current?.abort(); trafficAbort.current?.abort(); }, []);
 
   // Hide an old response during the render before device/window effects run.
   const device = deviceData?.device_id === deviceId ? deviceData : null;
+  const history = historyData?.device_id === deviceId && historyData.window === historyWindow ? historyData : null;
   const traffic = trafficData?.device_id === deviceId && trafficData.window === window ? trafficData : null;
   const capability = device?.security_capability;
   const healthLabel = capability?.available === false ? '安全分析不可用' :
@@ -201,6 +267,7 @@ export default function MobileDeviceDetailScreen({ lifecycle = nativeAppLifecycl
   }, [device?.display_name, navigation]);
   return <ScrollView style={ui.page} contentContainerStyle={design.pageContent}>
     {deviceError && <Text accessibilityRole="alert" style={ui.warning}>设备信息可能已过期：{deviceError}</Text>}
+    {historyError && <Text accessibilityRole="alert" style={ui.warning}>{historyStale ? '历史数据刷新失败，显示上次读取结果。' : '历史数据读取失败。'} {historyError}</Text>}
     {trafficError && <Text accessibilityRole="alert" style={ui.warning}>流量信息可能已过期：{trafficError}</Text>}
     {deviceStale && device && <Text accessibilityRole="alert" style={ui.warning}>设备数据连接中断，显示的是本次打开后取得的数据。</Text>}
     {trafficStale && traffic && <Text accessibilityRole="alert" style={ui.warning}>流量刷新失败，以下为最近一次真实数据。</Text>}
@@ -227,6 +294,58 @@ export default function MobileDeviceDetailScreen({ lifecycle = nativeAppLifecycl
         <View style={design.detailArt}>
           <Ionicons name={deviceIcon(`${device.display_name} ${device.device_type}`)} size={53} color="#4E5552" />
         </View>
+      </View>
+
+      {device.device_type === 'camera' && <View style={design.detailSection}>
+        <Text style={design.detailSectionTitle}>摄像头画面</Text>
+        <Text style={ui.warning}>未配置画面接口 · 当前无画面</Text>
+        <Text style={ui.muted}>项目没有可供 APP 使用的视频流或快照 API，不显示占位画面。</Text>
+        <Text style={ui.muted}>设备连接状态：{connectionLabels[device.connection_status]} · 最近收到遥测：{history?.latest ? time(history.latest.received_at) : '无留存记录'}</Text>
+      </View>}
+
+      <View style={design.detailSection}>
+        <Text style={design.detailSectionTitle}>{device.device_type === 'sensor' ? '温湿度与历史趋势' : '设备上报与状态变化'}</Text>
+        {!history && historyBusy && <ActivityIndicator accessibilityLabel="正在读取设备历史" color={palette.green} />}
+        {!history && !historyBusy && <Text style={ui.muted}>{historyError ?? '尚无设备历史记录。'}</Text>}
+        {history && <>
+          {device.device_type === 'sensor' && <>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+              {([{ key: 'temp', title: '温度', unit: '°C' }, { key: 'humidity', title: '湿度', unit: '%RH' }] as const).map(metric => {
+                const value = history.latest?.telemetry[metric.key];
+                const valid = typeof value === 'number' && Number.isFinite(value);
+                return <View key={metric.key} style={{ flexGrow: 1, flexBasis: 130, minWidth: 130, padding: 14,
+                  gap: 5, borderRadius: 16, borderWidth: 1, borderColor: palette.border }}>
+                  <Text style={ui.label}>{metric.title}</Text>
+                  <Text style={{ color: palette.text, fontSize: 34, lineHeight: 40, fontWeight: '800' }}>{valid ? Number(value).toFixed(1) : '—'}</Text>
+                  <Text style={ui.label}>{metric.unit}</Text>
+                  <Text style={ui.muted}>{valid && history.latest ? `观测 ${time(history.latest.observed_at)}\n接收 ${time(history.latest.received_at)}` : '没有该项有效读数'}</Text>
+                </View>;
+              })}
+            </View>
+            <Text style={ui.muted}>历史来自已留存设备观测；最近收到 {history.latest ? time(history.latest.received_at) : '无记录'}。</Text>
+            <Text style={ui.label}>趋势时间范围</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {HISTORY_WINDOWS.map(item => {
+                const active = historyWindow === item.value;
+                return <TouchableOpacity key={item.value} accessibilityRole="button" accessibilityState={{ selected: active }}
+                  style={[design.filterChip, active && design.filterChipActive]} onPress={() => setHistoryWindow(item.value)}>
+                  <Text style={[design.filterText, active && design.filterTextActive]}>{item.label}</Text>
+                </TouchableOpacity>;
+              })}
+            </View>
+            {history.availability.available ? <MobileSensorCharts history={history} /> :
+              <Text style={ui.muted}>{history.availability.reason === 'no_state_observations' ? '所选时段没有设备历史观测。' : '留存观测中没有可用的传感器数值。'}</Text>}
+          </>}
+          {device.device_type !== 'sensor' && history.latest && Object.entries(history.latest.telemetry).map(([key, value]) =>
+            <Text key={key} style={ui.body}>{key}：{value === null ? '空值' : typeof value === 'boolean' ? (value ? '是' : '否') : String(value)}</Text>)}
+          {history.series.slice(-5).reverse().map(point => <Text key={point.observation_id} style={design.noticeMeta}>
+            {time(point.received_at)} · {Object.entries(point.telemetry).map(([key, value]) => `${key} ${String(value)}`).join(' · ') || '已收到状态记录'}
+          </Text>)}
+          {history.connection_history_available ? history.connection_status_changes.length > 0 ? history.connection_status_changes.slice(-5).reverse().map(change =>
+            <Text key={change.event_id} style={ui.body}>{time(change.occurred_at)} · 连接 {change.from_status} → {change.to_status}（{change.source === 'timeout' ? '超时检测' : '上报刷新'}）</Text>) :
+            <Text style={ui.muted}>所选时段没有留存的连接状态变化。</Text> :
+            <Text style={ui.muted}>{history.connection_history_note}</Text>}
+        </>}
       </View>
 
       <View style={design.detailSection}>

@@ -60,6 +60,34 @@ export type MobileDeviceTraffic = {
   protocols: { category: 'tcp' | 'udp' | 'network_diagnostics' | 'other'; label: string; bytes: number; packets: number; share_percent: number }[];
   data_quality: { complete: null; message: string };
 };
+export type MobileHistoryWindow = '1h' | '24h' | '7d';
+export type MobileHistoryPoint = {
+  observation_id: number; observed_at: string; received_at: string;
+  telemetry: Record<string, string | number | boolean | null>;
+};
+export type MobileConnectionChange = {
+  event_id: number; occurred_at: string; from_status: MobileDevice['connection_status'];
+  to_status: MobileDevice['connection_status']; source: 'report' | 'timeout';
+};
+export type MobileDeviceHistory = {
+  device_id: string; window: MobileHistoryWindow; query_window: { from: string; to: string };
+  generated_at: string; availability: { available: boolean; reason: string | null };
+  data_source: 'v3_device_state_observations'; latest: MobileHistoryPoint | null;
+  series: MobileHistoryPoint[]; truncated: boolean; bucket_seconds: number;
+  connection_history_available: boolean; connection_status_changes: MobileConnectionChange[];
+  connection_history_truncated: boolean; connection_history_note: string;
+};
+export type MobileTopologyWindow = MobileHistoryWindow;
+export type MobileTopology = {
+  generated_at: string; window: { from: string; to: string; range: MobileTopologyWindow };
+  nodes: Array<{ device_id: string; display_name: string; device_type: string; area_id: string | null;
+    connection_status: MobileDevice['connection_status']; last_received_at: string | null; retired: boolean;
+    active_alert_count: number | null; highest_alert_severity: NoticeSeverity | null }>;
+  edges: Array<{ source_device_id: string; target_device_id: string; bytes: number; packets: number;
+    flows: number; protocols: string[]; last_seen: string }>;
+  availability: { available: boolean; reason: string | null; source: 'v3_device_traffic_peer_minutes' | null };
+  alert_capability: { available: boolean; reason: string | null };
+};
 export type Overview = {
   generated_at: string; user: { user_id: number; username: string };
   devices: MobileDevice[]; security_capability: SecurityCapability;
@@ -72,6 +100,22 @@ export type MobileNotice = {
   affected_devices: NoticeDevice[]; first_seen_at: string; updated_at: string;
   status: NoticeStatus; public_progress: string; read: boolean; first_read_at: string | null;
   acknowledged: boolean; acknowledged_at: string | null; resolved_at: string | null;
+};
+export type MobileNoticeReplay = {
+  incident_id: string; generated_at: string; window: { from: string; to: string };
+  notice: Pick<MobileNotice, 'user_title' | 'user_summary' | 'severity' | 'status' | 'first_seen_at' | 'public_progress'>;
+  incident_timeline: Array<{ occurred_at: string; resulting_status: NoticeStatus; public_progress: string }>;
+  devices: Array<NoticeDevice & { current_connection_status: MobileDevice['connection_status'];
+    current_last_received_at: string | null; observations: Array<{ observation_id: number; observed_at: string;
+      received_at: string; temperature_c: number | null; humidity_percent: number | null }> }>;
+  relationships: Array<{ source_device_id: string; target_device_id: string; bucket_start: string;
+    direction: 'tx' | 'rx'; protocol: string; bytes: number; packets: number; flows: number;
+    first_seen: string; last_seen: string }>;
+  connection_status_changes: Array<MobileConnectionChange & { device_id: string; state_version: number | null }>;
+  gaps: Array<{ device_id: string; from: string; to: string;
+    reason: 'no_observations_in_window' | 'no_retained_observation' | 'observation_gap_over_stale_threshold' }>;
+  truncated: boolean; traffic_available: boolean;
+  capabilities: { connection_status_history: boolean; camera_media: false; reason: string };
 };
 export type NoticeTombstone = { incident_id: string; change_id: number; reason: string };
 export type NoticeCollection = {
@@ -250,6 +294,10 @@ const finiteNonnegative = (value: unknown): number => {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new Error('number');
   return value;
 };
+const finiteNumber = (value: unknown): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('number');
+  return value;
+};
 const parseDeviceNoticeSummary = (value: unknown): MobileDeviceNoticeSummary => {
   const x = obj(value); onlyKeys(x, ['incident_id', 'user_title', 'severity', 'status', 'updated_at', 'read', 'acknowledged']);
   if (typeof x.read !== 'boolean' || typeof x.acknowledged !== 'boolean') throw new Error('notice state');
@@ -354,6 +402,158 @@ export function parseMobileDeviceTraffic(value: unknown): MobileDeviceTraffic {
     data_quality: { complete: null, message: str(quality.message) } };
 }
 
+const parseTelemetry = (value: unknown): Record<string, string | number | boolean | null> => {
+  const x = obj(value);
+  const forbidden = /password|passwd|token|secret|credential|auth|jwt|api_?key|signature|(^|_)(ip|mac)($|_)/i;
+  const result: Record<string, string | number | boolean | null> = {};
+  Object.entries(x).forEach(([key, item]) => {
+    if (!key || key.length > 64 || forbidden.test(key)) throw new Error('unsafe telemetry key');
+    if (item === null || typeof item === 'boolean' || typeof item === 'string') {
+      if (typeof item === 'string' && item.length > 256) throw new Error('telemetry string');
+      result[key] = item;
+    } else if (typeof item === 'number' && Number.isFinite(item)) result[key] = item;
+    else throw new Error('telemetry scalar');
+  });
+  return result;
+};
+const parseHistoryPoint = (value: unknown): MobileHistoryPoint => {
+  const x = obj(value); onlyKeys(x, ['observation_id', 'observed_at', 'received_at', 'telemetry']);
+  return { observation_id: int(x.observation_id), observed_at: iso(x.observed_at),
+    received_at: iso(x.received_at), telemetry: parseTelemetry(x.telemetry) };
+};
+const connectionStatuses = ['online', 'stale', 'offline', 'unknown'] as const;
+const parseMobileConnectionChange = (value: unknown): MobileConnectionChange => {
+  const x = obj(value); onlyKeys(x, ['event_id', 'occurred_at', 'from_status', 'to_status', 'source']);
+  return { event_id: int(x.event_id), occurred_at: iso(x.occurred_at),
+    from_status: oneOf(x.from_status, connectionStatuses), to_status: oneOf(x.to_status, connectionStatuses),
+    source: oneOf(x.source, ['report', 'timeout']) };
+};
+export function parseMobileDeviceHistory(value: unknown): MobileDeviceHistory {
+  const x = obj(value);
+  onlyKeys(x, ['device_id', 'window', 'query_window', 'generated_at', 'availability', 'data_source', 'latest',
+    'series', 'truncated', 'bucket_seconds', 'connection_history_available', 'connection_status_changes',
+    'connection_history_truncated', 'connection_history_note']);
+  const bounds = obj(x.query_window); onlyKeys(bounds, ['from', 'to']);
+  const availability = obj(x.availability); onlyKeys(availability, ['available', 'reason']);
+  if (typeof availability.available !== 'boolean' || typeof x.truncated !== 'boolean' ||
+    typeof x.connection_history_available !== 'boolean' || typeof x.connection_history_truncated !== 'boolean' ||
+    !Array.isArray(x.series) || !Array.isArray(x.connection_status_changes)) throw new Error('history');
+  const from = iso(bounds.from), to = iso(bounds.to);
+  if (Date.parse(from) >= Date.parse(to)) throw new Error('history range');
+  const series = x.series.map(parseHistoryPoint);
+  const latest = nullable(x.latest, parseHistoryPoint);
+  if (availability.available !== series.some(point => Object.keys(point.telemetry).length > 0)) throw new Error('history availability');
+  return { device_id: nonempty(x.device_id), window: oneOf(x.window, ['1h', '24h', '7d']),
+    query_window: { from, to }, generated_at: iso(x.generated_at),
+    availability: { available: availability.available, reason: nullable(availability.reason, str) },
+    data_source: oneOf(x.data_source, ['v3_device_state_observations']), latest, series,
+    truncated: x.truncated, bucket_seconds: int(x.bucket_seconds),
+    connection_history_available: x.connection_history_available,
+    connection_status_changes: x.connection_status_changes.map(parseMobileConnectionChange),
+    connection_history_truncated: x.connection_history_truncated,
+    connection_history_note: str(x.connection_history_note) };
+}
+export function parseMobileTopology(value: unknown): MobileTopology {
+  const x = obj(value); onlyKeys(x, ['generated_at', 'window', 'nodes', 'edges', 'availability', 'alert_capability']);
+  if (!Array.isArray(x.nodes) || !Array.isArray(x.edges)) throw new Error('topology arrays');
+  const window = obj(x.window); onlyKeys(window, ['from', 'to', 'range']);
+  const from = iso(window.from), to = iso(window.to);
+  if (Date.parse(from) >= Date.parse(to)) throw new Error('topology range');
+  const availability = obj(x.availability); onlyKeys(availability, ['available', 'reason', 'source']);
+  if (typeof availability.available !== 'boolean') throw new Error('topology availability');
+  const alert = obj(x.alert_capability); onlyKeys(alert, ['available', 'reason']);
+  if (typeof alert.available !== 'boolean') throw new Error('alert capability');
+  const nodes = x.nodes.map((raw: unknown) => {
+    const n = obj(raw); onlyKeys(n, ['device_id', 'display_name', 'device_type', 'area_id', 'connection_status',
+      'last_received_at', 'retired', 'active_alert_count', 'highest_alert_severity']);
+    if (typeof n.retired !== 'boolean') throw new Error('retired');
+    const count = nullable(n.active_alert_count, int);
+    const severity = nullable(n.highest_alert_severity, value => oneOf<NoticeSeverity>(value, ['info', 'low', 'medium', 'high', 'critical']));
+    if ((count === null) !== (!alert.available) || (count === 0 && severity !== null)) throw new Error('alert state');
+    return { device_id: nonempty(n.device_id), display_name: str(n.display_name), device_type: str(n.device_type),
+      area_id: nullable(n.area_id, str), connection_status: oneOf(n.connection_status, connectionStatuses),
+      last_received_at: nullable(n.last_received_at, iso), retired: n.retired,
+      active_alert_count: count, highest_alert_severity: severity };
+  });
+  const ids = new Set(nodes.map(node => node.device_id));
+  const edges = x.edges.map((raw: unknown) => {
+    const e = obj(raw); onlyKeys(e, ['source_device_id', 'target_device_id', 'bytes', 'packets', 'flows', 'protocols', 'last_seen']);
+    if (!Array.isArray(e.protocols)) throw new Error('protocols');
+    const source = nonempty(e.source_device_id), target = nonempty(e.target_device_id);
+    if (!ids.has(source) || !ids.has(target)) throw new Error('edge outside node set');
+    return { source_device_id: source, target_device_id: target, bytes: int(e.bytes), packets: int(e.packets),
+      flows: int(e.flows), protocols: e.protocols.map(nonempty), last_seen: iso(e.last_seen) };
+  });
+  const edgeSource: MobileTopology['availability']['source'] = nullable(availability.source, value => {
+    if (value !== 'v3_device_traffic_peer_minutes') throw new Error('topology source');
+    return 'v3_device_traffic_peer_minutes' as const;
+  });
+  if (availability.available !== (edgeSource !== null) || (availability.available && availability.reason === 'no_observed_device_relationships' && edges.length !== 0)) throw new Error('topology source');
+  return { generated_at: iso(x.generated_at), window: { from, to, range: oneOf(window.range, ['1h', '24h', '7d']) },
+    nodes, edges, availability: { available: availability.available, reason: nullable(availability.reason, str), source: edgeSource },
+    alert_capability: { available: alert.available, reason: nullable(alert.reason, str) } };
+}
+export function parseMobileNoticeReplay(value: unknown): MobileNoticeReplay {
+  const x = obj(value); onlyKeys(x, ['incident_id', 'generated_at', 'window', 'notice', 'incident_timeline', 'devices',
+    'relationships', 'connection_status_changes', 'gaps', 'truncated', 'traffic_available', 'capabilities']);
+  const bounds = obj(x.window); onlyKeys(bounds, ['from', 'to']);
+  const from = iso(bounds.from), to = iso(bounds.to);
+  if (Date.parse(from) >= Date.parse(to) || !Array.isArray(x.incident_timeline) || !Array.isArray(x.devices) ||
+    !Array.isArray(x.relationships) || !Array.isArray(x.connection_status_changes) || !Array.isArray(x.gaps) ||
+    typeof x.truncated !== 'boolean' || typeof x.traffic_available !== 'boolean') throw new Error('replay');
+  const noticeValue = obj(x.notice); onlyKeys(noticeValue, ['user_title', 'user_summary', 'severity', 'status', 'first_seen_at', 'public_progress']);
+  const notice = { user_title: str(noticeValue.user_title), user_summary: str(noticeValue.user_summary),
+    severity: oneOf(noticeValue.severity, ['info', 'low', 'medium', 'high', 'critical']),
+    status: oneOf(noticeValue.status, ['open', 'acknowledged', 'recovering', 'resolved', 'false_positive']),
+    first_seen_at: iso(noticeValue.first_seen_at), public_progress: str(noticeValue.public_progress) };
+  const incidentTimeline = x.incident_timeline.map((raw: unknown) => {
+    const item = obj(raw); onlyKeys(item, ['occurred_at', 'resulting_status', 'public_progress']);
+    return { occurred_at: iso(item.occurred_at), resulting_status: oneOf(item.resulting_status,
+      ['open', 'acknowledged', 'recovering', 'resolved', 'false_positive']), public_progress: str(item.public_progress) };
+  });
+  const deviceIds = new Set<string>();
+  const devices = x.devices.map((raw: unknown) => {
+    const d = obj(raw); onlyKeys(d, ['device_id', 'display_name', 'device_type', 'area_id', 'current_connection_status',
+      'current_last_received_at', 'observations']);
+    if (!Array.isArray(d.observations)) throw new Error('device observations');
+    const id = nonempty(d.device_id); deviceIds.add(id);
+    const observations = d.observations.map((rawPoint: unknown) => {
+      const p = obj(rawPoint); onlyKeys(p, ['observation_id', 'device_id', 'observed_at', 'received_at', 'temperature_c', 'humidity_percent']);
+      if (nonempty(p.device_id) !== id) throw new Error('cross-device observation');
+      return { observation_id: int(p.observation_id), observed_at: iso(p.observed_at), received_at: iso(p.received_at),
+        temperature_c: nullable(p.temperature_c, finiteNumber), humidity_percent: nullable(p.humidity_percent, finiteNonnegative) };
+    });
+    return { device_id: id, display_name: str(d.display_name), device_type: str(d.device_type), area_id: nullable(d.area_id, str),
+      current_connection_status: oneOf(d.current_connection_status, connectionStatuses),
+      current_last_received_at: nullable(d.current_last_received_at, iso), observations };
+  });
+  const relationships = x.relationships.map((raw: unknown) => {
+    const r = obj(raw); onlyKeys(r, ['source_device_id', 'target_device_id', 'bucket_start', 'direction', 'protocol', 'bytes', 'packets', 'flows', 'first_seen', 'last_seen']);
+    const source = nonempty(r.source_device_id), target = nonempty(r.target_device_id);
+    if (!deviceIds.has(source) || !deviceIds.has(target)) throw new Error('relationship outside scope');
+    return { source_device_id: source, target_device_id: target, bucket_start: iso(r.bucket_start), direction: oneOf(r.direction, ['tx', 'rx']),
+      protocol: str(r.protocol), bytes: int(r.bytes), packets: int(r.packets), flows: int(r.flows), first_seen: iso(r.first_seen), last_seen: iso(r.last_seen) };
+  });
+  const changes = x.connection_status_changes.map((raw: unknown) => {
+    const c = obj(raw); onlyKeys(c, ['device_id', 'event_id', 'occurred_at', 'state_version', 'from_status', 'to_status', 'source']);
+    const id = nonempty(c.device_id); if (!deviceIds.has(id)) throw new Error('change outside scope');
+    return { ...parseMobileConnectionChange({ event_id: c.event_id, occurred_at: c.occurred_at, from_status: c.from_status,
+      to_status: c.to_status, source: c.source }), device_id: id, state_version: nullable(c.state_version, int) };
+  });
+  const gaps = x.gaps.map((raw: unknown) => {
+    const g = obj(raw); onlyKeys(g, ['device_id', 'from', 'to', 'reason']);
+    const id = nonempty(g.device_id); if (!deviceIds.has(id)) throw new Error('gap outside scope');
+    return { device_id: id, from: iso(g.from), to: iso(g.to), reason: oneOf(g.reason,
+      ['no_observations_in_window', 'no_retained_observation', 'observation_gap_over_stale_threshold']) };
+  });
+  const capabilities = obj(x.capabilities); onlyKeys(capabilities, ['connection_status_history', 'camera_media', 'reason']);
+  if (typeof capabilities.connection_status_history !== 'boolean' || capabilities.camera_media !== false) throw new Error('replay capability');
+  return { incident_id: nonempty(x.incident_id), generated_at: iso(x.generated_at), window: { from, to }, notice,
+    incident_timeline: incidentTimeline, devices, relationships, connection_status_changes: changes, gaps,
+    truncated: x.truncated, traffic_available: x.traffic_available,
+    capabilities: { connection_status_history: capabilities.connection_status_history, camera_media: false, reason: str(capabilities.reason) } };
+}
+
 async function request<T>(config: ServerConfig, path: string, parse: (v: unknown) => T,
   options: { method?: 'GET' | 'POST'; body?: object; accessToken?: string; signal?: AbortSignal; idempotencyKey?: string } = {}): Promise<T> {
   let response: Response;
@@ -403,6 +603,16 @@ export const mobileApi = {
   },
   notice: (config: ServerConfig, accessToken: string, incidentId: string, signal?: AbortSignal) =>
     request(config, `/api/v3/mobile/notices/${encodeURIComponent(incidentId)}`, parseNotice, { accessToken, signal }),
+  noticeReplay: (config: ServerConfig, accessToken: string, incidentId: string,
+    bounds: { from?: string; to?: string } = {}, signal?: AbortSignal) => {
+    const query = new URLSearchParams();
+    if (bounds.from) query.set('from', bounds.from);
+    if (bounds.to) query.set('to', bounds.to);
+    const encoded = query.toString();
+    const suffix = encoded ? `?${encoded}` : '';
+    return request(config, `/api/v3/mobile/notices/${encodeURIComponent(incidentId)}/replay${suffix}`,
+      parseMobileNoticeReplay, { accessToken, signal });
+  },
   markNoticeRead: (config: ServerConfig, accessToken: string, incidentId: string, signal?: AbortSignal) =>
     request(config, `/api/v3/mobile/notices/${encodeURIComponent(incidentId)}/read`, parseNotice, { method: 'POST', body: {}, accessToken, signal }),
   acknowledgeNotice: (config: ServerConfig, accessToken: string, incidentId: string, signal?: AbortSignal) =>
@@ -420,4 +630,10 @@ export const mobileApi = {
   deviceTraffic: (config: ServerConfig, accessToken: string, deviceId: string, window: MobileTrafficWindow = '15m', signal?: AbortSignal) =>
     request(config, `/api/v3/mobile/devices/${encodeURIComponent(deviceId)}/traffic?window=${encodeURIComponent(window)}`,
       parseMobileDeviceTraffic, { accessToken, signal }),
+  deviceHistory: (config: ServerConfig, accessToken: string, deviceId: string, window: MobileHistoryWindow = '24h', signal?: AbortSignal) =>
+    request(config, `/api/v3/mobile/devices/${encodeURIComponent(deviceId)}/history?window=${encodeURIComponent(window)}`,
+      parseMobileDeviceHistory, { accessToken, signal }),
+  topology: (config: ServerConfig, accessToken: string, window: MobileTopologyWindow = '24h', signal?: AbortSignal) =>
+    request(config, `/api/v3/mobile/topology?window=${encodeURIComponent(window)}`,
+      parseMobileTopology, { accessToken, signal }),
 };
