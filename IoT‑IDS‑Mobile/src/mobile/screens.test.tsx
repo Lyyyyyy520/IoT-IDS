@@ -11,7 +11,7 @@ import type { AppLifecycleAdapter } from './appLifecycle';
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
-const mockNavigation = { navigate: mockNavigate, replace: jest.fn(), goBack: mockGoBack };
+const mockNavigation = { navigate: mockNavigate, replace: jest.fn(), goBack: mockGoBack, setOptions: jest.fn() };
 let mockRouteParams: { incidentId: string; deviceId: string } = { incidentId: 'inc-1', deviceId: 'door-1' };
 
 jest.mock('./MobileContext', () => ({ useMobile: jest.fn(), messageFor: (error: { kind?: string }) => error?.kind === 'network' ? '无法连接服务器，请检查网络后重试' : '操作未完成，请重试' }));
@@ -94,7 +94,7 @@ describe('authorized user screens', () => {
     useMobileMock.mockReturnValue({ ...base, overview });
     await render(<HomeScreen />);
     expect(screen.getByText('门口设备')).toBeTruthy();
-    expect(screen.getByText('连接：未知')).toBeTruthy();
+    expect(screen.getByText('未知')).toBeTruthy();
     expect(screen.getByText('运行模式：disabled · 已退役')).toBeTruthy();
     expect(screen.getByText('安全事件功能尚未接入')).toBeTruthy();
     expect(screen.queryByText(/当前安全|无攻击|192\.168\.|MAC|GNN/)).toBeNull();
@@ -132,7 +132,7 @@ describe('authorized user screens', () => {
       supportContact: { available: false, reason: 'support_contact_not_configured' }, syncNotices: jest.fn(), syncSupportContact: jest.fn() });
     await render(<NoticeListScreen />);
     expect(screen.getByText('门口设备提醒')).toBeTruthy();
-    expect(screen.getByText(/状态：等待管理员处理/)).toBeTruthy();
+    expect(screen.getByText(/等待管理员处理/)).toBeTruthy();
     expect(screen.getByText(/管理员正在核查/)).toBeTruthy();
     expect(screen.queryByText(/攻击源|192\.168\.|MAC|GNN|模型/)).toBeNull();
   });
@@ -155,7 +155,7 @@ describe('authorized user screens', () => {
       notices: [], noticesStale: false, noticesBusy: false, supportContact: { available: false, reason: 'support_contact_not_configured' },
       syncNotices: jest.fn(), syncSupportContact: jest.fn() });
     await render(<NoticeListScreen />);
-    expect(screen.getByText('当前没有已记录提醒。')).toBeTruthy();
+    expect(screen.getByText('当前没有已记录提醒')).toBeTruthy();
     expect(screen.queryByText(/当前安全|无攻击/)).toBeNull();
   });
 

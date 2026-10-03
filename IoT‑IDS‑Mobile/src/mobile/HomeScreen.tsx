@@ -124,6 +124,7 @@ export default function HomeScreen() {
             </View>
             <Text numberOfLines={1} style={design.deviceTileTitle}>{device.display_name}</Text>
             <Text numberOfLines={1} style={design.deviceTileMeta}>{statusText[device.connection_status]} · {device.area_id ?? device.device_type}</Text>
+            <Text numberOfLines={1} style={design.deviceTileMeta}>运行模式：{device.operation_mode}{device.retired ? ' · 已退役' : ''}</Text>
           </TouchableOpacity>;
         })}
       </View>}
@@ -152,7 +153,7 @@ export default function HomeScreen() {
       <Text style={design.noticeSummary} numberOfLines={2}>{notice.user_summary ?? notice.public_progress}</Text>
       <Text style={design.noticeMeta}>查看处理进度　›</Text>
     </TouchableOpacity>) : <View style={[ui.card, { paddingVertical: 14 }]}>
-      <Text style={ui.muted}>{unread === 0 ? '当前没有未读提醒。' : '暂无提醒数据'}</Text>
+      <Text style={ui.muted}>{auth.overview?.security_capability.available === false ? '安全事件功能尚未接入' : (unread === 0 ? '当前没有未读提醒。' : '暂无提醒数据')}</Text>
     </View>}
   </ScrollView>;
 }

@@ -50,6 +50,14 @@ function Trend({ traffic }: { traffic: MobileDeviceTraffic }) {
     { key: 'upload', label: '上传', color: palette.green, values: points.map(point => point.uploaded_bytes) },
     { key: 'download', label: '下载', color: palette.amber, values: points.map(point => point.downloaded_bytes) },
   ];
+  const expected = traffic.trend_resolution_seconds;
+  let previousEpoch = 0;
+  const gapWidths = points.map((point, index) => {
+    const epoch = Date.parse(point.bucket_start) / 1000;
+    const gapBuckets = index > 0 ? Math.max(0, Math.round((epoch - previousEpoch) / expected) - 1) : 0;
+    previousEpoch = epoch;
+    return Math.min(gapBuckets, 4) * 20;
+  });
   return <View style={{ gap: 5 }}>
     <View accessibilityLabel="设备流量趋势图" onLayout={event => setChartWidth(event.nativeEvent.layout.width)}
       style={{ height: chartHeight, position: 'relative', overflow: 'hidden' }}>
@@ -69,6 +77,9 @@ function Trend({ traffic }: { traffic: MobileDeviceTraffic }) {
           style={{ position: 'absolute', left: xAt(index) - 3, top: yAt(value) - 3, width: 7, height: 7,
             borderRadius: 4, backgroundColor: item.color, borderWidth: 1, borderColor: '#FFFFFF', zIndex: 2 }} />)}
       </React.Fragment>)}
+      {gapWidths.map((width, index) => width > 0 && <View key={`gap-${index}`} accessibilityLabel="此处存在数据缺口"
+        style={{ position: 'absolute', left: xAt(index) - width - 6, top: 10, width, height: 74,
+          borderBottomWidth: 1, borderStyle: 'dashed', borderColor: '#D8D5CE' }} />)}
     </View>
     <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
       {points.filter((_, index) => index === 0 || index === points.length - 1 || (points.length > 4 && index === Math.floor(points.length / 2)))
@@ -76,6 +87,7 @@ function Trend({ traffic }: { traffic: MobileDeviceTraffic }) {
           {new Date(point.bucket_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </Text>)}
     </View>
+    <Text style={ui.muted}>空白间隔表示没有对应数据，不按零流量补齐。</Text>
     {points.length === 1 && <Text style={ui.muted}>单个样本：上传 {bytes(points[0].uploaded_bytes)}，下载 {bytes(points[0].downloaded_bytes)}。</Text>}
   </View>;
 }
@@ -289,7 +301,8 @@ export default function MobileDeviceDetailScreen({ lifecycle = nativeAppLifecycl
         <View style={design.detailRow}>
           <View style={[design.detailRowIcon, { backgroundColor: '#F0EFEB' }]}><Ionicons name="settings-outline" size={19} color="#606966" /></View>
           <View style={design.detailRowText}><Text style={design.detailRowTitle}>设备运行状态</Text>
-            <Text style={design.detailRowSubtitle}>{device.status_text.operation} · {device.availability_text}</Text></View>
+            <Text style={design.detailRowSubtitle}>连接状态：{device.status_text.connection}</Text>
+            <Text style={design.detailRowSubtitle}>运行模式：{device.status_text.operation}</Text></View>
           <Ionicons name="chevron-forward" size={18} color="#8D9390" />
         </View>
         <TouchableOpacity accessibilityRole="button" style={[design.detailRow, { borderBottomWidth: 0 }]}
