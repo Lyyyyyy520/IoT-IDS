@@ -72,7 +72,7 @@ function Trend({ traffic }: { traffic: MobileDeviceTraffic }) {
         top: 9 + line * 25, borderTopWidth: 1, borderStyle: 'dashed', borderColor: '#EAE8E2' }} />)}
       {chartWidth > 0 && gapIndexes.map(index => {
         const x = (xAt(index - 1) + xAt(index)) / 2;
-        return <View key={`gap-${index}`} accessible accessibilityLabel="此处存在数据缺口" style={{ position: 'absolute',
+        return <View key={`gap-${index}`} accessible style={{ position: 'absolute',
           left: x, top: 5, bottom: 5, borderLeftWidth: 2, borderStyle: 'dashed', borderColor: palette.muted, zIndex: 3 }} />;
       })}
       {chartWidth > 0 && series.map(item => <React.Fragment key={item.key}>
@@ -97,7 +97,7 @@ function Trend({ traffic }: { traffic: MobileDeviceTraffic }) {
           {new Date(point.bucket_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </Text>)}
     </View>
-    {gapIndexes.length > 0 && <Text style={ui.muted}>空白间隔表示没有对应数据样本，趋势线不会跨越缺口连接。</Text>}
+    {gapIndexes.length > 0 && <Text accessibilityLabel="此处存在数据缺口" style={ui.muted}>空白间隔表示没有对应数据样本，趋势线不会跨越缺口连接。</Text>}
     {points.length === 1 && <Text style={ui.muted}>单个样本：上传 {bytes(points[0].uploaded_bytes)}，下载 {bytes(points[0].downloaded_bytes)}。</Text>}
   </View>;
 }
