@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import { mobileApi, MobileApiError, type MobileNotice, type NoticeStatus } from './api';
 import { messageFor, useMobile } from './MobileContext';
 import SupportContactCard from './SupportContactCard';
-import { palette, ui } from './ui';
+import { design, palette, ui } from './ui';
 
 type NoticeFilter = 'all' | 'unread' | 'unacknowledged' | 'processing' | 'resolved';
 const filterLabels: Record<NoticeFilter, string> = { all: '全部', unread: '未读', unacknowledged: '未知晓', processing: '处理中', resolved: '已解决' };
@@ -26,6 +27,8 @@ export default function NoticeListScreen() {
   const auth = useMobile();
   const navigation = useNavigation<any>();
   const [filter, setFilter] = useState<NoticeFilter>('all');
+  const [ackBusy, setAckBusy] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const focused = useIsFocused();
   const syncRef = useRef(auth.syncNotices);
   syncRef.current = auth.syncNotices;
@@ -38,12 +41,22 @@ export default function NoticeListScreen() {
     return true;
   }), [auth.notices, filter]);
   const capability = auth.overview?.security_capability;
-  return <ScrollView style={ui.page} contentContainerStyle={ui.content}
+  const acknowledge = async (incidentId: string) => {
+    if (ackBusy) return;
+    setAckBusy(incidentId); setActionError(null);
+    try {
+      const value = await auth.requestAuthorized((server, token) => mobileApi.acknowledgeNotice(server, token, incidentId));
+      auth.applyNotice(value);
+    } catch (error) { setActionError(messageFor(error)); }
+    finally { setAckBusy(null); }
+  };
+  const openNotice = (incidentId: string) => navigation.navigate('提醒详情', { incidentId });
+  return <ScrollView style={ui.page} contentContainerStyle={design.pageContent}
     refreshControl={<RefreshControl refreshing={auth.noticesBusy} onRefresh={() => void auth.syncNotices(true)} />}>
-    <Text style={ui.title}>安全提醒</Text>
-    <Text style={ui.subtitle}>这里只显示管理员发布给您的提醒和公开处理进度。</Text>
+    <Text style={ui.subtitle}>这里只显示管理员发布给您的安全提醒和公开处理进度。</Text>
     {auth.noticesStale && <Text accessibilityRole="alert" style={ui.warning}>提醒数据可能已过期。{auth.noticesError ?? ''}</Text>}
     {auth.lastNoticesSynced && <Text style={ui.muted}>最近同步：{new Date(auth.lastNoticesSynced).toLocaleString()}</Text>}
+    {actionError && <Text accessibilityRole="alert" style={ui.warning}>{actionError}</Text>}
     {capability?.available === false ? <View style={ui.card}>
       <Text style={ui.cardTitle}>提醒功能暂不可用</Text><Text style={ui.muted}>安全事件功能尚未接入或暂时不可用。</Text>
     </View> : auth.notices === null ? <View style={ui.card}>
@@ -51,23 +64,60 @@ export default function NoticeListScreen() {
       <Text accessibilityRole="alert" style={auth.noticesError ? ui.warning : ui.muted}>{auth.noticesError ?? '正在获取提醒…'}</Text>
       {auth.noticesError && <TouchableOpacity accessibilityRole="button" style={ui.secondaryButton} onPress={() => void auth.syncNotices(true)}><Text style={ui.secondaryText}>重试</Text></TouchableOpacity>}
     </View> : <>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        {(Object.keys(filterLabels) as NoticeFilter[]).map(key => <TouchableOpacity key={key} accessibilityRole="button"
-          accessibilityState={{ selected: filter === key }} style={ui.secondaryButton} onPress={() => setFilter(key)}>
-          <Text style={ui.secondaryText}>{filterLabels[key]}</Text>
-        </TouchableOpacity>)}
-      </View>
-      {notices.length === 0 ? <View style={ui.card}><Text style={ui.muted}>当前没有已记录提醒。</Text></View> : notices.map(notice =>
-        <TouchableOpacity key={notice.incident_id} accessibilityRole="button" style={ui.card}
-          accessibilityLabel={`查看提醒：${notice.user_title}`} onPress={() => navigation.navigate('提醒详情', { incidentId: notice.incident_id })}>
-          <Severity notice={notice} />
-          <Text style={ui.cardTitle}>{notice.user_title}</Text>
-          <Text style={ui.body} numberOfLines={3}>{notice.user_summary}</Text>
-          <Text style={ui.muted}>相关设备：{notice.affected_devices.map(device => device.display_name).join('、') || '未指定'}</Text>
-          <Text style={ui.muted}>状态：{statusLabels[notice.status]} · {notice.read ? '已读' : '未读'} · {notice.acknowledged ? '我已知晓' : '尚未标记已知晓'}</Text>
-          <Text style={ui.muted}>管理员进度：{notice.public_progress}</Text>
-          <Text style={ui.muted}>更新时间：{new Date(notice.updated_at).toLocaleString()}</Text>
-        </TouchableOpacity>)}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={design.filterList}>
+        {(Object.keys(filterLabels) as NoticeFilter[]).map(key => {
+          const allNotices = auth.notices ?? [];
+          const count = key === 'all' ? allNotices.length : allNotices.filter(item => {
+            if (key === 'unread') return !item.read;
+            if (key === 'unacknowledged') return !item.acknowledged;
+            if (key === 'processing') return processing(item.status);
+            return item.status === 'resolved' || item.status === 'false_positive';
+          }).length;
+          const active = filter === key;
+          return <TouchableOpacity key={key} accessibilityRole="button" accessibilityState={{ selected: active }}
+            style={[design.filterChip, active && design.filterChipActive]} onPress={() => setFilter(key)}>
+            <Text style={[design.filterText, active && design.filterTextActive]}>{filterLabels[key]}</Text>
+            <Text style={[design.filterText, { color: active ? palette.green : palette.muted }]}>{count}</Text>
+          </TouchableOpacity>;
+        })}
+      </ScrollView>
+      {notices.length === 0 ? <View style={[design.detailSection, design.emptyState]}>
+        <View style={[design.summaryIcon, { backgroundColor: palette.greenSoft }]}>
+          <Ionicons name="shield-checkmark" size={25} color={palette.green} />
+        </View>
+        <Text style={ui.cardTitle}>当前没有已记录提醒</Text>
+        <Text style={ui.muted}>有新的提醒时会在这里显示处理进度。</Text>
+      </View> : notices.map(notice => {
+        const urgent = notice.severity === 'critical' || notice.severity === 'high';
+        const finished = notice.status === 'resolved' || notice.status === 'false_positive';
+        return <View key={notice.incident_id} style={[design.noticeCard, urgent && !finished && design.noticeCritical]}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={`查看提醒：${notice.user_title}`}
+            onPress={() => openNotice(notice.incident_id)} style={design.noticeHeader}>
+            <View style={[design.noticeIcon, { backgroundColor: finished ? palette.greenSoft : urgent ? '#F8D9D9' : palette.amberSoft }]}>
+              <Ionicons name={finished ? 'checkmark-circle' : urgent ? 'warning' : 'notifications'}
+                size={25} color={finished ? palette.green : urgent ? palette.coral : palette.amber} />
+            </View>
+            <View style={design.noticeCopy}>
+              <Text style={design.noticeTitle}>{notice.user_title}</Text>
+              <Text style={design.noticeDate}>{new Date(notice.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={19} color="#8D9390" />
+          </TouchableOpacity>
+          <Text style={design.noticeSummary} numberOfLines={3}>{notice.user_summary}</Text>
+          <Text style={design.noticeMeta}>{statusLabels[notice.status]} · {notice.affected_devices.map(device => device.display_name).join('、') || '未指定设备'}</Text>
+          <Text style={design.noticeMeta}>管理员进度：{notice.public_progress}</Text>
+          <View style={design.noticeActions}>
+            {!notice.acknowledged && !finished && <TouchableOpacity accessibilityRole="button" disabled={ackBusy !== null}
+              style={design.noticeAction} onPress={() => void acknowledge(notice.incident_id)}>
+              <Text style={design.noticeActionText}>{ackBusy === notice.incident_id ? '提交中…' : '我已知晓'}</Text>
+            </TouchableOpacity>}
+            <TouchableOpacity accessibilityRole="button" style={[design.noticeAction, design.noticeActionPrimary]}
+              onPress={() => navigation.navigate('提交求助', { incidentId: notice.incident_id })}>
+              <Text style={design.noticeActionTextLight}>联系管理员</Text>
+            </TouchableOpacity>
+          </View>
+        </View>;
+      })}
     </>}
     <SupportContactCard />
   </ScrollView>;
