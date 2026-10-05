@@ -71,30 +71,32 @@ export default function LoginPage() {
 
       {/* Login Card */}
       <Card
+        className="login-card"
         style={{
-          width: 420,
+          width: 'min(320px, calc(100vw - 32px))',
           border: '1px solid var(--border-color)',
           boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
           zIndex: 1,
         }}
-        bodyStyle={{ padding: '40px 36px' } as any}
+        bodyStyle={{ padding: '20px 24px' } as any}
       >
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+        <div style={{ textAlign: 'center', marginBottom: 14 }}>
           <SafetyCertificateOutlined
-            style={{ fontSize: 48, color: 'var(--accent-cyan)', marginBottom: 12 }}
+            style={{ fontSize: 34, color: 'var(--accent-cyan)', marginBottom: 6 }}
           />
-          <Title level={3} style={{ color: 'var(--text-primary)', margin: 0 }}>
+          <Title level={3} style={{ color: 'var(--text-primary)', fontSize: 20, margin: 0 }}>
             IoT IDS
           </Title>
-          <Text style={{ color: 'var(--text-secondary)', fontSize: 18, lineHeight: 1.5 }}>
+          <Text style={{ color: 'var(--text-secondary)', fontSize: 15, lineHeight: 1.4 }}>
             智慧社区入侵检测管理平台
           </Text>
         </div>
 
-        <Form onFinish={onFinish} size="large">
+        <Form onFinish={onFinish} size="middle">
           <Form.Item
             name="username"
             rules={[{ required: true, message: '请输入账号' }]}
+            style={{ marginBottom: 10 }}
           >
             <Input
               prefix={<UserOutlined style={{ color: 'var(--text-muted)' }} />}
@@ -105,6 +107,7 @@ export default function LoginPage() {
           <Form.Item
             name="password"
             rules={[{ required: true, message: '请输入密码' }]}
+            style={{ marginBottom: 10 }}
           >
             <Input.Password
               prefix={<LockOutlined style={{ color: 'var(--text-muted)' }} />}
@@ -112,13 +115,13 @@ export default function LoginPage() {
               autoComplete="current-password"
             />
           </Form.Item>
-          <Form.Item style={{ marginBottom: 12 }}>
+          <Form.Item style={{ marginBottom: 8 }}>
             <Button
               type="primary"
               htmlType="submit"
               loading={loading}
               block
-              style={{ height: 52, fontSize: 18 }}
+              style={{ height: 40, fontSize: 15 }}
             >
               登 录
             </Button>
@@ -129,12 +132,12 @@ export default function LoginPage() {
           style={{
             textAlign: 'center',
             color: 'var(--text-muted)',
-            fontSize: 16,
-            marginTop: 16,
+            fontSize: 13,
+            marginTop: 8,
           }}
         >
           <div>账号由系统管理员配置</div>
-          <div style={{ marginTop: 4 }}>请勿使用共享或演示密码</div>
+          <div style={{ marginTop: 2 }}>请勿使用共享或演示密码</div>
         </div>
       </Card>
 
@@ -144,7 +147,7 @@ export default function LoginPage() {
           position: 'absolute',
           bottom: 20,
           color: 'var(--text-muted)',
-          fontSize: 16,
+          fontSize: 14,
           textAlign: 'center',
         }}
       >
