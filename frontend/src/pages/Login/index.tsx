@@ -87,7 +87,7 @@ export default function LoginPage() {
           <Title level={3} style={{ color: 'var(--text-primary)', fontSize: 20, margin: 0 }}>
             IoT IDS
           </Title>
-          <Text style={{ color: 'var(--text-secondary)', fontSize: 15, lineHeight: 1.4 }}>
+          <Text style={{ color: 'var(--text-secondary)', fontSize: 16, lineHeight: 1.4 }}>
             智慧社区入侵检测管理平台
           </Text>
         </div>
@@ -121,7 +121,7 @@ export default function LoginPage() {
               htmlType="submit"
               loading={loading}
               block
-              style={{ height: 40, fontSize: 15 }}
+              style={{ height: 44, fontSize: 16 }}
             >
               登 录
             </Button>
@@ -132,8 +132,8 @@ export default function LoginPage() {
           style={{
             textAlign: 'center',
             color: 'var(--text-muted)',
-            fontSize: 13,
-            marginTop: 8,
+            fontSize: 14,
+            marginTop: 10,
           }}
         >
           <div>账号由系统管理员配置</div>
