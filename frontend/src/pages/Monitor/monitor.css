@@ -167,7 +167,9 @@
 .graph-empty > span { color: #4f6673; font-size: 16px; }
 
 .capability-note { margin: 9px 12px 0; padding: 7px 9px; border-left: 2px solid #7a642e; background: #211d13; color: #b8a975; font-size: 16px; line-height: 1.5; }
-.recent-event-list, .component-list { min-height: 0; overflow-y: auto; padding: 7px 12px 10px; }
+.recent-panel-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.recent-event-list { min-height: 0; padding: 7px 12px 10px; }
+.component-list { min-height: 0; overflow-y: auto; padding: 7px 12px 10px; }
 .recent-event { padding: 7px 2px; display: flex; gap: 9px; border-bottom: 1px solid #192e3a; }
 .event-id { color: #4eb3bd; font: 16px ui-monospace, SFMono-Regular, Consolas, monospace; }
 .event-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -246,7 +248,7 @@
   .monitor-center-column > .graph-panel { min-height: 540px; }
   .topology-panel { min-height: 440px; }
   .device-list { max-height: 420px; }
-  .recent-event-list, .component-list { max-height: 360px; }
+  .component-list { max-height: 360px; }
 }
 
 @media (max-width: 680px) {
@@ -421,6 +423,32 @@
 .sync-button, .monitor-account button, .topology-error button,
 .topology-tools button, .monitor-gate button { min-height: 46px; padding-inline: 12px; }
 .monitor-account > span { max-width: 180px; font-size: 16px; }
+
+/* Put realtime status and sync controls below the main header row, aligned right. */
+.monitor-topbar {
+  grid-template-areas: "brand counters account account" "sync sync sync sync";
+  grid-template-columns: minmax(350px, 1.3fr) minmax(350px, 1.7fr) minmax(285px, 1.25fr) auto;
+  grid-template-rows: auto auto;
+  row-gap: 8px;
+  padding-block: 10px;
+}
+.monitor-brand { grid-area: brand; }
+.status-counters { grid-area: counters; }
+.monitor-sync { grid-area: sync; width: 100%; align-self: center; justify-content: flex-end; }
+.monitor-account { grid-area: account; }
+@media (max-width: 1120px) {
+  .monitor-topbar {
+    grid-template-areas: "brand account" "counters counters" "sync sync";
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+@media (max-width: 680px) {
+  .monitor-topbar {
+    grid-template-areas: "brand" "counters" "sync" "account";
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .monitor-sync { justify-content: flex-end; }
+}
 .device-row { min-height: 0; padding: 0; gap: 0; }
 .device-name { font-size: 22px; line-height: 1.35; }
 .device-manage-link { font-size: 16px; }
@@ -507,4 +535,83 @@
 .device-filter-selects { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0 12px 9px; }
 .monitor-filter-select select { width: 100%; min-width: 0; min-height: 36px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--bg-base); color: var(--text-primary); padding: 5px 8px; font: inherit; font-size: 16px; }
 @media (max-width: 480px) { .device-filter-selects { grid-template-columns: 1fr; } }
+
+/* Keep the inventory summaries visible below the scrollable live device list. */
+.device-list { flex: 1 1 auto; }
+.inventory-summary {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 11px;
+  padding: 12px;
+  border-top: 1px solid #1b3342;
+  background: rgba(8, 18, 27, .56);
+}
+.inventory-summary-section h3 {
+  margin: 0 0 7px;
+  color: #9db4bf;
+  font-size: 16px;
+  font-weight: 650;
+}
+.inventory-status-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.inventory-status-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 7px;
+  border: 1px solid rgba(43, 69, 84, .65);
+  border-radius: 4px;
+  background: rgba(12, 29, 40, .62);
+  color: #91a8b4;
+  font-size: 16px;
+}
+.inventory-status-row > span { display: inline-flex; align-items: center; gap: 6px; }
+.inventory-status-row .status-dot { flex: 0 0 7px; margin: 0; }
+.inventory-status-row strong, .inventory-type-row strong { color: #d6e5ec; font-size: 16px; font-variant-numeric: tabular-nums; }
+.inventory-coverage { margin-top: 7px; }
+.inventory-coverage > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #8299a6; font-size: 14px; }
+.inventory-coverage strong { color: #39c787; font-size: 16px; font-variant-numeric: tabular-nums; }
+.inventory-coverage > i { display: block; height: 6px; margin-top: 4px; overflow: hidden; border-radius: 4px; background: #172d39; }
+.inventory-coverage > i > b { display: block; height: 100%; border-radius: inherit; background: #36c787; }
+.inventory-type-list { display: grid; gap: 5px; max-height: 82px; overflow-y: auto; }
+.inventory-type-row { min-width: 0; display: grid; grid-template-columns: minmax(55px, .9fr) minmax(36px, 1.5fr) 24px; align-items: center; gap: 8px; color: #91a8b4; font-size: 16px; }
+.inventory-type-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inventory-type-row > i { height: 6px; overflow: hidden; border-radius: 4px; background: #172d39; }
+.inventory-type-row > i > b { display: block; height: 100%; border-radius: inherit; background: #38b9c2; }
+.inventory-type-row > strong { text-align: right; }
+.inventory-no-data { margin: 0; color: #718894; font-size: 16px; }
+.inventory-summary-footer { display: flex; justify-content: space-between; gap: 8px; padding-top: 7px; border-top: 1px solid #1b3342; color: #6f8794; font-size: 14px; }
+.inventory-summary-footer time { text-align: right; }
+
+/* The right rail mirrors the reference hierarchy: device, services, then live traffic. */
+.monitor-right-column { grid-template-rows: minmax(0, 1.08fr) minmax(0, .86fr) minmax(180px, .78fr); }
+.traffic-trend-panel { min-height: 0; }
+.traffic-trend-heading { min-height: 58px; gap: 6px; }
+.traffic-trend-controls { display: flex; align-items: center; gap: 8px; color: #708895; font-size: 16px; white-space: nowrap; }
+.traffic-trend-controls button { border: 1px solid #294554; border-radius: 4px; padding: 4px 8px; background: #0d202b; color: #a6beca; font: inherit; font-size: 16px; cursor: pointer; }
+.traffic-trend-controls button:disabled { opacity: .55; cursor: wait; }
+.traffic-trend-chart { flex: 1; min-height: 100px; padding: 5px 8px 0; }
+.traffic-trend-empty { flex: 1; min-height: 90px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 12px; color: #849ca8; text-align: center; font-size: 16px; }
+.traffic-trend-empty strong { color: #a9bdc7; font-weight: 600; }
+.traffic-trend-stale { padding: 4px 10px; color: #d6ae55; font-size: 14px; line-height: 1.4; }
+.traffic-trend-footer { display: flex; justify-content: space-between; gap: 8px; padding: 5px 11px 8px; border-top: 1px solid #1b3342; color: #708895; font-size: 14px; }
+.traffic-trend-footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.traffic-trend-footer time { flex: none; }
+
+@media (max-height: 820px) and (min-width: 1121px) {
+  .monitor-right-column { grid-template-rows: minmax(0, 1.05fr) minmax(0, .82fr) minmax(170px, .78fr); }
+  .inventory-summary { gap: 8px; padding-block: 9px; }
+}
+@media (max-width: 1120px) {
+  .monitor-right-column { grid-template-rows: auto; }
+  .traffic-trend-panel { min-height: 280px; }
+}
+@media (max-width: 480px) {
+  .inventory-summary { padding-inline: 10px; }
+  .inventory-status-row, .inventory-type-row { font-size: 14px; }
+  .inventory-status-row strong, .inventory-type-row strong { font-size: 14px; }
+  .traffic-trend-heading { align-items: flex-start; }
+  .traffic-trend-controls { flex-wrap: wrap; justify-content: flex-end; white-space: normal; }
+}
 

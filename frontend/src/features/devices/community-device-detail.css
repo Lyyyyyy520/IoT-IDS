@@ -3,7 +3,7 @@
   padding: 22px; overflow: auto; background: rgba(2, 8, 13, .82); backdrop-filter: blur(4px);
 }
 .community-device-dialog {
-  width: min(1040px, 100%); max-height: min(94vh, 1120px); overflow-y: auto;
+  position: relative; width: min(1040px, 100%); max-height: min(94vh, 1120px); overflow-y: auto;
   border: 1px solid #315369; border-radius: 10px; background: #0c1721;
   color: #dceaf2; box-shadow: 0 24px 70px rgba(0, 0, 0, .5);
 }
@@ -99,8 +99,10 @@
 .community-device-dialog .camera-unavailable { color: #9bb0bc; }
 .community-device-dialog .camera-empty { display: flex; flex-direction: column; gap: 8px; }
 .community-device-dialog .camera-empty strong { color: #dceaf2; font-size: 17px; }
-.community-device-dialog .camera-image-frame { position: relative; display: grid; place-items: center; min-height: 230px; overflow: hidden; border: 1px solid #294657; border-radius: 6px; background: #000; }
+.community-device-dialog .camera-image-frame { position: relative; display: grid; place-items: center; width: 100%; min-height: 230px; overflow: hidden; border: 1px solid #294657; border-radius: 6px; padding: 0; color: inherit; background: #000; cursor: zoom-in; }
 .community-device-dialog .camera-image-frame img { display: block; width: 100%; max-height: 520px; object-fit: contain; }
+.community-device-dialog .camera-image-frame.is-expanded { position: absolute; z-index: 5; inset: 0; width: auto; height: auto; min-height: 0; border: 0; border-radius: inherit; cursor: zoom-out; }
+.community-device-dialog .camera-image-frame.is-expanded img { height: 100%; max-height: none; object-fit: contain; }
 .community-device-dialog .camera-image-loading { position: absolute; inset: auto 0 0; padding: 9px; color: #e7f0f4; background: rgba(0, 0, 0, .75); text-align: center; font-size: 16px; }
 .community-device-dialog .camera-frame-time { margin: 9px 0 0; padding: 0; color: #9eb2be; background: transparent; }
 

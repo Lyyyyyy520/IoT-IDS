@@ -62,6 +62,7 @@ export function statusLabel(status: ConnectionStatus) {
 
 export function DeviceListPanel({
   devices,
+  inventoryDevices = devices,
   selectedId,
   onSelect,
   search,
@@ -73,9 +74,11 @@ export function DeviceListPanel({
   riskFilter,
   onRiskFilter,
   deviceTypes,
+  snapshotGeneratedAt,
   onManageDevice,
 }: {
   devices: MonitorDevice[];
+  inventoryDevices?: MonitorDevice[];
   selectedId: string | null;
   onSelect: (deviceId: string) => void;
   search: string;
@@ -87,9 +90,27 @@ export function DeviceListPanel({
   riskFilter: string;
   onRiskFilter: (value: string) => void;
   deviceTypes: string[];
+  snapshotGeneratedAt?: string;
   onManageDevice: (deviceId: string) => void;
 }) {
   const filters: DeviceFilter[] = ['all', 'online', 'stale', 'offline', 'unknown'];
+  const inventoryStatusCounts = useMemo(() => {
+    const statuses: ConnectionStatus[] = ['online', 'stale', 'offline', 'unknown'];
+    return statuses.map((status) => ({
+      status,
+      count: inventoryDevices.filter((device) => device.connection_status === status).length,
+    }));
+  }, [inventoryDevices]);
+  const inventoryTypeCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    inventoryDevices.forEach((device) => counts.set(device.device_type, (counts.get(device.device_type) ?? 0) + 1));
+    return [...counts.entries()].sort(([left], [right]) => left.localeCompare(right, 'zh-CN'));
+  }, [inventoryDevices]);
+  const maxTypeCount = Math.max(1, ...inventoryTypeCounts.map(([, count]) => count));
+  const onlineCount = inventoryStatusCounts.find(({ status }) => status === 'online')?.count ?? 0;
+  const onlinePercent = inventoryDevices.length > 0
+    ? Math.round((onlineCount / inventoryDevices.length) * 100)
+    : null;
   return (
     <section className="monitor-panel device-list-panel" aria-labelledby="device-list-title">
       <div className="panel-heading">
@@ -173,6 +194,44 @@ export function DeviceListPanel({
           ))
         )}
       </div>
+      <section className="inventory-summary" aria-label="设备实况统计">
+        <div className="inventory-summary-section">
+          <h3>设备连接概况</h3>
+          <div className="inventory-status-list">
+            {inventoryStatusCounts.map(({ status, count }) => (
+              <div className="inventory-status-row" key={status}>
+                <span><i className={`status-dot status-${status}`} aria-hidden="true" />{STATUS_LABELS[status]}</span>
+                <strong>{count}</strong>
+              </div>
+            ))}
+          </div>
+          <div className="inventory-coverage">
+            <div><span>在线设备占比</span><strong>{onlinePercent === null ? '—' : `${onlinePercent}%`}</strong></div>
+            <i aria-hidden="true"><b style={{ width: `${onlinePercent ?? 0}%` }} /></i>
+          </div>
+        </div>
+        <div className="inventory-summary-section">
+          <h3>设备类型分布</h3>
+          {inventoryTypeCounts.length === 0 ? (
+            <p className="inventory-no-data">暂无设备数据</p>
+          ) : (
+            <div className="inventory-type-list">
+              {inventoryTypeCounts.map(([type, count]) => (
+                <div className="inventory-type-row" key={type}>
+                  <span title={type}>{type}</span>
+                  <i aria-hidden="true"><b style={{ width: `${(count / maxTypeCount) * 100}%` }} /></i>
+                  <strong>{count}</strong>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {snapshotGeneratedAt && (
+          <footer className="inventory-summary-footer">
+            <span>快照更新时间</span><time dateTime={snapshotGeneratedAt}>{formatTime(snapshotGeneratedAt)}</time>
+          </footer>
+        )}
+      </section>
     </section>
   );
 }
@@ -482,60 +541,62 @@ export function RecentEventsPanel({
           事件处置：{incident.available ? '可用' : '不可用'}
         </span>
       </div>
-      {!incident.available && (
-        <div className="capability-note" data-testid="incident-capability">
-          {capabilityReason(incident)}；此区域仅展示本次连接收到的设备与组件状态事件，
-          不能代表“没有攻击”。
-        </div>
-      )}
-      {incident.available && (
-        <div className="monitor-incident-summary" data-testid="monitor-incident-summary">
-          {summaries.length === 0 ? (
-            <div className="panel-empty compact">
-              <strong>当前没有已记录事件</strong>
-            </div>
-          ) : summaries.map((item) => (
-            <article className="monitor-incident-row" key={item.incident_id}>
-              <button
-                type="button"
-                className="monitor-incident-focus"
-                aria-pressed={selectedIncidentId === item.incident_id}
-                aria-label={`${selectedIncidentId === item.incident_id ? '解除' : '在拓扑中定位'}事件 ${item.admin_title}`}
-                onClick={() => onSelectIncident(item.incident_id)}
-              >
-                <span className={`monitor-incident-severity severity-${item.severity}`}>{item.severity}</span>
-                <span><strong>{item.admin_title}</strong><small>{item.status} · {formatTime(item.updated_at)}</small></span>
-                <span aria-hidden="true">{selectedIncidentId === item.incident_id ? '⌖' : '＋'}</span>
-              </button>
-              <button
-                type="button"
-                className="monitor-incident-view"
-                onClick={() => onViewIncident(item.incident_id)}
-                aria-label={`查看事件 ${item.admin_title}`}
-              >
-                处置详情
-              </button>
-            </article>
-          ))}
-        </div>
-      )}
-      <h3 className="incremental-heading">本次连接的状态增量</h3>
-      <div className="recent-event-list">
-        {events.length === 0 ? (
-          <div className="panel-empty compact">
-            <strong>本次连接尚未收到增量状态事件</strong>
+      <div className="recent-panel-content">
+        {!incident.available && (
+          <div className="capability-note" data-testid="incident-capability">
+            {capabilityReason(incident)}；此区域仅展示本次连接收到的设备与组件状态事件，
+            不能代表“没有攻击”。
           </div>
-        ) : (
-          events.map((event) => (
-            <div className="recent-event" key={event.event_id}>
-              <span className="event-id">#{event.event_id}</span>
-              <span className="event-copy">
-                <strong>{eventTitle(event)}</strong>
-                <span>{formatTime(event.occurred_at)} · 状态版本 {event.state_version}</span>
-              </span>
-            </div>
-          ))
         )}
+        {incident.available && (
+          <div className="monitor-incident-summary" data-testid="monitor-incident-summary">
+            {summaries.length === 0 ? (
+              <div className="panel-empty compact">
+                <strong>当前没有已记录事件</strong>
+              </div>
+            ) : summaries.map((item) => (
+              <article className="monitor-incident-row" key={item.incident_id}>
+                <button
+                  type="button"
+                  className="monitor-incident-focus"
+                  aria-pressed={selectedIncidentId === item.incident_id}
+                  aria-label={`${selectedIncidentId === item.incident_id ? '解除' : '在拓扑中定位'}事件 ${item.admin_title}`}
+                  onClick={() => onSelectIncident(item.incident_id)}
+                >
+                  <span className={`monitor-incident-severity severity-${item.severity}`}>{item.severity}</span>
+                  <span><strong>{item.admin_title}</strong><small>{item.status} · {formatTime(item.updated_at)}</small></span>
+                  <span aria-hidden="true">{selectedIncidentId === item.incident_id ? '⌖' : '＋'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="monitor-incident-view"
+                  onClick={() => onViewIncident(item.incident_id)}
+                  aria-label={`查看事件 ${item.admin_title}`}
+                >
+                  处置详情
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
+        <h3 className="incremental-heading">本次连接的状态增量</h3>
+        <div className="recent-event-list">
+          {events.length === 0 ? (
+            <div className="panel-empty compact">
+              <strong>本次连接尚未收到增量状态事件</strong>
+            </div>
+          ) : (
+            events.map((event) => (
+              <div className="recent-event" key={event.event_id}>
+                <span className="event-id">#{event.event_id}</span>
+                <span className="event-copy">
+                  <strong>{eventTitle(event)}</strong>
+                  <span>{formatTime(event.occurred_at)} · 状态版本 {event.state_version}</span>
+                </span>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </section>
   );

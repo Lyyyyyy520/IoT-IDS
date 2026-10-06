@@ -131,27 +131,19 @@ export default function DeviceListPanel({
           <div
             role="listitem"
             key={device.device_id}
-            className={`device-inventory-row ${selectedId === device.device_id ? 'is-selected' : ''}`}
           >
-            <div className="device-inventory-row-main">
-              <button
-                type="button"
-                className="device-inventory-row-select"
-                onClick={() => onSelect(device.device_id)}
-                aria-label={`选择设备 ${device.display_name}`}
-              >
+            <button
+              type="button"
+              className={`device-inventory-row ${selectedId === device.device_id ? 'is-selected' : ''}`}
+              onClick={() => onSelect(device.device_id)}
+              aria-label={`查看或管理设备 ${device.display_name}`}
+            >
+              <span className="device-inventory-row-main">
                 <span className="v3-device-name">{device.display_name}</span>
-              </button>
-              <button
-                type="button"
-                className="device-inventory-manage-link"
-                onClick={() => onSelect(device.device_id)}
-                aria-label={`查看或管理 ${device.display_name}`}
-              >
-                查看/管理设备
-              </button>
-            </div>
-            <span className="v3-device-meta">{device.device_type}</span>
+                <span className="device-inventory-manage-link">查看/管理设备</span>
+              </span>
+              <span className="v3-device-meta">{device.device_type}</span>
+            </button>
           </div>
         ))}
       </div>

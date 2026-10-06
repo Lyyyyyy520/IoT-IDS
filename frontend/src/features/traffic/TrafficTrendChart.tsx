@@ -5,20 +5,30 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers';
 import type { TrafficResponse } from '../../api/v3Traffic';
 import {
+  buildRealtimeTrendSeries,
   buildTrendSeries,
   formatLocalTime,
   formatRate,
+  type TrafficRateSample,
   type TrafficMetric,
 } from './trafficUi';
 
 echarts.use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
-interface Props { response: TrafficResponse; metric: TrafficMetric }
+interface Props {
+  metric: TrafficMetric;
+  response?: TrafficResponse;
+  realtimeSamples?: TrafficRateSample[];
+}
 
-export default function TrafficTrendChart({ response, metric }: Props) {
+export default function TrafficTrendChart({ response, realtimeSamples, metric }: Props) {
   const unit = metric === 'bytes' ? 'bytes' : 'packets';
-  const txSeries = buildTrendSeries(response, metric, 'tx');
-  const rxSeries = buildTrendSeries(response, metric, 'rx');
+  const txSeries = response
+    ? buildTrendSeries(response, metric, 'tx')
+    : buildRealtimeTrendSeries(realtimeSamples ?? [], metric, 'tx');
+  const rxSeries = response
+    ? buildTrendSeries(response, metric, 'rx')
+    : buildRealtimeTrendSeries(realtimeSamples ?? [], metric, 'rx');
   const option = {
     animation: !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
     grid: { left: 96, right: 24, top: 52, bottom: 68 },
@@ -27,13 +37,16 @@ export default function TrafficTrendChart({ response, metric }: Props) {
       trigger: 'axis',
       renderMode: 'richText',
       textStyle: { fontSize: 16, lineHeight: 24 },
-      formatter: (items: Array<{ seriesName: string; value: [string, number | null] }>) => {
+      formatter: (items: Array<{ seriesName: string; value: [string | number, number | null] }>) => {
         const timestamp = items[0]?.value?.[0];
         if (!timestamp) return '';
-        const parsed = new Date(timestamp);
+        const timestampText = typeof timestamp === 'number'
+          ? new Date(timestamp).toISOString()
+          : timestamp;
+        const parsed = new Date(timestampText);
         const lines = [
-          `本地 ${formatLocalTime(timestamp)}`,
-          `UTC ${Number.isNaN(parsed.getTime()) ? timestamp : parsed.toISOString()}`,
+          `本地 ${formatLocalTime(timestampText)}`,
+          `UTC ${Number.isNaN(parsed.getTime()) ? timestampText : parsed.toISOString()}`,
         ];
         items.forEach((item) => {
           if (item.value[1] !== null) {
@@ -64,12 +77,12 @@ export default function TrafficTrendChart({ response, metric }: Props) {
       splitLine: { lineStyle: { color: '#19313d' } },
     },
     series: [{
-      name: 'TX 上传', type: 'line', showSymbol: false, connectNulls: false,
+      name: 'TX 上传', type: 'line', showSymbol: !response, connectNulls: false,
       lineStyle: { width: 2, color: '#52c2cc' },
       itemStyle: { color: '#52c2cc' },
       data: txSeries,
     }, {
-      name: 'RX 下载', type: 'line', showSymbol: false, connectNulls: false,
+      name: 'RX 下载', type: 'line', showSymbol: !response, connectNulls: false,
       lineStyle: { width: 2, color: '#8faee8' },
       itemStyle: { color: '#8faee8' },
       data: rxSeries,

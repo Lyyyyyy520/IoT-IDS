@@ -44,7 +44,10 @@ export function IncidentListPanel({
     <section className="incident-panel incident-list-panel" aria-labelledby="incident-list-title">
       <header className="incident-panel-heading">
         <div><p>RECORDED INCIDENTS</p><h2 id="incident-list-title">已记录事件</h2></div>
-        <button type="button" className="ghost-button" onClick={onRefresh} disabled={loading}>刷新</button>
+        <div className="incident-list-heading-actions">
+          <button type="button" className="ghost-button" onClick={onRefresh} disabled={loading}>刷新</button>
+          <button type="button" className="ghost-button" onClick={onClear}>清空筛选</button>
+        </div>
       </header>
       <div className="incident-filters">
         <label className="filter-wide"><span>搜索</span><input type="search" value={filters.search} onChange={(e) => patch({ search: e.target.value })} placeholder="标题、类型或事件 ID" /></label>
@@ -54,7 +57,6 @@ export function IncidentListPanel({
         <label><span>设备 ID</span><input value={filters.deviceId} onChange={(e) => patch({ deviceId: e.target.value })} /></label>
         <label><span>开始时间</span><input type="datetime-local" value={filters.from} onChange={(e) => patch({ from: e.target.value })} /></label>
         <label><span>结束时间</span><input type="datetime-local" value={filters.to} onChange={(e) => patch({ to: e.target.value })} /></label>
-        <button type="button" className="ghost-button clear-filter" onClick={onClear}>清空筛选</button>
       </div>
       <div className="incident-report-export">
         <span>导出当前筛选的告警摘要（{total} 条）</span>
