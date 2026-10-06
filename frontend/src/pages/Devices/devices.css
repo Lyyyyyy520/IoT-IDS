@@ -115,15 +115,26 @@
 .devices-inline-error, .devices-form-error { margin: 8px 12px; padding: 8px 10px; border-left: 3px solid #d9655e; background: #2b1718; color: #f1aaa5; font-size: 16px; line-height: 1.5; }
 
 .v3-device-list { flex: 1; min-height: 0; overflow-y: auto; padding: 5px 8px 8px; }
-.v3-device-card { width: 100%; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 8px; padding: 10px 8px; border: 0; border-left: 2px solid transparent; border-bottom: 1px solid #192f3b; background: transparent; color: inherit; text-align: left; cursor: pointer; }
-.v3-device-card:hover, .v3-device-card.is-selected { background: #112835; border-left-color: #49bac4; }
-.device-status-mark { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: currentColor; }
-.v3-device-card-main, .v3-device-card-side { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.v3-device-name { min-width:0; overflow-wrap:anywhere; font-size: 16px; font-weight: 670; line-height:1.4; }
-.v3-device-id, .v3-device-ip { min-width:0; color: #63808e; font: 16px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap:anywhere; }
-.v3-device-meta { color: #6f8895; font-size: 16px; overflow-wrap:anywhere; line-height:1.4; }
-.v3-device-card-side { align-items: flex-end; color: #748c98; font-size: 16px; white-space: nowrap; }
-.v3-device-card-side > span:first-child { font-size: 16px; font-weight: 680; }
+.device-inventory-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  padding: 8px; border-left: 2px solid transparent; border-bottom: 1px solid #192f3b;
+}
+.device-inventory-row:hover, .device-inventory-row.is-selected { background: #112633; border-left-color: #42b8c1; }
+.device-inventory-row-main { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.device-inventory-row-select {
+  width: 100%; min-width: 0; border: 0; padding: 0; background: transparent;
+  color: inherit; text-align: left; cursor: pointer;
+}
+.v3-device-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 22px; font-weight: 670; line-height: 1.35; }
+.device-inventory-manage-link {
+  margin: 0; border: 0; padding: 1px 0; background: transparent; color: #4eaab4;
+  cursor: pointer; font: inherit; font-size: 16px; white-space: nowrap;
+}
+.device-inventory-manage-link:hover { color: #82d9df; text-decoration: underline; }
+.v3-device-meta {
+  justify-self: end; max-width: 12ch; overflow: hidden; color: #6f8794;
+  font-size: 16px; line-height: 1.45; text-align: right; text-overflow: ellipsis; white-space: nowrap;
+}
 .lifecycle-retired { color: #d1a94c; }
 .devices-load-more { flex: none; margin: 0 10px 10px; padding: 7px; border: 1px solid #294b5a; border-radius: 5px; background: #0c202a; color: #84a9b5; cursor: pointer; }
 .devices-empty { flex: 1; min-height: 150px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px; color: #6d8794; text-align: center; font-size: 16px; }
@@ -263,7 +274,6 @@
   .devices-page-header { min-height: 64px; padding-block: 8px; }
   .device-filter-stack { padding-block: 8px; gap: 6px; }
   .device-filter-stack input, .device-filter-stack select { min-height: 31px; }
-  .v3-device-card { padding-block: 8px; }
   .detail-section { padding-block: 9px; }
   .traffic-metric-grid > div { min-height: 58px; }
   .traffic-chart-shell { min-height: 240px; }
@@ -382,8 +392,7 @@
 .detail-section-title h3, .traffic-section-heading h3,
 .traffic-quality-note h3, .sensor-history-heading h3 { font-size: var(--font-card-title); line-height: 1.35; }
 .devices-page-header p:last-child, .devices-eyebrow, .workspace-role,
-.workspace-user, .devices-notice, .device-list-meta, .v3-device-id,
-.v3-device-ip, .v3-device-meta, .v3-device-card-side,
+.workspace-user, .devices-notice, .device-list-meta, .v3-device-meta,
 .device-detail-grid dt, .reference-grid span, .reference-grid strong,
 .detail-device-id, .status-pill, .mode-pill, .retired-pill,
 .read-only-badge, .detail-refreshing, .credential-warning,
@@ -409,8 +418,7 @@
 .device-filter-stack input, .device-filter-stack select,
 .device-dialog-form input, .device-dialog-form select,
 .danger-zone input { min-height: 42px; }
-.v3-device-card { min-height: 74px; padding-block: 12px; }
-.v3-device-name { font-size: 18px; line-height: 1.35; }
+.v3-device-name { font-size: 22px; line-height: 1.35; }
 .device-detail-grid dd, .reference-grid strong { font-size: 16px; line-height: 1.45; }
 .traffic-metric-grid strong { font-size: 18px; line-height: 1.3; }
 .traffic-data-table { font-size: 16px; }
@@ -443,9 +451,7 @@
 .devices-panel-heading h2 { font-size: 22px; line-height: 1.3; }
 .detail-section-title h3, .traffic-section-heading h3,
 .traffic-quality-note h3, .sensor-history-heading h3 { font-size: 22px; line-height: 1.35; }
-.v3-device-card { min-height: 92px; padding-block: 14px; gap: 10px; }
-.v3-device-name { font-size: 22px; line-height: 1.35; }
-.v3-device-id, .v3-device-ip, .v3-device-meta, .v3-device-card-side,
+.v3-device-meta,
 .device-detail-grid dt, .status-pill, .mode-pill, .retired-pill,
 .read-only-badge, .detail-device-id { font-size: 16px; line-height: 1.45; }
 .device-detail-grid > div { min-height: 46px; padding-block: 10px; grid-template-columns: minmax(118px, .8fr) minmax(0, 1.2fr); }

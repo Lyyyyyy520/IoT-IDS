@@ -108,19 +108,19 @@ export function DeviceListPanel({
           type="search"
         />
       </label>
-      <div className="device-filters" aria-label="设备状态筛选">
-        {filters.map((value) => (
-          <button
-            type="button"
-            className={filter === value ? 'is-active' : ''}
-            aria-pressed={filter === value}
-            onClick={() => onFilter(value)}
-            key={value}
-          >
-            {value === 'all' ? '全部' : STATUS_LABELS[value]}
-          </button>
-        ))}
-      </div>
+      <label className="monitor-filter-select device-status-filter">
+        <span className="sr-only">按连接状态筛选</span>
+        <select
+          aria-label="按连接状态筛选"
+          value={filter}
+          onChange={(event) => onFilter(event.target.value as DeviceFilter)}
+        >
+          <option value="all">全部状态</option>
+          {filters.filter((value) => value !== 'all').map((value) => (
+            <option value={value} key={value}>{STATUS_LABELS[value]}</option>
+          ))}
+        </select>
+      </label>
       <div className="device-filter-selects">
         <label className="monitor-filter-select">
           <span className="sr-only">按类型筛选</span>
@@ -146,35 +146,29 @@ export function DeviceListPanel({
           </div>
         ) : (
           devices.map((device) => (
-            <div role="listitem" className="device-row-wrap" key={device.device_id}>
-              <button
-                type="button"
-                className={`device-row ${selectedId === device.device_id ? 'is-selected' : ''}`}
-                onClick={() => onSelect(device.device_id)}
-              >
-                <span className={`status-dot status-${device.connection_status}`} aria-hidden="true" />
-                <span className="device-row-main">
+            <div
+              role="listitem"
+              className={`device-row-wrap ${selectedId === device.device_id ? 'is-selected' : ''}`}
+              key={device.device_id}
+            >
+              <div className="device-row-main">
+                <button
+                  type="button"
+                  className="device-row"
+                  onClick={() => onSelect(device.device_id)}
+                >
                   <span className="device-name">{device.display_name}</span>
-                  <span className="device-meta">
-                    {device.device_type} · {device.area_id ?? '未分区'}
-                  </span>
-                  <span className="device-ip">{device.ip_address ?? '尚无 IP'}</span>
-                </span>
-                <span className="device-row-side">
-                  <span className={`status-text status-${device.connection_status}`}>
-                    {STATUS_LABELS[device.connection_status]}
-                  </span>
-                  <span>{MODE_LABELS[device.operation_mode]}</span>
-                </span>
-              </button>
-              <button
-                type="button"
-                className="device-manage-link"
-                onClick={() => onManageDevice(device.device_id)}
-                aria-label={`查看或管理 ${device.display_name}`}
-              >
-                查看/管理设备
-              </button>
+                </button>
+                <button
+                  type="button"
+                  className="device-manage-link"
+                  onClick={() => onManageDevice(device.device_id)}
+                  aria-label={`查看或管理 ${device.display_name}`}
+                >
+                  查看/管理设备
+                </button>
+              </div>
+              <span className="device-meta">{device.device_type}</span>
             </div>
           ))
         )}
