@@ -66,7 +66,7 @@ export function IncidentListPanel({
         {loading && items.length === 0 ? <div className="workspace-empty">正在读取真实事件…</div> : error && items.length === 0 ? (
           <div className="workspace-empty"><strong>事件列表暂不可用</strong><span>修复连接或权限后可重新读取。</span></div>
         ) : items.length === 0 ? (
-          <div className="workspace-empty"><strong>当前没有已记录事件</strong><span>这不代表系统安全或没有攻击。</span></div>
+          <div className="workspace-empty"><strong>当前没有已记录事件</strong></div>
         ) : items.map((item) => (
           <button type="button" className={`incident-list-row ${selectedId === item.incident_id ? 'selected' : ''}`} onClick={() => onSelect(item.incident_id)} key={item.incident_id}>
             <span className={`severity-marker severity-${item.severity}`}>{SEVERITY_LABELS[item.severity]}</span>
