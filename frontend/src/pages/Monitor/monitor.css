@@ -93,29 +93,30 @@
 .monitor-search { margin: 11px 12px 8px; }
 .monitor-search input { width: 100%; height: 34px; border: 1px solid #294554; border-radius: 5px; outline: 0; background: #08131c; color: #d9e8ef; padding: 0 10px; }
 .monitor-search input::placeholder { color: #58707e; }
-.device-filters { padding: 0 12px 9px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
-.device-filters button { border: 1px solid #243b48; background: transparent; color: #748d9a; padding: 5px 2px; border-radius: 4px; cursor: pointer; font-size: 16px; }
-.device-filters button.is-active { border-color: #2b8f9b; background: #102b35; color: #7ad9de; }
+.device-status-filter { display: block; margin: 0 12px 9px; }
 .device-list { min-height: 0; overflow-y: auto; padding: 0 8px 9px; }
-.device-row-wrap { position: relative; border-bottom: 1px solid #182c38; }
-.device-row {
-  width: 100%; border: 0; border-left: 2px solid transparent; border-bottom: 1px solid #182c38;
-  background: transparent; color: inherit; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto;
-  gap: 8px; align-items: start; padding: 10px 8px; text-align: left; cursor: pointer;
+.device-row-wrap {
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center; gap: 8px; padding: 8px; border-left: 2px solid transparent;
+  border-bottom: 1px solid #182c38;
 }
-.device-row-wrap .device-row { border-bottom: 0; padding-bottom: 23px; }
+.device-row {
+  width: 100%; border: 0; background: transparent; color: inherit; display: block;
+  min-width: 0; padding: 0; text-align: left; cursor: pointer;
+}
 .device-manage-link {
-  position: absolute; left: 27px; bottom: 5px; border: 0; background: transparent;
-  color: #4eaab4; padding: 1px 0; cursor: pointer; font-size: 16px;
+  position: static; margin: 0; border: 0; background: transparent;
+  color: #4eaab4; padding: 1px 0; cursor: pointer; font-size: 16px; white-space: nowrap;
 }
 .device-manage-link:hover { color: #82d9df; text-decoration: underline; }
-.device-row:hover, .device-row.is-selected { background: #112633; border-left-color: #42b8c1; }
+.device-row-wrap:hover, .device-row-wrap.is-selected { background: #112633; border-left-color: #42b8c1; }
 .status-dot { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: currentColor; }
 .device-row-main, .device-row-side { display: flex; flex-direction: column; }
-.device-row-main { gap: 2px; min-width: 0; }
-.device-name { min-width:0; overflow-wrap:anywhere; font-size: 16px; font-weight: 650; line-height:1.4; }
+.device-row-main { gap: 2px; min-width: 0; align-items: flex-start; }
+.device-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size: 16px; font-weight: 650; line-height:1.4; }
 .device-meta, .device-ip, .device-row-side { color: #6f8794; font-size: 16px; }
 .device-meta,.device-ip { white-space:normal; overflow-wrap:anywhere; }
+.device-row-wrap > .device-meta { justify-self: end; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 .device-ip { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .device-row-side { align-items: flex-end; gap: 7px; white-space: nowrap; }
 .status-text { font-size: 16px; font-weight: 650; }
@@ -256,8 +257,6 @@
   .monitor-sync { gap: 8px; }
   .sync-time { white-space: normal; overflow-wrap: anywhere; }
   .monitor-grid { padding: 8px; gap: 8px; }
-  .device-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-  .device-filters label { grid-template-columns: 1fr; gap: 4px; }
   .topology-panel { min-height: 400px; }
   .monitor-center-column > .graph-panel { min-height: 620px; }
   .graph-legend { align-items: flex-start; flex-direction: column; gap: 8px; }
@@ -277,12 +276,9 @@
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
 
-.device-filters { grid-template-columns: 1fr; gap: 7px; }
-.device-filters label { display: grid; grid-template-columns: 78px minmax(0, 1fr); align-items: center; gap: 8px; color: var(--text-secondary); font-size: 16px; }
-.device-filters select { min-width: 0; min-height: 36px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--bg-base); color: var(--text-primary); padding: 5px 8px; font: inherit; font-size: 16px; }
 .device-filter-note { grid-column: 1 / -1; color: var(--text-secondary); font-size: 16px; line-height: 1.4; }
 .device-alert-indicator { color: var(--risk-high); font-size: 16px; }
-.device-row { min-height: 90px; }
+.device-row { min-height: 0; }
 .device-name { font-size: 16px; }
 .device-meta,.device-ip,.device-row-side,.status-text { font-size: 16px; }
 .device-manage-link { font-size: 16px; }
@@ -373,12 +369,11 @@
 .detail-grid dt, .component-row span, .component-side time { font-size: var(--font-secondary); }
 .counter strong { font-size: 22px; }
 .panel-heading h2 { font-size: 20px; line-height: 1.3; }
-.monitor-search input, .device-filters select, .sync-button,
+.monitor-search input, .monitor-filter-select select, .sync-button,
 .monitor-account button, .topology-error button, .topology-tools button,
 .monitor-gate button { font-size: var(--font-control); line-height: 1.4; }
 .monitor-search input { min-height: 42px; }
-.device-filters select { min-height: 42px; }
-.device-filters button { min-height: 38px; padding-inline: 7px; font-size: var(--font-control); }
+.monitor-filter-select select { min-height: 42px; }
 .sync-button, .monitor-account button, .topology-error button,
 .topology-tools button, .monitor-gate button { min-height: 40px; }
 .device-name { font-size: 17px; line-height: 1.45; }
@@ -400,7 +395,6 @@
 @media (max-width: 680px) {
   .monitor-topbar { min-height: 0; }
   .monitor-sync, .monitor-account { flex-wrap: wrap; }
-  .device-filters label { grid-template-columns: minmax(70px, .7fr) minmax(0, 1.3fr); }
   .topology-legend { line-height: 1.5; }
 }
 
@@ -419,16 +413,15 @@
 .panel-heading h2 { font-size: 22px; line-height: 1.3; }
 .counter { min-width: 72px; min-height: 48px; padding: 8px 10px; }
 .counter strong { font-size: 24px; }
-.monitor-search input, .device-filters select, .sync-button,
+.monitor-search input, .monitor-filter-select select, .sync-button,
 .monitor-account button, .topology-error button, .topology-tools button,
 .monitor-gate button { font-size: 18px; line-height: 1.45; }
 .monitor-search input { min-height: 48px; }
-.device-filters select { min-height: 46px; }
-.device-filters button { min-height: 44px; padding-inline: 8px; font-size: 18px; }
+.monitor-filter-select select { min-height: 46px; }
 .sync-button, .monitor-account button, .topology-error button,
 .topology-tools button, .monitor-gate button { min-height: 46px; padding-inline: 12px; }
 .monitor-account > span { max-width: 180px; font-size: 16px; }
-.device-row { min-height: 110px; padding-block: 13px; gap: 10px; }
+.device-row { min-height: 0; padding: 0; gap: 0; }
 .device-name { font-size: 22px; line-height: 1.35; }
 .device-manage-link { font-size: 16px; }
 .status-text { font-weight: 700; }
@@ -465,7 +458,7 @@
   .monitor-brand, .monitor-brand div { min-width: 0; }
   .monitor-brand strong { white-space: normal; overflow-wrap: anywhere; }
   .monitor-account > span { display: inline; max-width: none; }
-  .device-row { min-height: 116px; }
+  .device-row { min-height: 0; }
   .topology-panel { min-height: 560px; }
   .graph-heading { align-items: stretch; flex-direction: column; justify-content: flex-start; gap: 8px; }
   .graph-heading > div { min-width: 0; max-width: 100%; }
