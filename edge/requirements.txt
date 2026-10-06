@@ -1,0 +1,6 @@
+numpy>=1.24
+onnxruntime>=1.15
+pandas>=1.5
+requests>=2.31
+scapy>=2.5
+paho-mqtt>=1.6

@@ -1,12 +1,16 @@
 [Unit]
-Description=IoT IDS Edge Detection Service
+Description=IoT IDS Edge Detection Service (device-graph GNN, edge-cloud)
 After=network.target
 
 [Service]
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/iot-ids/edge
-ExecStart=/usr/bin/python3 /home/pi/iot-ids/edge/edge_detect.py
+# 云端后端地址与 probe 凭据通过环境变量注入：
+#   IOT_IDS_SERVER_URL=http://<cloud>:5000
+#   IOT_IDS_PROBE_TOKEN=<token>
+EnvironmentFile=-/home/pi/iot-ids/edge/edge.env
+ExecStart=/usr/bin/python3 /home/pi/iot-ids/edge/edge_detect.py --live --interface wlan0
 Restart=on-failure
 RestartSec=10
 StandardOutput=append:/home/pi/iot-ids/edge/ids.log

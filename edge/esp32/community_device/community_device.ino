@@ -23,6 +23,9 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <WiFiUdp.h>
+#include <esp_system.h>
+#include <esp_timer.h>
+#include "device_secrets.h"
 
 // ==================== 配置区 ====================
 
@@ -33,19 +36,19 @@
 #define DEVICE_SENSOR   4   // 温湿度传感器（DHT11）
 #define DEVICE_SPEAKER  5   // 智能音箱（蜂鸣器发声）
 
-#define DEVICE_TYPE   DEVICE_LIGHT   // ← 改成你要烧录的设备
+#define DEVICE_TYPE   DEVICE_SPEAKER   // ← 改成你要烧录的设备
 
-// WiFi（树莓派热点）
-const char* WIFI_SSID = "iot-community";
-const char* WIFI_PASS = "12345678";   // 按实际密码填，注意空格
-
-
-// MQTT（树莓派 Broker）
-const char* MQTT_BROKER = "192.168.4.1";
-const int   MQTT_PORT   = 1883;
-
-// 设备唯一 ID（用于 MQTT topic，建议每台不同）
-const char* DEVICE_ID   = "light-01";
+// WiFi、MQTT 凭据和设备 ID 来自不入库的 device_secrets.h。
+const char* WIFI_SSID     = IOT_WIFI_SSID;
+const char* WIFI_PASS     = IOT_WIFI_PASSWORD;
+const char* MQTT_BROKER   = IOT_MQTT_HOST;
+const int   MQTT_PORT     = IOT_MQTT_PORT;
+const char* MQTT_USER     = IOT_MQTT_USERNAME;
+const char* MQTT_PASSWORD = IOT_MQTT_PASSWORD;
+const char* DEVICE_ID     = IOT_DEVICE_ID;
+const char* FIRMWARE_VERSION = "0.3.0";
+const int MQTT_HEARTBEAT_SCHEMA_VERSION = 2;
+const uint16_t MQTT_BUFFER_BYTES = 768;
 
 // 引脚（按设备类型使用对应引脚）
 #define PIN_SERVO   0   // 门禁舵机
@@ -71,7 +74,7 @@ IPAddress SUBNET(255, 255, 255, 0);
   IPAddress STATIC_IP(192, 168, 4, 12);
   const char* COAP_TARGET = "";
   #define COAP_SEND   0
-  #define COAP_LISTEN 0
+  #define COAP_LISTEN 1   // 路灯接收烟雾/门磁的联动（应急亮灯）
 #elif DEVICE_TYPE == DEVICE_PLUG
   IPAddress STATIC_IP(192, 168, 4, 13);
   const char* COAP_TARGET = "";
@@ -111,37 +114,74 @@ WiFiUDP       coapUdp;    // 设备间联动 CoAP（独立于攻击 UDP）
 bool attack_mode = false;         // 是否处于攻击模式（被感染）
 unsigned long lastTelemetry = 0;  // 上次遥测时间
 unsigned long lastAttack   = 0;   // 上次攻击发包时间
+unsigned long attackStarted = 0;  // 攻击实验开始时间
+char bootId[33] = {0};
+uint64_t telemetrySequence = 0;
 
-// Mirai UDP 洪水目标（模拟攻击外部服务器）
-const char* ATTACK_TARGET = "8.8.8.8";
-const int   ATTACK_PORT   = 80;
+// 攻击实验只能指向明确允许的隔离本地靶机。
+const bool  LAB_ATTACK_ENABLED = IOT_LAB_ATTACK_ENABLED;
+const char* ATTACK_TARGET = IOT_LAB_ATTACK_TARGET;
+const int   ATTACK_PORT   = IOT_LAB_ATTACK_PORT;
+const unsigned long ATTACK_INTERVAL_MS = 100;
+const unsigned long ATTACK_MAX_MS = 30000;
 
 // ==================== 遥测（按设备类型） ====================
 
-String buildTelemetry() {
-  char buf[128];
+void generateBootId() {
+  snprintf(bootId, sizeof(bootId), "%08lx%08lx%08lx%08lx",
+           (unsigned long)esp_random(), (unsigned long)esp_random(),
+           (unsigned long)esp_random(), (unsigned long)esp_random());
+}
+
+String buildDeviceTelemetry() {
+  char buf[160];
 #if DEVICE_TYPE == DEVICE_DOOR
   // 门禁：上报门状态（locked/unlocked）
-  snprintf(buf, sizeof(buf), "{\"device\":\"%s\",\"type\":\"door\",\"state\":\"locked\"}", DEVICE_ID);
+  snprintf(buf, sizeof(buf), "{\"device_type\":\"door\",\"state\":\"locked\"}");
 #elif DEVICE_TYPE == DEVICE_LIGHT
   int light = analogRead(PIN_LED) / 16;  // 简化为光照占位
-  snprintf(buf, sizeof(buf), "{\"device\":\"%s\",\"type\":\"light\",\"level\":%d}", DEVICE_ID, light);
+  snprintf(buf, sizeof(buf), "{\"device_type\":\"light\",\"level\":%d}", light);
 #elif DEVICE_TYPE == DEVICE_PLUG
-  snprintf(buf, sizeof(buf), "{\"device\":\"%s\",\"type\":\"plug\",\"power\":220,\"on\":true}", DEVICE_ID);
+  snprintf(buf, sizeof(buf), "{\"device_type\":\"plug\",\"power\":220,\"on\":true}");
 #elif DEVICE_TYPE == DEVICE_SENSOR
   float t = dht.readTemperature();
   float h = dht.readHumidity();
   if (isnan(t)) t = 25.0;  // 读取失败用占位
   if (isnan(h)) h = 50.0;
-  snprintf(buf, sizeof(buf), "{\"device\":\"%s\",\"type\":\"sensor\",\"temp\":%.1f,\"humidity\":%.1f}", DEVICE_ID, t, h);
+  snprintf(buf, sizeof(buf), "{\"device_type\":\"sensor\",\"temp\":%.1f,\"humidity\":%.1f}", t, h);
 #elif DEVICE_TYPE == DEVICE_SPEAKER
-  snprintf(buf, sizeof(buf), "{\"device\":\"%s\",\"type\":\"speaker\",\"state\":\"idle\"}", DEVICE_ID);
+  snprintf(buf, sizeof(buf), "{\"device_type\":\"speaker\",\"state\":\"idle\"}");
 #endif
   return String(buf);
 }
 
+String buildTelemetry() {
+  telemetrySequence++;
+  uint64_t uptimeMs = (uint64_t)(esp_timer_get_time() / 1000ULL);
+  String ip = WiFi.localIP().toString();
+  String mac = WiFi.macAddress();
+  String deviceTelemetry = buildDeviceTelemetry();
+  char envelope[640];
+  snprintf(envelope, sizeof(envelope),
+           "{\"schema_version\":%d,\"device_id\":\"%s\",\"boot_id\":\"%s\","
+           "\"sequence\":%llu,\"firmware_version\":\"%s\",\"uptime_ms\":%llu,"
+           "\"ip\":\"%s\",\"mac\":\"%s\",\"telemetry\":%s}",
+           MQTT_HEARTBEAT_SCHEMA_VERSION, DEVICE_ID, bootId,
+           (unsigned long long)telemetrySequence, FIRMWARE_VERSION,
+           (unsigned long long)uptimeMs, ip.c_str(), mac.c_str(),
+           deviceTelemetry.c_str());
+  return String(envelope);
+}
+
 String topicStatus()  { return String("community/") + DEVICE_ID + "/status"; }
 String topicControl() { return String("community/") + DEVICE_ID + "/control"; }
+
+bool isAllowedAttackTarget() {
+  IPAddress target;
+  if (!target.fromString(ATTACK_TARGET)) return false;
+  return target[0] == 192 && target[1] == 168 && target[2] == 4
+         && target[3] >= 2 && target[3] <= 254;
+}
 
 // ==================== 执行器动作（按设备类型） ====================
 
@@ -191,7 +231,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
   if (String(topic) == topicControl()) {
     if (msg == "attack") {
+      if (!LAB_ATTACK_ENABLED || !isAllowedAttackTarget()) {
+        Serial.println("[安全] 攻击实验未启用或目标不在隔离网段，已拒绝指令");
+        return;
+      }
       attack_mode = true;
+      attackStarted = millis();
       Serial.println("[控制] 进入攻击模式（模拟被感染）");
     } else if (msg == "normal") {
       attack_mode = false;
@@ -210,14 +255,18 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 void doAttack() {
   // udpplain：向目标高频发送 UDP 包
   unsigned long now = millis();
-  if (now - lastAttack < 50) return;  // 限速
+  if (now - attackStarted >= ATTACK_MAX_MS) {
+    attack_mode = false;
+    actuatorNormal();
+    Serial.println("[安全] 攻击实验达到最长时限，已自动停止");
+    return;
+  }
+  if (now - lastAttack < ATTACK_INTERVAL_MS) return;  // 硬限速
   lastAttack = now;
 
-  for (int i = 0; i < 3; i++) {
-    udp.beginPacket(ATTACK_TARGET, ATTACK_PORT);
-    udp.write((const uint8_t*)"\x00\x00\x00\x00", 4);
-    udp.endPacket();
-  }
+  udp.beginPacket(ATTACK_TARGET, ATTACK_PORT);
+  udp.write((const uint8_t*)"\x00\x00\x00\x00", 4);
+  udp.endPacket();
   actuatorAttack();  // 触发设备专属"被入侵反应"
 }
 
@@ -226,41 +275,28 @@ void doAttack() {
 void connectWiFi() {
   Serial.printf("连接 WiFi: %s\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
-  WiFi.config(STATIC_IP, GATEWAY, SUBNET);  // 固定 IP（设备间 CoAP 直连需要）
-  WiFi.disconnect();
-  delay(200);
+  WiFi.config(STATIC_IP, GATEWAY, SUBNET);  // 静态 IP：CoAP 直连需要设备有固定 IP
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);       // 降低发射功率（社区密集部署）
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
 
-  // 关键修复：ESP32-C3 克隆板默认发射功率过高会导致天线失真、能扫描但连不上，
-  // 必须降低发射功率。逐档尝试，直到连上为止。
-  wifi_power_t powers[] = {WIFI_POWER_8_5dBm, WIFI_POWER_15dBm, WIFI_POWER_11dBm, WIFI_POWER_5dBm};
-  const char* names[]   = {"8.5dBm", "15dBm", "11dBm", "5dBm"};
-  int n = sizeof(powers) / sizeof(powers[0]);
-
-  for (int i = 0; i < n; i++) {
-    WiFi.setTxPower(powers[i]);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-    int tries = 0;
-    while (WiFi.status() != WL_CONNECTED && tries < 20) {  // 每档等 10 秒
-      delay(500);
-      Serial.print(".");
-      tries++;
-    }
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.printf("\n已连接 (功率 %s), IP: %s\n", names[i], WiFi.localIP().toString().c_str());
-      return;
-    }
-    Serial.printf("\n功率 %s 失败，换下一档...\n", names[i]);
-    WiFi.disconnect();
-    delay(300);
+  int tries = 0;
+  while (WiFi.status() != WL_CONNECTED && tries < 20) {  // 最多等 10 秒
+    delay(500);
+    Serial.print(".");
+    tries++;
   }
-  Serial.println("\nWiFi 连接失败（所有功率档都试过）");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("\n已连接, IP: %s\n", WiFi.localIP().toString().c_str());
+  } else {
+    Serial.println("\nWiFi 连接失败（当前热点可能未开启，稍后会自动重连）");
+  }
 }
 
 void connectMQTT() {
   mqtt.setServer(MQTT_BROKER, MQTT_PORT);
   mqtt.setCallback(mqttCallback);
   while (!mqtt.connected()) {
-    if (mqtt.connect(DEVICE_ID)) {
+    if (mqtt.connect(DEVICE_ID, MQTT_USER, MQTT_PASSWORD)) {
       mqtt.subscribe(topicControl().c_str());
       Serial.printf("MQTT 已连接, 订阅 %s\n", topicControl().c_str());
     } else {
@@ -279,6 +315,13 @@ void sendCoapEvent() {
   coapUdp.write((const uint8_t*)"evt", 3);
   coapUdp.endPacket();
   Serial.printf("[联动] 发送联动事件给 %s\n", COAP_TARGET);
+#if DEVICE_TYPE == DEVICE_DOOR
+  // 门禁额外联动摄像头（开门录像，安防联动）
+  coapUdp.beginPacket("192.168.4.10", 5683);
+  coapUdp.write((const uint8_t*)"evt", 3);
+  coapUdp.endPacket();
+  Serial.println("[联动] 发送联动事件给 192.168.4.10 (摄像头)");
+#endif
 }
 #endif
 
@@ -309,6 +352,16 @@ void actuatorTriggered() {
   delay(500);
   doorServo.write(90);  // 回位
   Serial.println("[联动] 门禁联动解锁");
+#elif DEVICE_TYPE == DEVICE_LIGHT
+  // 路灯联动：闪烁 3 次（烟雾/门磁触发，应急亮灯）
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(PIN_LED, HIGH);
+    delay(200);
+    digitalWrite(PIN_LED, LOW);
+    delay(200);
+  }
+  digitalWrite(PIN_LED, HIGH);  // 恢复常亮
+  Serial.println("[联动] 路灯闪烁");
 #endif
 }
 #endif
@@ -318,6 +371,8 @@ void actuatorTriggered() {
 void setup() {
   Serial.begin(115200);
   delay(500);
+  generateBootId();
+  mqtt.setBufferSize(MQTT_BUFFER_BYTES);
 
   // 初始化引脚
 #if DEVICE_TYPE == DEVICE_DOOR
@@ -336,12 +391,15 @@ void setup() {
   digitalWrite(PIN_BUZZER, LOW);
 #endif
 
+  connectWiFi();
+
   // 设备间联动：绑定 CoAP 端口（接收方监听 5683）
+  // 必须放在 WiFi 初始化之后：UDP socket 走 lwIP tcpip 线程，
+  // 线程未启动时调用会触发 tcpip_send_msg_wait_sem (Invalid mbox) 崩溃
 #if COAP_LISTEN
   coapUdp.begin(5683);
 #endif
 
-  connectWiFi();
   connectMQTT();
   Serial.printf("设备启动: %s (类型 %d)\n", DEVICE_ID, DEVICE_TYPE);
 }
@@ -379,7 +437,9 @@ void loop() {
   else if (now - lastTelemetry >= TELEMETRY_MS) {
     lastTelemetry = now;
     String telemetry = buildTelemetry();
-    mqtt.publish(topicStatus().c_str(), telemetry.c_str());
-    Serial.printf("[遥测] %s\n", telemetry.c_str());
+    bool published = mqtt.publish(topicStatus().c_str(), telemetry.c_str());
+    Serial.printf("[遥测] boot=%s sequence=%llu result=%s\n", bootId,
+                  (unsigned long long)telemetrySequence,
+                  published ? "sent" : "failed");
   }
 }

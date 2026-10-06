@@ -32,8 +32,9 @@ frontend/dist/
 Thumbs.db
 Desktop.ini
 
-# Database (contains local data, regenerate from seed scripts)
+# Local database (contains user/device/event history; never regenerate from demo seeds)
 backend/data/ids.db
+backend/data/backups/
 
 # Trained models (too large, regenerate from training scripts)
 # Keep ONNX model for demo
@@ -55,6 +56,8 @@ temp/
 # Environment
 .env
 .env.local
+edge/esp32/**/device_secrets.h
+edge/mosquitto/passwd*
 training/data/
 
 # Expo generated QR

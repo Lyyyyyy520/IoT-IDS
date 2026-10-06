@@ -1,3 +1,5 @@
+> 历史参考：本文是 2026-08 的旧硬件部署步骤，包含已过期的网络和凭据示例，不可作为当前操作手册。当前服务、数据库升级与恢复以 [README](../README.md)、[API 目录](05-api-spec.md)、[v3 清理清单](rebuild/legacy-cleanup-inventory.md) 和 [运维恢复手册](12-operations-and-recovery.md) 为准。
+
 # 09 - 现场部署步骤清单（硬件到货后照着做）
 
 > 状态：部署操作手册
@@ -111,6 +113,8 @@ ls backend/data/device_gnn.onnx backend/data/device_gnn_norm.npz
 
 # 4.2 启动 Flask 后端
 cd backend
+export IOT_IDS_SESSION_SECRET='<本地长随机值>'
+export IOT_IDS_PROBE_TOKEN='<与探针一致的另一长随机值>'
 python app.py
 ```
 
@@ -121,38 +125,46 @@ python app.py
 ```bash
 # 5.1 设备上电 → 自动连 iot-community 热点 → 发 MQTT 遥测
 
-# 5.2 验证设备已连上（在 Pi 上订阅遥测）
-mosquitto_sub -h 192.168.4.1 -t "community/+/status"
+# 5.2 用后端 MQTT 身份验证设备已连上
+mosquitto_sub -h 192.168.4.1 -u iot-ids-backend -P '<本地凭据>' \
+  -t "community/+/status"
 
-# 5.3 启动抓包（通过 API）
-curl -X POST http://192.168.4.1:5000/api/capture/start \
+# 5.3 登录旧管理 API 并保存会话 Cookie（v3 API 尚未启用）
+curl -c cookies.txt -X POST http://192.168.4.1:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"<已修改的管理员密码>"}'
+
+# 5.4 启动抓包（通过 API）
+curl -b cookies.txt -X POST http://192.168.4.1:5000/api/capture/start \
   -H "Content-Type: application/json" \
   -d '{"use_scapy": true}'
 
-# 5.4 触发设备检测（每 60 秒一次，或手动触发）
-curl -X POST http://192.168.4.1:5000/api/device/detect \
-  -H "Authorization: Bearer <token>"
+# 5.5 旧链路手动触发设备检测
+curl -b cookies.txt -X POST http://192.168.4.1:5000/api/device/detect
 
-# 5.5 查看设备风险等级
-curl http://192.168.4.1:5000/api/device/status \
-  -H "Authorization: Bearer <token>"
+# 5.6 查看设备风险等级
+curl -b cookies.txt http://192.168.4.1:5000/api/device/status
 ```
 
 - [ ] 遥测订阅能看到设备状态 → 设备通信正常
 - [ ] `/api/device/detect` 返回设备风险等级 → 检测闭环通
 
-## 第 6 步：触发攻击模式测试
+## 第 6 步：隔离环境攻击模式测试
+
+只有在本地靶机、出口阻断、MQTT ACL、30 秒自动停止和断电停止均验证后，才将
+设备未跟踪的 `device_secrets.h` 中 `IOT_LAB_ATTACK_ENABLED` 改为 `true`。
 
 ```bash
 # 6.1 让门禁"被感染"（发 Mirai UDP 洪水 + 舵机开门）
-mosquitto_pub -h 192.168.4.1 -t "community/door-01/control" -m "attack"
+mosquitto_pub -h 192.168.4.1 -u iot-ids-backend -P '<本地凭据>' \
+  -t "community/door-01/control" -m "attack"
 
 # 6.2 等几秒后检测
-curl -X POST http://192.168.4.1:5000/api/device/detect \
-  -H "Authorization: Bearer <token>"
+curl -b cookies.txt -X POST http://192.168.4.1:5000/api/device/detect
 
-# 6.3 隔离门禁
-mosquitto_pub -h 192.168.4.1 -t "community/door-01/control" -m "block"
+# 6.3 主动恢复正常；第一版不自动下发 block/断电
+mosquitto_pub -h 192.168.4.1 -u iot-ids-backend -P '<本地凭据>' \
+  -t "community/door-01/control" -m "normal"
 ```
 
 - [ ] 攻击后 `/api/device/detect` 把门禁判为"僵尸网络(红)" → 检测成功

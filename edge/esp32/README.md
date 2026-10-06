@@ -14,17 +14,23 @@
 
 > 摄像头（ESP32-CAM）是单独设备，用另一套固件（见第 6 节）。
 
-## 2. 编译前配置（`community_device.ino` 顶部"配置区"）
+## 2. 编译前安全配置
 
-每台设备烧录前改 4 处：
+每个固件目录都包含 `device_secrets.example.h`。烧录前复制为
+`device_secrets.h`，并为每台设备设置独立 MQTT 密码；真实 secrets 文件已
+被 `.gitignore` 排除，禁止提交到仓库。
 
 ```cpp
-#define DEVICE_TYPE DEVICE_SENSOR   // ① 改成对应设备类型
-const char* WIFI_SSID = "iot-community";   // ② 树莓派热点 SSID
-const char* WIFI_PASS = "12345678";        // ③ 热点密码
-const char* MQTT_BROKER = "192.168.4.1";   // ④ 树莓派 IP
-const char* DEVICE_ID = "sensor-01";       // ⑤ 唯一设备 ID（每台不同）
+#define IOT_WIFI_SSID "iot-community"
+#define IOT_WIFI_PASSWORD "本地热点强密码"
+#define IOT_DEVICE_ID "sensor-01"
+#define IOT_MQTT_USERNAME IOT_DEVICE_ID
+#define IOT_MQTT_PASSWORD "该设备唯一的 MQTT 密码"
+#define IOT_LAB_ATTACK_ENABLED false
 ```
+
+`IOT_DEVICE_ID` 同时作为 MQTT 用户名。Mosquitto ACL 只允许该用户发布
+自己的 `community/{device_id}/status` 和订阅自己的 control 主题。
 
 **6 台设备建议配置：**
 
@@ -50,7 +56,8 @@ const char* DEVICE_ID = "sensor-01";       // ⑤ 唯一设备 ID（每台不同
 1. 开发板管理器安装 **ESP32** 支持包（Arduino-ESP32 core）
 2. 开发板选择：**ESP32C3 Dev Module**
 3. 插 USB，选择对应串口
-4. 改好配置 → 上传
+4. 复制并填写 `device_secrets.h`
+5. 改好设备类型配置 → 上传
 
 ## 5. MQTT 主题与攻击模式
 
@@ -59,22 +66,54 @@ const char* DEVICE_ID = "sensor-01";       // ⑤ 唯一设备 ID（每台不同
 | `community/{DEVICE_ID}/status` | 设备→Pi | 遥测上报（每 5s） |
 | `community/{DEVICE_ID}/control` | Pi→设备 | 控制指令 |
 
+两套固件现在统一发送 MQTT 心跳 schema v2。每次启动生成新的 32 位十六进制
+`boot_id`，同一启动会话内 `sequence` 从 1 开始递增；MAC 和 IP 均从设备运行状态
+读取，设备类型字段放在 `telemetry` 对象内。示例：
+
+```json
+{
+  "schema_version": 2,
+  "device_id": "sensor-01",
+  "boot_id": "4f8c3d1670f24dc982a4e565e27f7810",
+  "sequence": 1,
+  "firmware_version": "0.3.0",
+  "uptime_ms": 5100,
+  "ip": "192.168.4.14",
+  "mac": "AA:BB:CC:DD:EE:14",
+  "telemetry": {
+    "device_type": "sensor",
+    "temp": 25.1,
+    "humidity": 50.2
+  }
+}
+```
+
+设备 `uptime_ms` 只用于重放和诊断证据，在线状态以服务器实际接收时间为准。
+串口日志只打印 boot、sequence 和发布结果，不打印完整 payload 或任何 MQTT 密码。
+
 **控制指令**（发到 control 主题）：
 
 | 指令 | 效果 |
 |------|------|
-| `attack` | 进入攻击模式（发 Mirai UDP 洪水 + 设备"被入侵反应"） |
+| `attack` | 仅在隔离实验开关启用时，向本地靶机发送受限 UDP 流量 |
 | `normal` | 恢复正常模式 |
 | `block` | 隔离（物理阻断：锁死/断电/静音） |
 
-**演示时**，在树莓派上用 mosquitto 发指令即可触发攻击/隔离：
+攻击实验默认关闭。启用前必须同时确认：目标是 `192.168.4.0/24` 内的本地
+靶机、树莓派禁止该流量转发至公网、MQTT ACL 已生效，并准备好断电停止手段。
+固件硬限制为约 10 包/秒、最长 30 秒，到时自动恢复正常。
+
+使用具备控制主题权限的独立管理身份发布指令：
 
 ```bash
-# 让门禁"被感染"
-mosquitto_pub -h 192.168.4.1 -t "community/door-01/control" -m "attack"
-# 隔离门禁
-mosquitto_pub -h 192.168.4.1 -t "community/door-01/control" -m "block"
+mosquitto_pub -h 192.168.4.1 -u iot-ids-backend -P '<本地凭据>' \
+  -t "community/door-01/control" -m "attack"
+mosquitto_pub -h 192.168.4.1 -u iot-ids-backend -P '<本地凭据>' \
+  -t "community/door-01/control" -m "normal"
 ```
+
+第一版产品不会自动发布 `block`，只展示人工处置建议；旧固件中的 `block`
+分支仅为后续受控实验保留。
 
 ## 6. 摄像头（ESP32-CAM）说明
 

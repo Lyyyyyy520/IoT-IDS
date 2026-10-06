@@ -1,20 +1,27 @@
 """
 Authentication Service — Flask Session-based login/logout with role control.
 
-Permission rule:
-- username == "admin": administrator
-- every other authenticated account: normal user
+The v3 permission contract has three roles:
+- admin: device/configuration management and incident handling
+- operator: incident handling and full Web read access
+- user: paired APP access only (device scoping is implemented by v3 APIs)
 """
 from functools import wraps
 from flask import session, jsonify, request
 from werkzeug.security import check_password_hash
 
 from database import query_one, execute
+from contracts import Role, enum_values
 
 
-def effective_role(username: str) -> str:
-    """Return the effective role derived from the account name."""
-    return 'admin' if username == 'admin' else 'user'
+ALLOWED_ROLES = set(enum_values(Role))
+
+
+def effective_role(username: str, stored_role: str | None = None) -> str:
+    """Normalize a role read from the trusted user record or signed session."""
+    if stored_role in ALLOWED_ROLES:
+        return str(stored_role)
+    return Role.USER.value
 
 
 def login_user(username: str, password: str) -> dict:
@@ -23,6 +30,26 @@ def login_user(username: str, password: str) -> dict:
     if not user:
         return {'success': False, 'message': '账号不存在'}
 
+    profile_table = query_one(
+        "SELECT 1 AS present FROM sqlite_master "
+        "WHERE type='table' AND name='v3_mobile_user_profiles'"
+    )
+    if profile_table:
+        mobile_profile = query_one(
+            "SELECT mobile_only FROM v3_mobile_user_profiles WHERE user_id=?",
+            (user['id'],),
+        )
+        if mobile_profile and bool(mobile_profile['mobile_only']):
+            execute(
+                "INSERT INTO audit_logs (user_id, username, action, detail) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    user['id'], username, 'login_failed',
+                    'mobile_only_web_login_denied',
+                ),
+            )
+            return {'success': False, 'message': '该账号仅支持 APP 配对登录'}
+
     if not check_password_hash(user['password_hash'], password):
         execute(
             "INSERT INTO audit_logs (user_id, username, action, detail) VALUES (?, ?, ?, ?)",
@@ -30,7 +57,7 @@ def login_user(username: str, password: str) -> dict:
         )
         return {'success': False, 'message': '密码错误'}
 
-    role = effective_role(user['username'])
+    role = effective_role(user['username'], user.get('role'))
     session['user_id'] = user['id']
     session['username'] = user['username']
     session['role'] = role
@@ -72,7 +99,7 @@ def get_current_user() -> dict | None:
         return None
 
     username = session.get('username', '')
-    role = effective_role(username)
+    role = effective_role(username, session.get('role'))
     session['role'] = role
     return {
         'id': session['user_id'],
@@ -91,17 +118,29 @@ def require_auth(f):
     return decorated
 
 
-def require_admin(f):
-    """Decorator: require the account named 'admin'."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if 'user_id' not in session:
-            return jsonify({'error': '未登录，请先登录'}), 401
-        if session.get('username') != 'admin':
-            return jsonify({'error': '权限不足，仅管理员可操作'}), 403
-        session['role'] = 'admin'
-        return f(*args, **kwargs)
-    return decorated
+def require_roles(*allowed_roles: str):
+    """Build a decorator that permits only the specified normalized roles."""
+    allowed = {
+        role.value if isinstance(role, Role) else str(role)
+        for role in allowed_roles
+    }
+
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if 'user_id' not in session:
+                return jsonify({'error': '未登录，请先登录'}), 401
+            role = effective_role(session.get('username', ''), session.get('role'))
+            session['role'] = role
+            if role not in allowed:
+                return jsonify({'error': '权限不足'}), 403
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+
+require_admin = require_roles(Role.ADMIN)
+require_operator = require_roles(Role.ADMIN, Role.OPERATOR)
 
 
 def log_action(action: str, detail: str = ''):
