@@ -65,6 +65,7 @@ export interface MonitorGraphEdge {
   bytes: number;
   packets: number;
   protocols: string[];
+  relation_type: 'observed_traffic' | 'configured_linkage' | 'unknown';
 }
 
 export interface MonitorGraphSnapshot {
@@ -92,6 +93,7 @@ export interface MonitorIncidentSummary {
   updated_at: string;
   resolved_at?: string | null;
   incident_version: number;
+  affected_device_ids: string[];
 }
 
 export interface MonitorIncidentData {
@@ -431,6 +433,9 @@ function parseIncidentSummary(
     incident_version: integer(
       row.incident_version, label + '.incident_version', 1,
     ),
+    affected_device_ids: row.affected_device_ids === undefined
+      ? []
+      : stringArray(row.affected_device_ids, label + '.affected_device_ids'),
   };
 }
 
@@ -484,6 +489,13 @@ function parseGraphEdge(value: unknown, index: number): MonitorGraphEdge {
     bytes: integer(row.bytes, `graph.edges[${index}].bytes`, 0),
     packets: integer(row.packets, `graph.edges[${index}].packets`, 0),
     protocols: stringArray(row.protocols, `graph.edges[${index}].protocols`),
+    relation_type: row.relation_type === undefined
+      ? 'unknown'
+      : oneOf(
+          row.relation_type,
+          ['observed_traffic', 'configured_linkage', 'unknown'] as const,
+          `graph.edges[${index}].relation_type`,
+        ),
   };
 }
 

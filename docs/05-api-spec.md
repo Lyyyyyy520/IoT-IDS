@@ -21,6 +21,7 @@
 | 方法 | 路径 | 权限 | 用途 |
 |---|---|---|---|
 | `GET` | `/api/v3/monitor` | admin/operator | Web 实时快照与事件游标 |
+| `GET` | `/api/v3/monitor/export` | admin/operator | 按监视页当前筛选导出设备状态与已留存流量趋势 CSV |
 | `GET` | `/api/v3/events?after=<event_id>` | admin/operator；受范围限制的 user | 持久 SSE 变化流 |
 | `GET` | `/api/v3/devices` | admin/operator | 设备列表与筛选 |
 | `POST` | `/api/v3/devices` | admin | 手动登记 |
@@ -36,6 +37,10 @@
 | `GET` | `/api/v3/devices/{device_id}/peers` | admin/operator | 设备通信对象与方向 |
 
 设备流量仅从设备详情使用。时间为带时区的 ISO 8601，查询上限、隐私裁剪、聚合字段和 `no_samples` 语义见 [设备流量契约](rebuild/v3-device-traffic.md)。实时页面先获取 monitor 快照，再用返回游标建立 SSE。
+
+`GET /api/v3/monitor` 同时返回 24 小时设备关系图快照。边的 `relation_type` 明确为 `observed_traffic`（已观测的 TX peer 聚合）、`configured_linkage`（社区拓扑登记的配置联动）或 `unknown`（兼容旧响应）；前端不得把配置联动描述成实际流量。监视事件摘要的 `affected_device_ids` 只列事件角色为 `affected` 的设备，用于管理员端图上定位，不包含可疑来源或旁观设备。
+
+监控报表只接受 `search`、`connection_status`、`device_type`、`risk_filter` 和 `range` 筛选；`range` 为 `15m|1h|6h|24h|7d`，时间范围使用 UTC 左闭右开。除 7 天范围按小时汇总外，趋势桶按分钟输出。CSV 同时包含设备状态行与实际留存的流量桶行；无样本的设备状态行标记 `no_samples`，不会将缺失桶补成零流量。设备最多导出 10000 台、趋势桶最多导出 20000 条，超限时文件元数据会明确写出截断提示。导出需要当前 admin/operator Web session；数据不含 MAC、凭据或原始报文。
 
 ## 安全事件和求助
 

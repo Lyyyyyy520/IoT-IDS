@@ -827,8 +827,31 @@ def test_help_request_scope_idempotency_ownership_and_progress(context):
         ).fetchone() == (1,)
 
 
-def test_monitor_overview_and_device_delete_references(context):
+def test_monitor_overview_and_device_delete_references(context, monkeypatch):
     incident = _create(context.incident)
+    observed_at = NOW - timedelta(seconds=30)
+    with sqlite3.connect(context.database_path) as connection:
+        connection.execute(
+            "INSERT INTO v3_device_traffic_peer_minutes "
+            "(device_id,bucket_start,direction,peer_key,peer_device_id,peer_ip,protocol,"
+            "bytes,packets,flow_count,first_sample_at,last_sample_at,updated_at) "
+            "VALUES('camera-01',?,'tx','device:lock-01','lock-01','10.1.1.2','tcp',"
+            "120,3,1,?,?,?)",
+            tuple(value.isoformat().replace("+00:00", "Z") for value in (
+                observed_at.replace(second=0), observed_at, observed_at, NOW,
+            )),
+        )
+    monkeypatch.setattr(
+        "services.monitor_snapshot._planned_linkages",
+        lambda: [{
+            "source": "sensor-01",
+            "target": "lock-01",
+            "bytes": 0,
+            "packets": 0,
+            "protocols": ["coap"],
+            "relation_type": "configured_linkage",
+        }],
+    )
     _login(context.client)
     monitor = context.client.get("/api/v3/monitor")
     assert monitor.status_code == 200
@@ -840,9 +863,16 @@ def test_monitor_overview_and_device_delete_references(context):
     }
     assert isinstance(body["graph"]["nodes"], list)
     assert isinstance(body["graph"]["edges"], list)
+    edges = {
+        (edge["source"], edge["target"]): edge
+        for edge in body["graph"]["edges"]
+    }
+    assert edges[("camera-01", "lock-01")]["relation_type"] == "observed_traffic"
+    assert edges[("sensor-01", "lock-01")]["relation_type"] == "configured_linkage"
     assert body["incidents"]["active"][0]["incident_id"] == (
         incident["incident_id"]
     )
+    assert body["incidents"]["active"][0]["affected_device_ids"] == ["camera-01"]
     assert body["incidents"]["empty_meaning"] == (
         "no_recorded_incidents_not_proven_safe"
     )

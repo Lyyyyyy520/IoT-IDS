@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import csv
 import json
 from pathlib import Path
 import sqlite3
@@ -148,7 +149,93 @@ def test_monitor_returns_only_persisted_devices_and_component_health(tmp_path):
     assert payload["system_components"][0]["readiness"] == "ready"
 
 
-@pytest.mark.parametrize("path", ["/api/v3/monitor", "/api/v3/events?after=0"])
+def test_monitor_report_exports_filtered_status_and_real_traffic_with_gap_labels(tmp_path):
+    database_path = _initialized(tmp_path)
+    service = DeviceStateService(database_path, clock=lambda: NOW)
+    devices = [
+        ("camera-01", "AA:BB:CC:DD:EE:01", "=门厅摄像头", "camera", "192.168.4.21"),
+        ("sensor-01", "AA:BB:CC:DD:EE:03", "客厅传感器", "sensor", "192.168.4.23"),
+    ]
+    for device_id, mac, name, device_type, ip_address in devices:
+        service.bind_device(
+            device_id=device_id,
+            identity_kind="mac",
+            identity_value=mac,
+            display_name=name,
+            device_type=device_type,
+            area_id="building-a",
+        )
+        service.record_observation(
+            device_id=device_id,
+            identity_kind="mac",
+            identity_value=mac,
+            source="test-probe",
+            ip_address=ip_address,
+            sequence=1,
+        )
+    bucket = (NOW - timedelta(minutes=5)).replace(second=0, microsecond=0)
+    sample_at = bucket.replace(second=12)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "INSERT INTO v3_device_traffic_minutes "
+            "(device_id,bucket_start,tx_bytes,rx_bytes,tx_packets,rx_packets,"
+            "tx_flow_count,rx_flow_count,first_sample_at,last_sample_at,updated_at) "
+            "VALUES('camera-01',?,120,80,3,2,1,1,?,?,?)",
+            tuple(value.isoformat().replace("+00:00", "Z") for value in (
+                bucket, sample_at, sample_at, NOW,
+            )),
+        )
+
+    client = _app(database_path).test_client()
+    _login(client, "admin")
+    filtered = client.get(
+        "/api/v3/monitor/export?range=15m&search=%E9%97%A8%E5%8E%85"
+        "&connection_status=online&device_type=camera"
+    )
+    assert filtered.status_code == 200
+    assert filtered.mimetype == "text/csv"
+    assert "monitor-report.csv" in filtered.headers["Content-Disposition"]
+    assert filtered.headers["Cache-Control"] == "no-store"
+    records = list(csv.DictReader(
+        line for line in filtered.get_data(as_text=True).splitlines()
+        if not line.startswith("#")
+    ))
+    assert [row["record_type"] for row in records] == ["device", "traffic_bucket"]
+    assert records[0]["device_id"] == "camera-01"
+    assert records[0]["display_name"] == "'=门厅摄像头"
+    assert records[0]["traffic_data_status"] == "available"
+    assert records[1]["bucket_start"] == "2026-09-19T07:55:00Z"
+    assert records[1]["tx_bytes"] == "120"
+    assert records[1]["rx_packets"] == "2"
+    assert all(row["device_id"] != "sensor-01" for row in records)
+
+    all_devices = client.get("/api/v3/monitor/export?range=15m")
+    all_records = list(csv.DictReader(
+        line for line in all_devices.get_data(as_text=True).splitlines()
+        if not line.startswith("#")
+    ))
+    device_status = {
+        row["device_id"]: row["traffic_data_status"]
+        for row in all_records if row["record_type"] == "device"
+    }
+    assert device_status == {"camera-01": "available", "sensor-01": "no_samples"}
+
+
+def test_monitor_report_rejects_unknown_duplicate_and_invalid_filters(tmp_path):
+    database_path = _initialized(tmp_path)
+    client = _app(database_path).test_client()
+    _login(client, "operator")
+
+    assert client.get("/api/v3/monitor/export?range=2d").status_code == 400
+    assert client.get(
+        "/api/v3/monitor/export?range=1h&range=6h"
+    ).get_json()["error"]["code"] == "duplicate_query_parameter"
+    assert client.get(
+        "/api/v3/monitor/export?unexpected=yes"
+    ).get_json()["error"]["code"] == "unknown_query_parameters"
+
+
+@pytest.mark.parametrize("path", ["/api/v3/monitor", "/api/v3/events?after=0", "/api/v3/monitor/export?range=1h"])
 def test_v3_auth_fails_closed_with_uniform_error_envelope(tmp_path, path):
     database_path = _initialized(tmp_path)
     client = _app(database_path).test_client()
@@ -166,7 +253,7 @@ def test_v3_auth_fails_closed_with_uniform_error_envelope(tmp_path, path):
     assert user.get_json()["error"]["code"] == "user_scope_unavailable"
 
 
-@pytest.mark.parametrize("path", ["/api/v3/monitor", "/api/v3/events?after=0"])
+@pytest.mark.parametrize("path", ["/api/v3/monitor", "/api/v3/events?after=0", "/api/v3/monitor/export?range=1h"])
 def test_missing_database_returns_503_without_creating_it(tmp_path, path):
     database_path = tmp_path / "absent.sqlite"
     client = _app(database_path).test_client()

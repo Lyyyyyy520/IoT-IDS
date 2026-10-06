@@ -8,6 +8,7 @@ import type {
   ConnectionStatus,
   MonitorCapability,
   MonitorDevice,
+  MonitorGraphNode,
   MonitorGraphSnapshot,
   MonitorIncidentData,
   MonitorRealtimeEvent,
@@ -142,7 +143,6 @@ export function DeviceListPanel({
         {devices.length === 0 ? (
           <div className="panel-empty compact">
             <strong>没有匹配的真实设备</strong>
-            <span>当前筛选条件下没有数据库记录。</span>
           </div>
         ) : (
           devices.map((device) => (
@@ -188,38 +188,98 @@ function capabilityReason(capability: MonitorCapability): string {
   return CAPABILITY_REASONS[capability.reason] ?? capability.reason;
 }
 
-const RISK_COLORS: Record<number, string> = {
-  0: '#00CC66',  // 正常/绿（Low，规范色标）
-  1: '#FFCC00',  // 低危/黄（Medium）
-  2: '#FF8800',  // 中危/橙（High）
-  3: '#FF4444',  // 高危/红（Critical）
+const RISK_VARIABLES: Record<number, string> = {
+  0: '--risk-low',
+  1: '--risk-medium',
+  2: '--risk-high',
+  3: '--risk-critical',
 };
-const UNKNOWN_COLOR = '#8897a0';
+const GRAPH_SYMBOLS = ['circle', 'rect', 'roundRect', 'diamond', 'triangle', 'pin'] as const;
+const GRAPH_SYMBOL_CLASSES: Record<string, string> = {
+  circle: 'circle', rect: 'rect', roundRect: 'round-rect', diamond: 'diamond',
+  triangle: 'triangle', pin: 'pin',
+};
+const RELATION_LABELS = {
+  observed_traffic: '观测到的通信',
+  configured_linkage: '配置声明的联动',
+  unknown: '关系来源未标注',
+} as const;
 
-function graphOption(graph: MonitorGraphSnapshot): Record<string, unknown> {
+function themeColor(variable: string): string {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return 'currentColor';
+  return window.getComputedStyle(document.documentElement).getPropertyValue(variable).trim() || 'currentColor';
+}
+
+export function graphTypeSymbols(nodes: MonitorGraphNode[]): Record<string, string> {
+  const types = [...new Set(nodes.map((node) => node.type))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  return Object.fromEntries(types.map((type, index) => [type, GRAPH_SYMBOLS[index % GRAPH_SYMBOLS.length]]));
+}
+
+export function buildGraphOption(
+  graph: MonitorGraphSnapshot,
+  highlightedDeviceIds: ReadonlySet<string> = new Set(),
+): Record<string, unknown> {
+  const hasHighlight = highlightedDeviceIds.size > 0;
+  const typeSymbols = graphTypeSymbols(graph.nodes);
+  const names = new Map(graph.nodes.map((node) => [node.id, node.label]));
   const nodes = graph.nodes.map((node) => ({
     id: node.id,
     name: node.label,
-    symbolSize: 18,
+    symbol: typeSymbols[node.type] ?? 'circle',
+    symbolSize: highlightedDeviceIds.has(node.id) ? 28 : 22,
     itemStyle: {
-      color: node.risk_level != null ? RISK_COLORS[node.risk_level] ?? UNKNOWN_COLOR : UNKNOWN_COLOR,
-      borderColor: node.status === 'online' ? '#34c97b' : '#63717b',
-      borderWidth: 2,
+      color: node.risk_level != null && RISK_VARIABLES[node.risk_level]
+        ? themeColor(RISK_VARIABLES[node.risk_level])
+        : themeColor('--text-secondary'),
+      borderColor: highlightedDeviceIds.has(node.id)
+        ? themeColor('--accent-blue')
+        : themeColor(node.status === 'online' ? '--risk-low' : node.status === 'stale' ? '--risk-medium' : node.status === 'offline' ? '--risk-critical' : '--text-secondary'),
+      borderWidth: highlightedDeviceIds.has(node.id) ? 5 : 2,
+      opacity: hasHighlight && !highlightedDeviceIds.has(node.id) ? 0.24 : 1,
+      shadowBlur: highlightedDeviceIds.has(node.id) ? 12 : 0,
+      shadowColor: themeColor('--accent-blue'),
     },
-    label: { show: true, position: 'bottom', fontSize: 10, color: '#7893a3' },
+    label: {
+      show: true,
+      position: 'bottom',
+      fontSize: 14,
+      color: themeColor('--text-primary'),
+      fontWeight: highlightedDeviceIds.has(node.id) ? 700 : 400,
+    },
     device_type: node.type,
     status: node.status,
     risk_name: node.risk_name,
     ip: node.ip,
   }));
-  const links = graph.edges.map((edge) => ({
-    source: edge.source,
-    target: edge.target,
-    lineStyle: {
-      width: Math.min(4, Math.max(1, Math.ceil(Math.log2(edge.packets + 1)))),
-      curveness: 0.08,
-    },
-  }));
+  const links = graph.edges.map((edge) => {
+    const touchesHighlightedDevice = highlightedDeviceIds.has(edge.source)
+      || highlightedDeviceIds.has(edge.target);
+    const edgeColor = edge.relation_type === 'observed_traffic'
+      ? '--accent-cyan'
+      : edge.relation_type === 'configured_linkage'
+        ? '--accent-purple'
+        : '--text-secondary';
+    return {
+      source: edge.source,
+      target: edge.target,
+      source_label: names.get(edge.source) ?? edge.source,
+      target_label: names.get(edge.target) ?? edge.target,
+      relation_type: edge.relation_type,
+      lineStyle: {
+        color: hasHighlight && touchesHighlightedDevice ? themeColor('--accent-blue') : themeColor(edgeColor),
+        type: edge.relation_type === 'configured_linkage'
+          ? 'dashed'
+          : edge.relation_type === 'unknown' ? 'dotted' : 'solid',
+        width: hasHighlight && touchesHighlightedDevice
+          ? 4
+          : Math.min(4, Math.max(1, Math.ceil(Math.log2(edge.packets + 1)))),
+        opacity: hasHighlight
+          ? touchesHighlightedDevice ? 1 : 0.16
+          : 0.9,
+        curveness: 0.08,
+      },
+    };
+  });
   return {
     animation: false,
     tooltip: {
@@ -234,6 +294,9 @@ function graphOption(graph: MonitorGraphSnapshot): Record<string, unknown> {
             ip?: string | null;
             source?: string;
             target?: string;
+            source_label?: string;
+            target_label?: string;
+            relation_type?: keyof typeof RELATION_LABELS;
           };
         };
         if (p.dataType === 'node') {
@@ -247,7 +310,11 @@ function graphOption(graph: MonitorGraphSnapshot): Record<string, unknown> {
           ].filter(Boolean).join('<br/>');
         }
         if (p.dataType === 'edge') {
-          return `${p.data?.source ?? ''} ↔ ${p.data?.target ?? ''}`;
+          const data = p.data ?? {};
+          const relationship = data.relation_type
+            ? RELATION_LABELS[data.relation_type]
+            : RELATION_LABELS.unknown;
+          return `${data.source_label ?? data.source ?? ''} ↔ ${data.target_label ?? data.target ?? ''}<br/>${relationship}`;
         }
         return '';
       },
@@ -271,11 +338,17 @@ export function CapabilityPanel({
   graph,
   onSelect,
   visibleIds,
+  highlightedDeviceIds,
+  highlightLabel,
+  onClearHighlight,
 }: {
   capability: MonitorCapability;
   graph?: MonitorGraphSnapshot | null;
   onSelect?: (deviceId: string) => void;
   visibleIds?: Set<string> | null;
+  highlightedDeviceIds?: ReadonlySet<string>;
+  highlightLabel?: string | null;
+  onClearHighlight?: () => void;
 }) {
   const filteredGraph = useMemo(() => {
     if (!graph || !visibleIds) return graph;
@@ -286,47 +359,84 @@ export function CapabilityPanel({
       edges: graph.edges.filter((edge) => kept.has(edge.source) && kept.has(edge.target)),
     };
   }, [graph, visibleIds]);
+  const allTypes = graphTypeSymbols(graph?.nodes ?? []);
+  const visibleHighlightedCount = filteredGraph?.nodes.filter(
+    (node) => highlightedDeviceIds?.has(node.id),
+  ).length ?? 0;
   const renderable = capability.available && filteredGraph != null && filteredGraph.nodes.length > 0;
   return (
     <section className="monitor-panel graph-panel" aria-labelledby="graph-title">
       <div className="panel-heading graph-heading">
         <div>
-          <p className="eyebrow">GNN RELATION VIEW</p>
-          <h2 id="graph-title">设备关系主视图</h2>
+          <p className="eyebrow">DEVICE RELATION VIEW · 近 24 小时</p>
+          <h2 id="graph-title">设备通信与配置关系</h2>
         </div>
         <span className={`capability-badge ${capability.available ? 'available' : 'unavailable'}`}>
           {capability.available ? '能力可用' : '能力不可用'}
         </span>
       </div>
       {renderable ? (
-        <div className="graph-canvas" style={{ flex: 1, minHeight: 0 }} data-testid="graph-capability">
-          <ReactEChartsCore
-            echarts={echarts}
-            option={graphOption(filteredGraph)}
-            notMerge
-            lazyUpdate
-            onEvents={onSelect ? {
-              click: (params: unknown) => {
-                const p = params as { dataType?: string; data?: { id?: string } };
-                if (p.dataType === 'node' && p.data?.id) onSelect(p.data.id);
-              },
-            } : undefined}
-            style={{ width: '100%', height: '100%', minHeight: 320 }}
-            opts={{ renderer: 'canvas' }}
-          />
-        </div>
+        <>
+          <div className="graph-legend" aria-label="设备关系图例">
+            <div className="graph-legend-group" aria-label="设备类型">
+              <strong>设备类型</strong>
+              {Object.entries(allTypes).map(([type, symbol]) => (
+                <span className="graph-legend-item" key={type}>
+                  <i className={`graph-type-symbol graph-type-${GRAPH_SYMBOL_CLASSES[symbol] ?? 'circle'}`} aria-hidden="true" />
+                  {type}
+                </span>
+              ))}
+            </div>
+            <div className="graph-legend-group" aria-label="关系来源">
+              <strong>关系来源</strong>
+              <span className="graph-legend-item"><i className="graph-line graph-line-observed" aria-hidden="true" />{RELATION_LABELS.observed_traffic}</span>
+              <span className="graph-legend-item"><i className="graph-line graph-line-configured" aria-hidden="true" />{RELATION_LABELS.configured_linkage}</span>
+              {filteredGraph.edges.some((edge) => edge.relation_type === 'unknown') && (
+                <span className="graph-legend-item"><i className="graph-line graph-line-unknown" aria-hidden="true" />{RELATION_LABELS.unknown}</span>
+              )}
+            </div>
+            <div className="graph-legend-group" aria-label="风险颜色">
+              <strong>节点填色</strong>
+              <span className="graph-legend-item"><i className="graph-risk-swatch risk-normal" aria-hidden="true" />正常</span>
+              <span className="graph-legend-item"><i className="graph-risk-swatch risk-low" aria-hidden="true" />低危</span>
+              <span className="graph-legend-item"><i className="graph-risk-swatch risk-medium" aria-hidden="true" />中危</span>
+              <span className="graph-legend-item"><i className="graph-risk-swatch risk-high" aria-hidden="true" />高危</span>
+              <span className="graph-legend-item"><i className="graph-risk-swatch risk-unknown" aria-hidden="true" />未检测</span>
+            </div>
+          </div>
+          {highlightLabel !== undefined && highlightLabel !== null && (
+            <div className="graph-highlight-banner" role="status">
+              <span>
+                事件定位：{highlightLabel} · {visibleHighlightedCount}/{highlightedDeviceIds?.size ?? 0} 台关联设备在当前筛选中可见
+                {highlightedDeviceIds?.size === 0 ? '；该事件没有关联设备，未执行节点定位。' : ''}
+              </span>
+              {onClearHighlight && <button type="button" onClick={onClearHighlight}>清除定位</button>}
+            </div>
+          )}
+          <div className="graph-canvas" style={{ flex: 1, minHeight: 0 }} data-testid="graph-capability">
+            <ReactEChartsCore
+              echarts={echarts}
+              option={buildGraphOption(filteredGraph, highlightedDeviceIds)}
+              notMerge
+              lazyUpdate
+              onEvents={onSelect ? {
+                click: (params: unknown) => {
+                  const p = params as { dataType?: string; data?: { id?: string } };
+                  if (p.dataType === 'node' && p.data?.id) onSelect(p.data.id);
+                },
+              } : undefined}
+              style={{ width: '100%', height: '100%', minHeight: 320 }}
+              opts={{ renderer: 'canvas' }}
+            />
+          </div>
+        </>
       ) : (
         <div className="graph-empty" data-testid="graph-capability">
           <div className="graph-empty-mark" aria-hidden="true">◇</div>
           <strong>
             {capability.available ? '暂无设备节点' : 'GNN 图暂不可用'}
           </strong>
-          <p>
-            {capability.available
-              ? '当前没有可渲染的设备节点与边，页面不会生成替代拓扑。'
-              : capabilityReason(capability)}
-          </p>
-          <span>未绘制静态节点、随机连线或装饰性拓扑</span>
+          {!capability.available && <p>{capabilityReason(capability)}</p>}
         </div>
       )}
     </section>
@@ -353,11 +463,15 @@ export function RecentEventsPanel({
   events,
   incident,
   incidents,
+  selectedIncidentId,
+  onSelectIncident,
   onViewIncident,
 }: {
   events: MonitorRealtimeEvent[];
   incident: MonitorCapability;
   incidents?: MonitorIncidentData | null;
+  selectedIncidentId: string | null;
+  onSelectIncident: (incidentId: string) => void;
   onViewIncident: (incidentId: string) => void;
 }) {
   const summaries = [...(incidents?.active ?? []), ...(incidents?.recent ?? [])]
@@ -385,14 +499,29 @@ export function RecentEventsPanel({
           {summaries.length === 0 ? (
             <div className="panel-empty compact">
               <strong>当前没有已记录事件</strong>
-              <span>这不是“系统安全”或“无攻击”的检测结论。</span>
             </div>
           ) : summaries.map((item) => (
-            <button type="button" key={item.incident_id} onClick={() => onViewIncident(item.incident_id)}>
-              <span className={`monitor-incident-severity severity-${item.severity}`}>{item.severity}</span>
-              <span><strong>{item.admin_title}</strong><small>{item.status} · {formatTime(item.updated_at)}</small></span>
-              <span aria-hidden="true">→</span>
-            </button>
+            <article className="monitor-incident-row" key={item.incident_id}>
+              <button
+                type="button"
+                className="monitor-incident-focus"
+                aria-pressed={selectedIncidentId === item.incident_id}
+                aria-label={`${selectedIncidentId === item.incident_id ? '解除' : '在拓扑中定位'}事件 ${item.admin_title}`}
+                onClick={() => onSelectIncident(item.incident_id)}
+              >
+                <span className={`monitor-incident-severity severity-${item.severity}`}>{item.severity}</span>
+                <span><strong>{item.admin_title}</strong><small>{item.status} · {formatTime(item.updated_at)}</small></span>
+                <span aria-hidden="true">{selectedIncidentId === item.incident_id ? '⌖' : '＋'}</span>
+              </button>
+              <button
+                type="button"
+                className="monitor-incident-view"
+                onClick={() => onViewIncident(item.incident_id)}
+                aria-label={`查看事件 ${item.admin_title}`}
+              >
+                处置详情
+              </button>
+            </article>
           ))}
         </div>
       )}
@@ -401,7 +530,6 @@ export function RecentEventsPanel({
         {events.length === 0 ? (
           <div className="panel-empty compact">
             <strong>本次连接尚未收到增量状态事件</strong>
-            <span>这不是安全结论；事件处置能力以上方后端状态为准。</span>
           </div>
         ) : (
           events.map((event) => (
@@ -431,7 +559,6 @@ export function DeviceDetailsPanel({ device }: { device: MonitorDevice | null })
       {!device ? (
         <div className="panel-empty compact">
           <strong>尚未选择设备</strong>
-          <span>从左侧真实设备列表中选择一项。</span>
         </div>
       ) : (
         <div className="detail-content">
@@ -456,8 +583,22 @@ export function DeviceDetailsPanel({ device }: { device: MonitorDevice | null })
           </dl>
           <div className="behavior-panel">
             <h3 className="behavior-title">行为异常提示</h3>
+            <div className="behavior-coverage-grid">
+              <div>
+                <strong>设备遥测覆盖</strong>
+                <span>{device.received_at
+                  ? `最近接收 ${formatTime(device.received_at)} · ${device.sources.length ? device.sources.join('、') : '来源未标注'}`
+                  : '尚无后端接收的设备观测'}</span>
+              </div>
+              <div>
+                <strong>GNN 能力状态</strong>
+                <span>监视快照未提供运行或配置状态</span>
+              </div>
+            </div>
             {device.risk_level === null ? (
-              <p className="behavior-note">该设备尚未产生 GNN 检测结论；在出现风险前不展示异常，也不会伪造分析结果。</p>
+              <p className="behavior-note">{device.received_at
+                ? '暂无该设备的 GNN 风险结论。已接收遥测不等于已完成风险检测；无风险结果不能解释为正常。当前响应也无法区分检测数据不足与检测能力未配置。'
+                : '设备遥测覆盖不足：尚无后端接收的设备观测。当前响应未提供 GNN 运行/配置或模型输入覆盖状态，无法判断是否应有风险结论；缺少结论不等于正常。'}</p>
             ) : (
               <>
                 <div className="behavior-evidence-grid">
@@ -466,12 +607,12 @@ export function DeviceDetailsPanel({ device }: { device: MonitorDevice | null })
                   <div><strong>参考基线</strong><span>尚未接入</span></div>
                 </div>
                 <p className="behavior-observation-time">检测时间：{formatTime(device.risk_detected_at)}</p>
-                <div className="behavior-baseline-gap">
-                  <strong>通信基线尚未接入</strong>
-                  <p>当前检测只输出风险类别与置信度，尚未计算频率、协议/端口、连接对象的参考基线，因此不展示偏离结论。</p>
-                </div>
               </>
             )}
+            <div className="behavior-baseline-gap">
+              <strong>通信基线尚未接入</strong>
+              <p>当前检测只输出风险类别与置信度，尚未计算频率、协议/端口、连接对象的参考基线，因此不展示偏离结论。</p>
+            </div>
           </div>
         </div>
       )}
@@ -492,7 +633,6 @@ export function SystemHealthPanel({ components }: { components: SystemComponentH
         {components.length === 0 ? (
           <div className="panel-empty compact">
             <strong>尚未收到组件状态</strong>
-            <span>系统不会把缺少记录解释为全部健康。</span>
           </div>
         ) : (
           components.map((component) => (
