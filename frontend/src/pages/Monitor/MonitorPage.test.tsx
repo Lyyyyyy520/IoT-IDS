@@ -53,11 +53,13 @@ beforeEach(() => {
 });
 
 describe('MonitorPage real states', () => {
-  it('shows graph and incident unavailable reasons without a fake topology or safety claim', () => {
+  it('renders the real graph capability and the current incident unavailable reason without a fake topology', () => {
     renderPage();
     expect(screen.queryByRole('button', { name: '旧版功能' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('graph-capability')).toHaveTextContent('后端尚未提供图快照能力');
-    expect(screen.getByTestId('incident-capability')).toHaveTextContent('后端尚未提供安全事件存储能力');
+    // 图能力已可用：渲染真实图（canvas），不显示“暂不可用”文案或伪造拓扑
+    expect(screen.getByTestId('graph-capability')).not.toHaveTextContent('GNN 图暂不可用');
+    // 事件能力未迁移时给出明确原因
+    expect(screen.getByTestId('incident-capability')).toHaveTextContent('事件存储尚未完成迁移');
     expect(screen.getByText(/不能代表“没有攻击”/)).toBeInTheDocument();
   });
 

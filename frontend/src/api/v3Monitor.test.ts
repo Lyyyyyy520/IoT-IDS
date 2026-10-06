@@ -120,7 +120,7 @@ describe('v3 monitor runtime contracts', () => {
       },
     });
     expect(snapshot.incidents?.active[0].status).toBe('open');
-    expect(snapshot.capabilities.graph.available).toBe(false);
+    expect(snapshot.capabilities.graph.available).toBe(true);
 
     const event = parseMonitorEvent('incident.opened', JSON.stringify({
       event_id: 8,

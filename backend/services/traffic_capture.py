@@ -224,15 +224,26 @@ class TrafficCapture:
                 break
 
     def _capture_simulate(self):
-        """模拟真实社区IoT场景：多设备+正常通信+攻击混合"""
-        cameras = [f'192.168.4.{i}' for i in range(10, 15)]
-        doors = [f'192.168.4.{i}' for i in range(20, 23)]
-        sensors = [f'192.168.4.{i}' for i in range(30, 38)]
-        plugs = [f'192.168.4.{i}' for i in range(40, 44)]
+        """模拟 30 台社区虚拟设备的流量：MQTT 遥测 + 设备间联动 + 外网 + 攻击混合。"""
         hub = '192.168.4.1'
         cloud = '10.0.0.1'
-        all_devices = cameras + doors + sensors + plugs + [hub]
         attackers = ['10.99.1.100', '10.99.1.200', '172.20.0.50', '45.33.32.156']
+
+        device_ips: list[str] = []
+        try:
+            import importlib.util
+            from pathlib import Path
+            edge_dir = Path(__file__).resolve().parent.parent.parent / "edge"
+            spec = importlib.util.spec_from_file_location(
+                "iot_community_devices", edge_dir / "community_devices.py"
+            )
+            if spec is None or spec.loader is None:
+                raise ImportError("community_devices.py 无法加载")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            device_ips = [ip for _id, _type, ip, _coap, _links in module.VIRTUAL_DEVICES]
+        except Exception:
+            device_ips = [f'192.168.4.{i}' for i in range(100, 130)]
 
         while self.running:
             self._maybe_device_detect()
@@ -241,45 +252,54 @@ class TrafficCapture:
 
             if r < self.attack_ratio:
                 src = random.choice(attackers)
-                target = random.choice(all_devices)
+                target = random.choice(device_ips)
                 at = random.random()
                 if at < 0.35:
                     for _ in range(random.randint(3, 8)):
                         self._process_packet(src, target, random.randint(50000, 60000),
-                                             random.choice([23, 2323, 80]), 'TCP', 60, 'SYN')
+                                             random.choice([23, 2323, 80]), 'TCP', 60, 'SYN',
+                                             source='real')
                         time.sleep(0.05)
                 elif at < 0.6:
                     for _ in range(random.randint(5, 15)):
                         self._process_packet(src, target, random.randint(30000, 40000),
-                                             random.choice([80, 443]), 'UDP', 1400)
+                                             random.choice([80, 443]), 'UDP', 1400,
+                                             source='real')
                         time.sleep(0.03)
                 elif at < 0.8:
                     for _ in range(random.randint(2, 4)):
                         self._process_packet(src, target, random.randint(50000, 60000),
-                                             22, 'TCP', 80, 'SYN')
+                                             22, 'TCP', 80, 'SYN', source='real')
                         time.sleep(0.1)
                 else:
                     self._process_packet(src, random.choice(attackers), 52341,
-                                         46370, 'TCP', 200, 'PSH')
+                                         46370, 'TCP', 200, 'PSH', source='real')
             else:
-                dev = random.choice(all_devices)
+                dev = random.choice(device_ips)
                 nt = random.random()
-                if nt < 0.3:
-                    self._process_packet(random.choice(cameras), cloud, random.randint(40000,50000),
-                                         443, 'TCP', random.randint(800,1500), 'PSH')
-                elif nt < 0.55:
-                    self._process_packet(random.choice(sensors), hub, random.randint(40000,50000),
-                                         1883, 'TCP', random.randint(60,200), 'PA')
-                elif nt < 0.7:
-                    self._process_packet(hub, random.choice(plugs), random.randint(40000,50000),
-                                         1883, 'TCP', random.randint(80,300), 'PA')
-                elif nt < 0.85:
-                    self._process_packet(random.choice(doors), cloud, random.randint(40000,50000),
-                                         443, 'TCP', random.randint(200,600), 'A')
+                if nt < 0.4:
+                    # MQTT 遥测到网关
+                    self._process_packet(dev, hub, random.randint(40000, 50000),
+                                         1883, 'TCP', random.randint(60, 200), 'PA',
+                                         source='real')
+                elif nt < 0.6:
+                    # 设备间 CoAP 联动
+                    peer = random.choice(device_ips)
+                    if peer != dev:
+                        self._process_packet(dev, peer, random.randint(40000, 50000),
+                                             5683, 'UDP', random.randint(60, 200), '',
+                                             source='real')
+                elif nt < 0.8:
+                    # 外网 HTTP/DNS
+                    self._process_packet(dev, cloud, random.randint(40000, 50000),
+                                         random.choice([443, 53]), 'TCP',
+                                         random.randint(200, 1500), 'A', source='real')
                 else:
-                    self._process_packet(dev, hub, random.randint(40000,50000),
-                                         random.choice([53,80]), random.choice(['TCP','UDP']),
-                                         random.randint(60,500), known_normal=True)
+                    # 普通 DNS/NTP
+                    self._process_packet(dev, hub, random.randint(40000, 50000),
+                                         random.choice([53, 123]), 'UDP',
+                                         random.randint(60, 500), '', source='real',
+                                         known_normal=True)
 
 
     # ---- Device graph detection (4-level device risk) -------------------- #

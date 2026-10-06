@@ -1,9 +1,12 @@
 import { useNavigate } from 'react-router-dom';
+import { incidentsExportUrl } from '../../api/v3Incidents';
 import type { IncidentDetail, IncidentListItem, IncidentStatus } from '../../api/v3Incidents';
+import { utc } from './useIncidentWorkspace';
 import type { IncidentFilters } from './useIncidentWorkspace';
 import {
   ROLE_LABELS, SEVERITY_LABELS, SOURCE_LABELS, STATUS_LABELS, localTime,
 } from './incidentUi';
+import { IncidentReplayPanel } from './IncidentReplayPanel';
 
 const STATUSES: Array<'all' | IncidentStatus> = ['all', 'open', 'acknowledged', 'recovering', 'resolved', 'false_positive'];
 
@@ -28,6 +31,15 @@ export function IncidentListPanel({
 }) {
   const patch = (value: Partial<IncidentFilters>) => onFilters({ ...filters, ...value });
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const exportUrl = incidentsExportUrl({
+    search: filters.search.trim() || undefined,
+    status: filters.status === 'all' ? undefined : filters.status,
+    severity: filters.severity === 'all' ? undefined : filters.severity,
+    source: filters.source === 'all' ? undefined : filters.source,
+    device_id: filters.deviceId.trim() || undefined,
+    from: utc(filters.from),
+    to: utc(filters.to),
+  });
   return (
     <section className="incident-panel incident-list-panel" aria-labelledby="incident-list-title">
       <header className="incident-panel-heading">
@@ -43,6 +55,10 @@ export function IncidentListPanel({
         <label><span>开始时间</span><input type="datetime-local" value={filters.from} onChange={(e) => patch({ from: e.target.value })} /></label>
         <label><span>结束时间</span><input type="datetime-local" value={filters.to} onChange={(e) => patch({ to: e.target.value })} /></label>
         <button type="button" className="ghost-button clear-filter" onClick={onClear}>清空筛选</button>
+      </div>
+      <div className="incident-report-export">
+        <span>导出当前筛选的告警摘要（{total} 条）</span>
+        <a className="ghost-button" href={exportUrl} download="incidents-export.csv">导出 CSV</a>
       </div>
       <div className="list-meta"><span>共 {total} 条</span><span>最后更新 {lastUpdatedAt ? localTime(lastUpdatedAt) : '尚未成功读取'}</span></div>
       {error && <div className="workspace-inline-error" role="alert">{error}</div>}
@@ -108,6 +124,7 @@ export function IncidentDetailPanel({
         <section className="user-preview"><h3>APP 用户可见预览</h3><p className="boundary-label public">公开字段 · 不含疑似来源和技术证据</p><strong>{detail.user_preview.user_title}</strong><p>{detail.user_preview.user_summary}</p><p><b>处理进度：</b>{detail.user_preview.public_progress ?? '管理员尚未提供公开进度'}</p></section>
         <section><h3>结案信息</h3><p><b>解决摘要：</b>{detail.resolution_summary ?? '尚无'}</p><p><b>误报原因：</b>{detail.false_positive_reason ?? '尚无'}</p></section>
         <section className="timeline-section"><h3>处置时间线</h3>{detail.timeline.map((entry) => <article className="timeline-entry" key={entry.timeline_id}><span className="timeline-dot" aria-hidden="true" /><div><header><strong>{entry.action}</strong><time>{localTime(entry.occurred_at)}</time></header><p>{entry.actor_username} · {entry.actor_role} · {STATUS_LABELS[entry.resulting_status]} · v{entry.incident_version}</p>{entry.public_progress && <div className="timeline-public"><b>APP 用户可见：</b>{entry.public_progress}</div>}{entry.admin_details && <div className="timeline-admin"><b>仅管理端：</b>{entry.admin_details}</div>}</div></article>)}</section>
+        <IncidentReplayPanel incidentId={detail.incident_id} />
       </div>
     </section>
   );

@@ -41,7 +41,10 @@ export default function MonitorPage() {
   const closeDeviceDetail = useCallback(() => setDetailDeviceId(null), []);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<DeviceFilter>('all');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [riskFilter, setRiskFilter] = useState('all');
   const devices = monitor.snapshot?.devices ?? [];
+  const deviceTypes = useMemo(() => [...new Set(devices.map((device) => device.device_type))].sort(), [devices]);
 
   useEffect(() => {
     if (selectedId && devices.some((device) => device.device_id === selectedId)) return;
@@ -52,11 +55,17 @@ export default function MonitorPage() {
     const query = search.trim().toLocaleLowerCase('zh-CN');
     return devices.filter((device) => {
       if (filter !== 'all' && device.connection_status !== filter) return false;
+      if (typeFilter !== 'all' && device.device_type !== typeFilter) return false;
+      if (riskFilter === 'undetected' && device.risk_level !== null) return false;
+      if (riskFilter === 'normal' && device.risk_level !== 0) return false;
+      if (riskFilter === 'alerted' && (device.risk_level === null || device.risk_level === 0)) return false;
       if (!query) return true;
       return [device.display_name, device.device_type, device.area_id, device.ip_address, device.device_id]
         .some((value) => value?.toLocaleLowerCase('zh-CN').includes(query));
     });
-  }, [devices, filter, search]);
+  }, [devices, filter, typeFilter, riskFilter, search]);
+
+  const visibleIds = useMemo(() => new Set(visibleDevices.map((device) => device.device_id)), [visibleDevices]);
 
   const selectedDevice = devices.find((device) => device.device_id === selectedId) ?? null;
   const counts = devices.reduce<Record<ConnectionStatus, number>>(
@@ -149,10 +158,20 @@ export default function MonitorPage() {
             onSearch={setSearch}
             filter={filter}
             onFilter={setFilter}
+            typeFilter={typeFilter}
+            onTypeFilter={setTypeFilter}
+            riskFilter={riskFilter}
+            onRiskFilter={setRiskFilter}
+            deviceTypes={deviceTypes}
             onManageDevice={(deviceId) => navigate(`/devices?device_id=${encodeURIComponent(deviceId)}`)}
           />
           <div className="monitor-center-column">
-            <CapabilityPanel capability={monitor.snapshot.capabilities.graph} />
+            <CapabilityPanel
+              capability={monitor.snapshot.capabilities.graph}
+              graph={monitor.snapshot.graph}
+              onSelect={(deviceId) => { setSelectedId(deviceId); setDetailDeviceId(deviceId); }}
+              visibleIds={visibleIds}
+            />
             <RecentEventsPanel
               events={monitor.recentEvents}
               incident={monitor.snapshot.capabilities.incident}

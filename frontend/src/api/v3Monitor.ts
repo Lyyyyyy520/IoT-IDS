@@ -49,6 +49,31 @@ export interface MonitorCapability {
   semantics?: string;
 }
 
+export interface MonitorGraphNode {
+  id: string;
+  label: string;
+  type: string;
+  status: 'unknown' | 'online' | 'stale' | 'offline';
+  risk_level: number | null;
+  risk_name: string | null;
+  ip: string | null;
+}
+
+export interface MonitorGraphEdge {
+  source: string;
+  target: string;
+  bytes: number;
+  packets: number;
+  protocols: string[];
+}
+
+export interface MonitorGraphSnapshot {
+  window: { from: string; to: string; range: string };
+  nodes: MonitorGraphNode[];
+  edges: MonitorGraphEdge[];
+  availability: { source: string | null; reason: string | null };
+}
+
 export type IncidentStatus =
   | 'open'
   | 'acknowledged'
@@ -86,6 +111,7 @@ export interface MonitorSnapshot {
     graph: MonitorCapability;
     incident: MonitorCapability;
   };
+  graph?: MonitorGraphSnapshot | null;
   incidents?: MonitorIncidentData | null;
 }
 
@@ -437,6 +463,53 @@ function parseIncidentData(value: unknown): MonitorIncidentData | null {
   };
 }
 
+function parseGraphNode(value: unknown, index: number): MonitorGraphNode {
+  const row = object(value, `graph.nodes[${index}]`);
+  return {
+    id: text(row.id, `graph.nodes[${index}].id`),
+    label: text(row.label, `graph.nodes[${index}].label`),
+    type: text(row.type, `graph.nodes[${index}].type`),
+    status: oneOf(row.status, CONNECTION_STATUSES, `graph.nodes[${index}].status`),
+    risk_level: nullableInteger(row.risk_level, `graph.nodes[${index}].risk_level`),
+    risk_name: nullableText(row.risk_name, `graph.nodes[${index}].risk_name`),
+    ip: nullableText(row.ip, `graph.nodes[${index}].ip`),
+  };
+}
+
+function parseGraphEdge(value: unknown, index: number): MonitorGraphEdge {
+  const row = object(value, `graph.edges[${index}]`);
+  return {
+    source: text(row.source, `graph.edges[${index}].source`),
+    target: text(row.target, `graph.edges[${index}].target`),
+    bytes: integer(row.bytes, `graph.edges[${index}].bytes`, 0),
+    packets: integer(row.packets, `graph.edges[${index}].packets`, 0),
+    protocols: stringArray(row.protocols, `graph.edges[${index}].protocols`),
+  };
+}
+
+function parseGraphSnapshot(value: unknown): MonitorGraphSnapshot | null {
+  if (value === null || value === undefined) return null;
+  const graph = object(value, 'graph');
+  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
+    throw new MonitorApiError('invalid_response', 'graph 列表字段格式错误');
+  }
+  const window = object(graph.window, 'graph.window');
+  const availability = object(graph.availability, 'graph.availability');
+  return {
+    window: {
+      from: text(window.from, 'graph.window.from'),
+      to: text(window.to, 'graph.window.to'),
+      range: text(window.range, 'graph.window.range'),
+    },
+    nodes: graph.nodes.map(parseGraphNode),
+    edges: graph.edges.map(parseGraphEdge),
+    availability: {
+      source: nullableText(availability.source, 'graph.availability.source'),
+      reason: nullableText(availability.reason, 'graph.availability.reason'),
+    },
+  };
+}
+
 export function parseMonitorSnapshot(value: unknown): MonitorSnapshot {
   const snapshot = object(value, 'monitor');
   if (snapshot.api_version !== 'v3' || snapshot.schema_version !== 4) {
@@ -457,6 +530,9 @@ export function parseMonitorSnapshot(value: unknown): MonitorSnapshot {
       graph: parseCapability(capabilities.graph, 'capabilities.graph'),
       incident: parseCapability(capabilities.incident, 'capabilities.incident'),
     },
+    ...(snapshot.graph === undefined
+      ? {}
+      : { graph: parseGraphSnapshot(snapshot.graph) }),
     ...(snapshot.incidents === undefined
       ? {}
       : { incidents: parseIncidentData(snapshot.incidents) }),

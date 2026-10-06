@@ -86,10 +86,10 @@ function aborted(error: unknown): boolean {
   return error instanceof IncidentApiError && error.kind === 'aborted';
 }
 
-function utc(value: string): string | undefined {
+export function utc(value: string): string | undefined {
   if (!value) return undefined;
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
 export function useIncidentWorkspace(options: Options = {}) {

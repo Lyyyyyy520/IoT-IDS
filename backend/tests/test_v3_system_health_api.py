@@ -105,8 +105,8 @@ def test_health_api_permissions_redaction_and_read_only_behavior(tmp_path):
         assert payload["components"]["integrity_check"]["result"] == "ok"
         assert payload["components"]["event_log"]["retained_events"] == 1
         assert payload["components"]["mqtt"]["status"] == "unavailable"
-        assert payload["components"]["graph"]["status"] == "unavailable"
-        assert payload["components"]["graph"]["reason_code"] == "graph_capability_unavailable"
+        assert payload["components"]["graph"]["status"] == "ready"
+        assert payload["components"]["graph"]["reason_code"] is None
         assert payload["maintenance"]["last_successful_at"] is None
         assert payload["maintenance"]["last_apply_at"] is None
         assert payload["maintenance"]["last_plan_at"] is None

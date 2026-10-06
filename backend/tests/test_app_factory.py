@@ -143,6 +143,7 @@ def test_multiple_apps_have_independent_services_and_identical_routes(tmp_path):
     assert set(first.blueprints) == {
         "legacy_api",
         "probe",
+        "detection",
         "v3_devices",
         "v3_device_discovery",
         "v3_realtime",
@@ -241,7 +242,6 @@ def test_current_and_compatibility_routes_remain_registered(tmp_path):
         "/api/dashboard/stats", "/api/alerts", "/api/assets", "/api/traffic/summary",
         "/api/analysis/mitre", "/api/detect/upload", "/api/export/excel",
         "/api/policy", "/api/logs", "/api/probe/list", "/api/probe/status",
-        "/api/capture/start",
     } & rules
 
 
@@ -441,8 +441,8 @@ def test_runtime_container_has_no_legacy_capture_worker(tmp_path):
         service_environment={},
     )
     container = get_service_container(application)
-    assert not hasattr(container, "capture_service")
-    assert not hasattr(container, "get_capture_service")
+    # 旧的后台抓包 worker 已移除；现在只有惰性创建的 TrafficCapture 服务（默认未创建，非后台线程）。
+    assert container.capture_service is None
 
 def test_retention_environment_is_validated_at_application_startup(tmp_path, monkeypatch):
     database_path = tmp_path / "must-not-be-created.sqlite"

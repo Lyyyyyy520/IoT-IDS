@@ -111,7 +111,7 @@ export default function SensorHistoryPanel({ device }: { device: DeviceDetail })
   }, [data?.series]);
 
   const latest = data?.latest;
-  const isSensor = device.device_type.toLowerCase() === 'sensor';
+  const isSensor = device.device_type.toLowerCase() === 'temp_sensor';
   if (!isSensor) return null;
 
   return (

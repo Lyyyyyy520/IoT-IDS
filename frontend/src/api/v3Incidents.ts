@@ -59,6 +59,76 @@ export interface IncidentTimelineEntry {
   incident_version: number;
 }
 
+export interface IncidentReplayWindow {
+  from: string;
+  to: string;
+}
+
+export interface IncidentReplayCapabilities {
+  connection_status_history: boolean;
+  camera_media: boolean;
+  reason: string | null;
+}
+
+export interface IncidentReplayObservation {
+  observation_id: number;
+  device_id: string;
+  observed_at: string | null;
+  received_at: string;
+  temperature_c: number | null;
+  humidity_percent: number | null;
+}
+
+export interface IncidentReplayDevice extends IncidentDevice {
+  current_connection_status: string;
+  current_last_received_at: string | null;
+  observations: IncidentReplayObservation[];
+}
+
+export interface IncidentReplayRelationship {
+  source_device_id: string;
+  target_device_id: string;
+  bucket_start: string;
+  direction: string;
+  protocol: string;
+  bytes: number;
+  packets: number;
+  flows: number;
+  first_seen: string | null;
+  last_seen: string | null;
+}
+
+export interface IncidentReplayStatusChange {
+  event_id: number;
+  device_id: string;
+  occurred_at: string;
+  state_version: number | null;
+  from_status: string;
+  to_status: string;
+  source: string;
+}
+
+export interface IncidentReplayGap {
+  device_id: string;
+  from: string;
+  to: string;
+  reason: string;
+}
+
+export interface IncidentReplay {
+  incident_id: string;
+  generated_at: string;
+  window: IncidentReplayWindow;
+  incident_timeline: IncidentTimelineEntry[];
+  devices: IncidentReplayDevice[];
+  relationships: IncidentReplayRelationship[];
+  connection_status_changes: IncidentReplayStatusChange[];
+  gaps: IncidentReplayGap[];
+  truncated: boolean;
+  traffic_available: boolean;
+  capabilities: IncidentReplayCapabilities;
+}
+
 export interface IncidentDetail extends IncidentListItem {
   admin_summary: string;
   user_summary: string;
@@ -259,6 +329,12 @@ function nullableInteger(value: unknown, label: string): number | null {
   return integer(value, label);
 }
 
+function nullableNumber(value: unknown, label: string): number | null {
+  if (value === null) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) invalid(`${label} 必须是有效数字`);
+  return value;
+}
+
 function bool(value: unknown, label: string): boolean {
   if (typeof value !== 'boolean') invalid(`${label} 必须是布尔值`);
   return value;
@@ -366,6 +442,83 @@ export function parseIncidentDetail(value: unknown): IncidentDetail {
       user_title: text(preview.user_title, 'user_preview.user_title'),
       user_summary: text(preview.user_summary, 'user_preview.user_summary'),
       public_progress: nullableText(preview.public_progress, 'user_preview.public_progress'),
+    },
+  };
+}
+
+export function parseIncidentReplay(value: unknown): IncidentReplay {
+  const row = object(value, 'incident replay');
+  const window = object(row.window, 'window');
+  const capabilities = object(row.capabilities, 'capabilities');
+  return {
+    incident_id: text(row.incident_id, 'incident_id'),
+    generated_at: timestamp(row.generated_at, 'generated_at') as string,
+    window: {
+      from: timestamp(window.from, 'window.from') as string,
+      to: timestamp(window.to, 'window.to') as string,
+    },
+    incident_timeline: array(row.incident_timeline, 'incident_timeline').map(parseIncidentTimeline),
+    devices: array(row.devices, 'devices').map((value) => {
+      const device = object(value, 'replay device');
+      return {
+        ...parseIncidentDevice(device),
+        current_connection_status: text(device.current_connection_status, 'current_connection_status'),
+        current_last_received_at: timestamp(device.current_last_received_at, 'current_last_received_at', true),
+        observations: array(device.observations, 'observations').map((obsValue) => {
+          const obs = object(obsValue, 'observation');
+          return {
+            observation_id: integer(obs.observation_id, 'observation_id', 1),
+            device_id: text(obs.device_id, 'device_id'),
+            observed_at: timestamp(obs.observed_at, 'observed_at', true),
+            received_at: timestamp(obs.received_at, 'received_at') as string,
+            temperature_c: nullableNumber(obs.temperature_c, 'temperature_c'),
+            humidity_percent: nullableNumber(obs.humidity_percent, 'humidity_percent'),
+          };
+        }),
+      };
+    }),
+    relationships: array(row.relationships, 'relationships').map((value) => {
+      const rel = object(value, 'relationship');
+      return {
+        source_device_id: text(rel.source_device_id, 'source_device_id'),
+        target_device_id: text(rel.target_device_id, 'target_device_id'),
+        bucket_start: timestamp(rel.bucket_start, 'bucket_start') as string,
+        direction: text(rel.direction, 'direction'),
+        protocol: text(rel.protocol, 'protocol'),
+        bytes: integer(rel.bytes, 'bytes'),
+        packets: integer(rel.packets, 'packets'),
+        flows: integer(rel.flows, 'flows'),
+        first_seen: timestamp(rel.first_seen, 'first_seen', true),
+        last_seen: timestamp(rel.last_seen, 'last_seen', true),
+      };
+    }),
+    connection_status_changes: array(row.connection_status_changes, 'connection_status_changes').map((value) => {
+      const change = object(value, 'status change');
+      return {
+        event_id: integer(change.event_id, 'event_id', 1),
+        device_id: text(change.device_id, 'device_id'),
+        occurred_at: timestamp(change.occurred_at, 'occurred_at') as string,
+        state_version: nullableInteger(change.state_version, 'state_version'),
+        from_status: text(change.from_status, 'from_status'),
+        to_status: text(change.to_status, 'to_status'),
+        source: text(change.source, 'source'),
+      };
+    }),
+    gaps: array(row.gaps, 'gaps').map((value) => {
+      const gap = object(value, 'gap');
+      return {
+        device_id: text(gap.device_id, 'device_id'),
+        from: timestamp(gap.from, 'from') as string,
+        to: timestamp(gap.to, 'to') as string,
+        reason: text(gap.reason, 'reason'),
+      };
+    }),
+    truncated: bool(row.truncated, 'truncated'),
+    traffic_available: bool(row.traffic_available, 'traffic_available'),
+    capabilities: {
+      connection_status_history: bool(capabilities.connection_status_history, 'connection_status_history'),
+      camera_media: bool(capabilities.camera_media, 'camera_media'),
+      reason: nullableText(capabilities.reason, 'reason'),
     },
   };
 }
@@ -483,6 +636,7 @@ function queryString<T extends object>(values: T): string {
 export interface IncidentsApi {
   listIncidents(query?: IncidentQuery, signal?: AbortSignal): Promise<IncidentListResponse>;
   getIncident(id: string, signal?: AbortSignal): Promise<IncidentDetail>;
+  getIncidentReplay(id: string, range?: { from?: string; to?: string }, signal?: AbortSignal): Promise<IncidentReplay>;
   createIncident(input: CreateIncidentInput, signal?: AbortSignal): Promise<IncidentDetail>;
   transitionIncident(id: string, action: 'ack' | 'recovering' | 'resolve' | 'false-positive', input: TransitionIncidentInput, signal?: AbortSignal): Promise<IncidentDetail>;
   getSupportContact(signal?: AbortSignal): Promise<SupportContact>;
@@ -563,6 +717,14 @@ export class V3IncidentsClient implements IncidentsApi {
     return this.read(`${INCIDENTS_ENDPOINT}/${encodeURIComponent(id)}`, parseIncidentDetail, signal);
   }
 
+  getIncidentReplay(id: string, range?: { from?: string; to?: string }, signal?: AbortSignal): Promise<IncidentReplay> {
+    const params = new URLSearchParams();
+    if (range?.from) params.set('from', range.from);
+    if (range?.to) params.set('to', range.to);
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return this.read(`${INCIDENTS_ENDPOINT}/${encodeURIComponent(id)}/replay${suffix}`, parseIncidentReplay, signal);
+  }
+
   createIncident(input: CreateIncidentInput, signal?: AbortSignal): Promise<IncidentDetail> {
     return this.write(INCIDENTS_ENDPOINT, 'POST', input, parseIncidentDetail, signal);
   }
@@ -593,3 +755,8 @@ export class V3IncidentsClient implements IncidentsApi {
 }
 
 export const v3IncidentsApi = new V3IncidentsClient();
+
+export function incidentsExportUrl(query: IncidentQuery): string {
+  const { limit, offset, ...params } = query;
+  return `${INCIDENTS_ENDPOINT}/export${queryString(params)}`;
+}

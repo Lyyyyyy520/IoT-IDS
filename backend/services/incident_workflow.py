@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import hmac
+import csv
+import io
 import json
 import math
 from pathlib import Path
@@ -168,6 +170,14 @@ def _iso(value: datetime) -> str:
     return _utc(value).isoformat().replace("+00:00", "Z")
 
 
+def _csv_safe(value) -> str:
+    """阻止电子表格公式注入：以 = + - @ 或制表/回车开头的单元格加前导单引号。"""
+    text = "" if value is None else str(value)
+    if text and text[0] in "=+-@\t\r":
+        return "'" + text
+    return text
+
+
 def _text(value, field: str, *, minimum: int = 1, maximum: int = 500) -> str:
     if not isinstance(value, str):
         raise IncidentWorkflowError(f"{field} must be a string")
@@ -311,6 +321,9 @@ class IncidentWorkflowService:
         occurred_at: datetime,
         result: str = "success",
     ) -> None:
+        # 追加后端内部审计记录（只写，暂不提供读取 API）。
+        # 面向用户的处置历史由 v3_incident_timeline 提供（_admin_detail 返回），
+        # 本表用于合规/取证审计，二者职责不同。
         connection.execute(
             "INSERT INTO v3_incident_workflow_audit "
             "(entity_type,entity_id,action,actor_user_id,actor_username,"
@@ -711,6 +724,87 @@ class IncidentWorkflowService:
                     "SELECT COALESCE(MAX(event_id),0) FROM v3_realtime_events"
                 ).fetchone()[0]),
             }
+
+    def export_incidents(
+        self, *, status: str | None = None, severity: str | None = None,
+        source: str | None = None, device_id: str | None = None,
+        search: str | None = None, from_time: str | None = None,
+        to_time: str | None = None, generated_at: str,
+    ) -> str:
+        """导出满足筛选条件的告警摘要 CSV，并注明时间范围与生成时间。"""
+        if status is not None and status not in _INCIDENT_STATUSES:
+            raise IncidentWorkflowError("status is invalid")
+        if severity is not None and severity not in _SEVERITIES:
+            raise IncidentWorkflowError("severity is invalid")
+        if source is not None and source not in _SOURCES:
+            raise IncidentWorkflowError("source is invalid")
+        if device_id is not None and not is_valid_device_id(device_id):
+            raise IncidentWorkflowError("device_id is invalid")
+        if search is not None:
+            search = _text(search.strip(), "search", maximum=160)
+        conditions, params = [], []
+        for column, value in (
+            ("i.status", status), ("i.severity", severity), ("i.source", source),
+        ):
+            if value is not None:
+                conditions.append(f"{column}=?")
+                params.append(value)
+        if device_id is not None:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM v3_incident_devices d "
+                "WHERE d.incident_id=i.incident_id AND d.device_id=?)"
+            )
+            params.append(device_id)
+        if search is not None:
+            conditions.append(
+                "(LOWER(i.incident_id) LIKE ? OR LOWER(i.incident_type) LIKE ? "
+                "OR LOWER(i.admin_title) LIKE ? OR LOWER(i.user_title) LIKE ?)"
+            )
+            needle = f"%{search.lower()}%"
+            params.extend([needle, needle, needle, needle])
+        if from_time is not None:
+            conditions.append("i.updated_at>=?")
+            params.append(from_time)
+        if to_time is not None:
+            conditions.append("i.updated_at<=?")
+            params.append(to_time)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        with self._read() as connection:
+            rows = connection.execute(
+                "SELECT i.incident_id,i.incident_type,i.severity,i.status,"
+                "i.source,i.admin_title,i.user_title,i.first_seen_at,"
+                "i.last_seen_at,i.updated_at,i.resolved_at,i.incident_version,"
+                "(SELECT COUNT(*) FROM v3_incident_devices d "
+                "WHERE d.incident_id=i.incident_id AND d.incident_role='affected') "
+                "AS affected_device_count "
+                "FROM v3_incidents i" + where
+                + " ORDER BY i.updated_at DESC,i.incident_id LIMIT 10001",
+                params,
+            ).fetchall()
+        truncated = len(rows) > 10000
+        rows = rows[:10000]
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["# 数据时间范围: " + (from_time or "不限") + " 至 " + (to_time or "不限")])
+        writer.writerow(["# 生成时间: " + generated_at])
+        if truncated:
+            writer.writerow(["# 结果已截断：最多导出 10000 条，与当前筛选条件匹配的完整结果可能更多。"])
+        writer.writerow([
+            "incident_id", "incident_type", "severity", "status", "source",
+            "admin_title", "user_title", "affected_device_count",
+            "first_seen_at", "last_seen_at", "updated_at", "resolved_at",
+            "incident_version",
+        ])
+        for row in rows:
+            writer.writerow([
+                _csv_safe(row["incident_id"]), _csv_safe(row["incident_type"]),
+                row["severity"], row["status"], row["source"],
+                _csv_safe(row["admin_title"]), _csv_safe(row["user_title"]),
+                int(row["affected_device_count"]),
+                row["first_seen_at"], row["last_seen_at"], row["updated_at"],
+                row["resolved_at"], row["incident_version"],
+            ])
+        return buffer.getvalue()
 
     def get_incident(self, incident_id: str) -> dict:
         incident_id = self._validate_incident_id(incident_id)

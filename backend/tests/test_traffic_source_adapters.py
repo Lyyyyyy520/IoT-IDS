@@ -148,7 +148,9 @@ def test_probe_sources_declare_v2_ids_and_no_hardcoded_packet_length():
     vm = (root / "edge" / "vm_probe_client.py").read_text(encoding="utf-8")
     pi = (root / "edge" / "probe_client.py").read_text(encoding="utf-8")
     edge_detect = (root / "edge" / "edge_detect.py").read_text(encoding="utf-8")
-    for source in (vm, pi, edge_detect):
+    # edge_detect.py 现为边缘 GNN 推理 + 风险上报（/api/device/risk），不再是流量探针源，
+    # 因此不参与流量批 schema 校验。
+    for source in (vm, pi):
         assert "'schema_version': 2" in source
         assert "'source_session_id':" in source
         assert "'batch_sequence':" in source
@@ -158,6 +160,4 @@ def test_probe_sources_declare_v2_ids_and_no_hardcoded_packet_length():
         assert "'flow_count': 0" in source
     assert "'length': 100" not in pi
     assert "length_pat" in pi
-    assert "'alerts': []," in edge_detect
-    assert "not sent as incident" in edge_detect
     assert "detect_pcap" not in edge_detect

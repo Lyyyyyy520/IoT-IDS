@@ -113,7 +113,7 @@ def mqtt_loop(device_id, device_type, src_ip, stop, attack_event):
 
     client.on_message = on_message
     try:
-        client.connect(BROKER, BROKER_PORT, keepalive=60, bind_address=src_ip)
+        client.connect(BROKER, BROKER_PORT, keepalive=60)
     except Exception as e:
         print(f'[MQTT] {device_id} 连接失败: {e}')
         return
@@ -180,7 +180,10 @@ def attack_worker(device_id, src_ip, attack_event, stop):
     双重信号让 GNN 能更准地判「僵尸网络(红)」。未触发时 idle，几乎不占资源。
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((src_ip, 0))  # 固定源端口（持久 socket）
+    try:
+        sock.bind((src_ip, 0))  # 固定源端口（持久 socket）
+    except OSError:
+        pass  # 未绑定虚拟 IP 时，攻击流量从默认地址发出（本地测试可接受）
     while not stop.is_set():
         if attack_event.is_set():
             # 阶段1：轻量内部扫描（按 SCAN_RATE 概率，可调）
@@ -210,7 +213,10 @@ def device_worker(device_id, device_type, src_ip, listen_coap, coap_targets, is_
     # 持久 UDP socket：DNS/NTP/CoAP 共用，源端口固定
     # （避免每次发包新建 socket 导致源端口过多、被模型误判为扫描/僵尸网络）
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_sock.bind((src_ip, 0))
+    try:
+        udp_sock.bind((src_ip, 0))
+    except OSError:
+        pass  # 未绑定虚拟 IP 时，DNS/NTP/CoAP 流量从默认地址发出
 
     # MQTT 心跳 + 控制订阅（独立线程）
     t = threading.Thread(target=mqtt_loop, args=(device_id, device_type, src_ip, stop, attack_event), daemon=True)

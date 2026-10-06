@@ -55,7 +55,8 @@ export default function DeviceTrafficPanel({ device, isAdmin, active, onSelectPe
   const latestSample = traffic.realtime?.freshness.latest_sample_at
     ?? traffic.history?.freshness.latest_sample_at
     ?? null;
-  const freshness = freshnessKind(latestSample, new Date());
+  const staleAfterMs = (traffic.history?.freshness.stale_after_seconds ?? 15) * 1000;
+  const freshness = freshnessKind(latestSample, new Date(), staleAfterMs);
   const historyPoints = buildTrendData(traffic.history, trendMetric);
   const protocolRows = useMemo(
     () => protocolBreakdown(traffic.history?.protocols ?? [], protocolMetric),

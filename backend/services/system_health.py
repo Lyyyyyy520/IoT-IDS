@@ -372,8 +372,11 @@ def build_system_health(
                 components["mqtt"] = _component("unavailable", "mqtt_disabled", observed_at)
         except Exception:
             components["mqtt"] = _component("degraded", "mqtt_configuration_error", observed_at)
+    # 设备图快照能力已实现（monitor_snapshot._graph_snapshot），数据库可读即可用。
     components["graph"] = _component(
-        "unavailable", "graph_capability_unavailable", observed_at,
+        "ready" if database["available"] else "unavailable",
+        None if database["available"] else "graph_capability_unavailable",
+        observed_at,
     )
     for name in ("traffic", "event_log", "incident", "mobile", "discovery", "mqtt", "api"):
         components[name] = _with_runtime_override(container, name, components[name])

@@ -91,9 +91,9 @@ def test_v9_migration_upgrades_and_is_idempotent_without_touching_legacy_assets(
         connection.close()
     assert [migration.checksum for migration in V3_MIGRATIONS[:8]] == FROZEN_V1_TO_V8
     assert V3_MIGRATIONS[8].name == "unknown_device_discovery"
-    assert first["applied_versions"] == [9]
+    assert first["applied_versions"] == [9, 10]
     assert repeated["applied_versions"] == []
-    assert repeated["skipped_versions"] == list(range(1, 10))
+    assert repeated["skipped_versions"] == list(range(1, 11))
     assert assets == 1 and candidates == 0
     assert {"evidence_hash", "sanitized_metadata_json", "deduplication_key"} <= table_columns
     plan = plan_database(path)

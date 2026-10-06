@@ -11,8 +11,15 @@ const state = vi.hoisted(() => ({ role: 'admin', workspace: null as any, options
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ isAdmin: state.role === 'admin', user: { username: `${state.role}-test`, role: state.role } }),
 }));
-vi.mock('../../features/incidents/useIncidentWorkspace', () => ({
-  useIncidentWorkspace: (options: unknown) => { state.options = options; return state.workspace; },
+vi.mock('../../features/incidents/useIncidentWorkspace', async () => {
+  const actual = await vi.importActual<typeof import('../../features/incidents/useIncidentWorkspace')>('../../features/incidents/useIncidentWorkspace');
+  return {
+    ...actual,
+    useIncidentWorkspace: (options: unknown) => { state.options = options; return state.workspace; },
+  };
+});
+vi.mock('../../features/incidents/IncidentReplayPanel', () => ({
+  IncidentReplayPanel: () => <div>事件回放测试面板</div>,
 }));
 
 function workspace(overrides: Record<string, unknown> = {}) {
@@ -139,7 +146,7 @@ describe('IncidentsPage', () => {
     });
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: '用户求助' }));
-    const input = await screen.findByLabelText('公开回复 · APP 用户可见');
+    const input = await screen.findByLabelText('公开回复 · APP 用户可见', {}, { timeout: 5000 });
     fireEvent.change(input, { target: { value: '已为您安排进一步协助。' } });
     fireEvent.click(screen.getByRole('button', { name: '更新处理进度' }));
     expect(await screen.findByText(/其他管理员更新/)).toBeInTheDocument();

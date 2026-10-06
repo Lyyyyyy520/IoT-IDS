@@ -1,11 +1,20 @@
+import { useMemo } from 'react';
+import ReactEChartsCore from 'echarts-for-react/lib/core';
+import * as echarts from 'echarts/core';
+import { GraphChart } from 'echarts/charts';
+import { TooltipComponent } from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
 import type {
   ConnectionStatus,
   MonitorCapability,
   MonitorDevice,
+  MonitorGraphSnapshot,
   MonitorIncidentData,
   MonitorRealtimeEvent,
   SystemComponentHealth,
 } from '../../api/v3Monitor';
+
+echarts.use([GraphChart, TooltipComponent, CanvasRenderer]);
 
 export type DeviceFilter = 'all' | ConnectionStatus;
 
@@ -29,8 +38,9 @@ const READINESS_LABELS: Record<SystemComponentHealth['readiness'], string> = {
 };
 
 const CAPABILITY_REASONS: Record<string, string> = {
-  graph_snapshots_not_implemented: '后端尚未提供图快照能力',
-  incident_store_not_implemented: '后端尚未提供安全事件存储能力',
+  incident_store_not_migrated: '事件存储尚未完成迁移',
+  recorded_incident_workflow_available: '事件工作流已就绪',
+  no_observed_device_relationships: '暂无观测到的设备间关系',
 };
 
 function formatTime(value: string | null): string {
@@ -57,6 +67,11 @@ export function DeviceListPanel({
   onSearch,
   filter,
   onFilter,
+  typeFilter,
+  onTypeFilter,
+  riskFilter,
+  onRiskFilter,
+  deviceTypes,
   onManageDevice,
 }: {
   devices: MonitorDevice[];
@@ -66,6 +81,11 @@ export function DeviceListPanel({
   onSearch: (value: string) => void;
   filter: DeviceFilter;
   onFilter: (value: DeviceFilter) => void;
+  typeFilter: string;
+  onTypeFilter: (value: string) => void;
+  riskFilter: string;
+  onRiskFilter: (value: string) => void;
+  deviceTypes: string[];
   onManageDevice: (deviceId: string) => void;
 }) {
   const filters: DeviceFilter[] = ['all', 'online', 'stale', 'offline', 'unknown'];
@@ -99,6 +119,24 @@ export function DeviceListPanel({
             {value === 'all' ? '全部' : STATUS_LABELS[value]}
           </button>
         ))}
+      </div>
+      <div className="device-filter-selects">
+        <label className="monitor-filter-select">
+          <span className="sr-only">按类型筛选</span>
+          <select value={typeFilter} onChange={(event) => onTypeFilter(event.target.value)}>
+            <option value="all">全部类型</option>
+            {deviceTypes.map((type) => <option value={type} key={type}>{type}</option>)}
+          </select>
+        </label>
+        <label className="monitor-filter-select">
+          <span className="sr-only">按告警状态筛选</span>
+          <select value={riskFilter} onChange={(event) => onRiskFilter(event.target.value)}>
+            <option value="all">全部告警状态</option>
+            <option value="undetected">未检测</option>
+            <option value="normal">正常</option>
+            <option value="alerted">有告警</option>
+          </select>
+        </label>
       </div>
       <div className="device-list" role="list">
         {devices.length === 0 ? (
@@ -150,7 +188,105 @@ function capabilityReason(capability: MonitorCapability): string {
   return CAPABILITY_REASONS[capability.reason] ?? capability.reason;
 }
 
-export function CapabilityPanel({ capability }: { capability: MonitorCapability }) {
+const RISK_COLORS: Record<number, string> = {
+  0: '#00CC66',  // 正常/绿（Low，规范色标）
+  1: '#FFCC00',  // 低危/黄（Medium）
+  2: '#FF8800',  // 中危/橙（High）
+  3: '#FF4444',  // 高危/红（Critical）
+};
+const UNKNOWN_COLOR = '#8897a0';
+
+function graphOption(graph: MonitorGraphSnapshot): Record<string, unknown> {
+  const nodes = graph.nodes.map((node) => ({
+    id: node.id,
+    name: node.label,
+    symbolSize: 18,
+    itemStyle: {
+      color: node.risk_level != null ? RISK_COLORS[node.risk_level] ?? UNKNOWN_COLOR : UNKNOWN_COLOR,
+      borderColor: node.status === 'online' ? '#34c97b' : '#63717b',
+      borderWidth: 2,
+    },
+    label: { show: true, position: 'bottom', fontSize: 10, color: '#7893a3' },
+    device_type: node.type,
+    status: node.status,
+    risk_name: node.risk_name,
+    ip: node.ip,
+  }));
+  const links = graph.edges.map((edge) => ({
+    source: edge.source,
+    target: edge.target,
+    lineStyle: {
+      width: Math.min(4, Math.max(1, Math.ceil(Math.log2(edge.packets + 1)))),
+      curveness: 0.08,
+    },
+  }));
+  return {
+    animation: false,
+    tooltip: {
+      formatter: (params: unknown) => {
+        const p = params as {
+          dataType?: string;
+          data?: {
+            name?: string;
+            device_type?: string;
+            status?: string;
+            risk_name?: string | null;
+            ip?: string | null;
+            source?: string;
+            target?: string;
+          };
+        };
+        if (p.dataType === 'node') {
+          const d = p.data ?? {};
+          return [
+            d.name,
+            d.device_type ? `类型：${d.device_type}` : '',
+            d.status ? `状态：${d.status}` : '',
+            `风险：${d.risk_name ?? '未检测'}`,
+            d.ip ? `IP：${d.ip}` : '',
+          ].filter(Boolean).join('<br/>');
+        }
+        if (p.dataType === 'edge') {
+          return `${p.data?.source ?? ''} ↔ ${p.data?.target ?? ''}`;
+        }
+        return '';
+      },
+    },
+    series: [{
+      type: 'graph',
+      layout: 'force',
+      data: nodes,
+      links,
+      roam: true,
+      draggable: true,
+      force: { repulsion: 140, edgeLength: 90, gravity: 0.1 },
+      emphasis: { focus: 'adjacency', lineStyle: { width: 3 } },
+      lineStyle: { color: '#3b6275' },
+    }],
+  };
+}
+
+export function CapabilityPanel({
+  capability,
+  graph,
+  onSelect,
+  visibleIds,
+}: {
+  capability: MonitorCapability;
+  graph?: MonitorGraphSnapshot | null;
+  onSelect?: (deviceId: string) => void;
+  visibleIds?: Set<string> | null;
+}) {
+  const filteredGraph = useMemo(() => {
+    if (!graph || !visibleIds) return graph;
+    const kept = new Set(graph.nodes.filter((node) => visibleIds.has(node.id)).map((node) => node.id));
+    return {
+      ...graph,
+      nodes: graph.nodes.filter((node) => visibleIds.has(node.id)),
+      edges: graph.edges.filter((edge) => kept.has(edge.source) && kept.has(edge.target)),
+    };
+  }, [graph, visibleIds]);
+  const renderable = capability.available && filteredGraph != null && filteredGraph.nodes.length > 0;
   return (
     <section className="monitor-panel graph-panel" aria-labelledby="graph-title">
       <div className="panel-heading graph-heading">
@@ -162,16 +298,37 @@ export function CapabilityPanel({ capability }: { capability: MonitorCapability 
           {capability.available ? '能力可用' : '能力不可用'}
         </span>
       </div>
-      <div className="graph-empty" data-testid="graph-capability">
-        <div className="graph-empty-mark" aria-hidden="true">◇</div>
-        <strong>{capability.available ? '等待真实图快照' : 'GNN 图暂不可用'}</strong>
-        <p>
-          {capability.available
-            ? '当前 monitor 响应没有可渲染的节点与边，页面不会生成替代拓扑。'
-            : capabilityReason(capability)}
-        </p>
-        <span>未绘制静态节点、随机连线或装饰性拓扑</span>
-      </div>
+      {renderable ? (
+        <div className="graph-canvas" style={{ flex: 1, minHeight: 0 }} data-testid="graph-capability">
+          <ReactEChartsCore
+            echarts={echarts}
+            option={graphOption(filteredGraph)}
+            notMerge
+            lazyUpdate
+            onEvents={onSelect ? {
+              click: (params: unknown) => {
+                const p = params as { dataType?: string; data?: { id?: string } };
+                if (p.dataType === 'node' && p.data?.id) onSelect(p.data.id);
+              },
+            } : undefined}
+            style={{ width: '100%', height: '100%', minHeight: 320 }}
+            opts={{ renderer: 'canvas' }}
+          />
+        </div>
+      ) : (
+        <div className="graph-empty" data-testid="graph-capability">
+          <div className="graph-empty-mark" aria-hidden="true">◇</div>
+          <strong>
+            {capability.available ? '暂无设备节点' : 'GNN 图暂不可用'}
+          </strong>
+          <p>
+            {capability.available
+              ? '当前没有可渲染的设备节点与边，页面不会生成替代拓扑。'
+              : capabilityReason(capability)}
+          </p>
+          <span>未绘制静态节点、随机连线或装饰性拓扑</span>
+        </div>
+      )}
     </section>
   );
 }
@@ -297,6 +454,25 @@ export function DeviceDetailsPanel({ device }: { device: MonitorDevice | null })
             <div><dt>后端接收时间</dt><dd>{formatTime(device.received_at)}</dd></div>
             <div className="detail-wide"><dt>数据来源</dt><dd>{device.sources.length ? device.sources.join('、') : '尚无来源'}</dd></div>
           </dl>
+          <div className="behavior-panel">
+            <h3 className="behavior-title">行为异常提示</h3>
+            {device.risk_level === null ? (
+              <p className="behavior-note">该设备尚未产生 GNN 检测结论；在出现风险前不展示异常，也不会伪造分析结果。</p>
+            ) : (
+              <>
+                <div className="behavior-evidence-grid">
+                  <div><strong>触发指标</strong><span>设备图 GNN 分类</span></div>
+                  <div><strong>观测值</strong><span>{device.risk_name ?? '未命名'} · 置信度 {device.risk_confidence !== null ? `${(device.risk_confidence * 100).toFixed(0)}%` : '未知'}</span></div>
+                  <div><strong>参考基线</strong><span>尚未接入</span></div>
+                </div>
+                <p className="behavior-observation-time">检测时间：{formatTime(device.risk_detected_at)}</p>
+                <div className="behavior-baseline-gap">
+                  <strong>通信基线尚未接入</strong>
+                  <p>当前检测只输出风险类别与置信度，尚未计算频率、协议/端口、连接对象的参考基线，因此不展示偏离结论。</p>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </section>

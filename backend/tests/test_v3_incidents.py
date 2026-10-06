@@ -835,9 +835,11 @@ def test_monitor_overview_and_device_delete_references(context):
     body = monitor.get_json()
     assert body["capabilities"]["incident"]["available"] is True
     assert body["capabilities"]["graph"] == {
-        "available": False,
-        "reason": "graph_snapshots_not_implemented",
+        "available": True,
+        "reason": None,
     }
+    assert isinstance(body["graph"]["nodes"], list)
+    assert isinstance(body["graph"]["edges"], list)
     assert body["incidents"]["active"][0]["incident_id"] == (
         incident["incident_id"]
     )

@@ -15,6 +15,7 @@ import hashlib
 from urllib.parse import quote
 from pathlib import Path
 import sqlite3
+from contracts import SQLITE_BUSY, SQLITE_LOCKED, SQLITE_READONLY, SQLITE_FULL, SQLITE_CORRUPT, SQLITE_NOTADB, SQLITE_CANTOPEN, SQLITE_IOERR
 import sys
 from typing import Callable, Mapping
 
@@ -331,19 +332,19 @@ def _sqlite_error_code(error: sqlite3.Error) -> str:
             return "database_busy"
         if "readonly" in message or "read-only" in message:
             return "database_read_only"
-    if primary == sqlite3.SQLITE_BUSY:
+    if primary == SQLITE_BUSY:
         return "database_busy"
-    if primary == sqlite3.SQLITE_LOCKED:
+    if primary == SQLITE_LOCKED:
         return "database_locked"
-    if primary == sqlite3.SQLITE_READONLY:
+    if primary == SQLITE_READONLY:
         return "database_read_only"
-    if primary == sqlite3.SQLITE_FULL:
+    if primary == SQLITE_FULL:
         return "database_disk_full"
-    if primary in {sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB}:
+    if primary in {SQLITE_CORRUPT, SQLITE_NOTADB}:
         return "database_corrupt"
-    if primary == sqlite3.SQLITE_CANTOPEN:
+    if primary == SQLITE_CANTOPEN:
         return "database_open_failed"
-    if primary == sqlite3.SQLITE_IOERR:
+    if primary == SQLITE_IOERR:
         return "database_io_error"
     return "database_operation_failed"
 
@@ -394,9 +395,11 @@ def _validate_schema(connection: sqlite3.Connection) -> int:
         applied = read_applied_migrations(connection)
         ledger = {int(row["version"]): row for row in applied}
         version = max(ledger, default=0)
-        if version != 9:
+        latest = max((migration.version for migration in V3_MIGRATIONS), default=0)
+        if version != latest:
             raise MaintenanceError(
-                "schema_version_unsupported", "maintenance requires schema version 9"
+                "schema_version_unsupported",
+                f"maintenance requires schema version {latest}",
             )
         for migration in V3_MIGRATIONS:
             row = ledger.get(migration.version)

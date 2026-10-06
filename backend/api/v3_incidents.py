@@ -13,7 +13,7 @@ import sqlite3
 from typing import Callable
 from uuid import uuid4
 
-from flask import Blueprint, current_app, g, jsonify, request, session
+from flask import Blueprint, current_app, g, jsonify, make_response, request, session
 
 from config import MobileSecuritySettings
 from contracts import Role
@@ -365,6 +365,48 @@ def create_v3_incidents_blueprint(
                 limit=integer("limit", 50, positive=True),
                 offset=integer("offset", 0),
             ))
+        return handle(execute)
+
+    @blueprint.get("/api/v3/incidents/export")
+    @admin(write=False)
+    def export_incidents():
+        def execute():
+            allowed = {
+                "status", "severity", "source", "device_id",
+                "search", "from", "to",
+            }
+            if set(request.args) - allowed:
+                raise ApiInputError(
+                    "unknown_query_parameters",
+                    "存在不支持的查询参数",
+                )
+            from_value, to_value = one("from"), one("to")
+            if from_value is not None:
+                from_value = _timestamp(
+                    from_value, "from"
+                ).astimezone(timezone.utc).isoformat().replace(
+                    "+00:00", "Z"
+                )
+            if to_value is not None:
+                to_value = _timestamp(
+                    to_value, "to"
+                ).astimezone(timezone.utc).isoformat().replace(
+                    "+00:00", "Z"
+                )
+            generated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            csv_text = service.export_incidents(
+                status=one("status"), severity=one("severity"),
+                source=one("source"), device_id=one("device_id"),
+                search=one("search"),
+                from_time=from_value, to_time=to_value,
+                generated_at=generated_at,
+            )
+            response = make_response(csv_text)
+            response.headers["Content-Type"] = "text/csv; charset=utf-8"
+            response.headers["Content-Disposition"] = (
+                "attachment; filename=\"incidents-export.csv\""
+            )
+            return response
         return handle(execute)
 
     @blueprint.get("/api/v3/incidents/<incident_id>")
