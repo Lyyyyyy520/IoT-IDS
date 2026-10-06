@@ -8,6 +8,10 @@ import {
   deviceErrorMessage,
   formatDeviceTime,
 } from './deviceUi';
+import CameraPreviewPanel from './CameraPreviewPanel';
+import DeviceObservedStatePanel from './DeviceObservedStatePanel';
+import SensorHistoryPanel from './SensorHistoryPanel';
+import './community-device-detail.css';
 
 const REFERENCE_LABELS: Record<string, string> = {
   state_observations: '状态观测',
@@ -190,6 +194,16 @@ export default function DeviceDetailPanel({
             <div><dt>后端接收时间</dt><dd>{formatDeviceTime(device.received_at)}</dd></div>
             <div className="detail-wide"><dt>观测来源</dt><dd>{device.sources.length ? device.sources.join('、') : '尚无来源'}</dd></div>
           </dl>
+        </div>
+
+        <div className="detail-section">
+          <div className="detail-section-title"><h3>采集数据</h3></div>
+          {device.device_type.toLowerCase() === 'temp_sensor' ? (
+            <SensorHistoryPanel device={device} />
+          ) : (
+            <DeviceObservedStatePanel device={device} />
+          )}
+          {device.device_type.toLowerCase() === 'camera' && <CameraPreviewPanel device={device} />}
         </div>
 
         <div className="detail-section">

@@ -155,7 +155,7 @@ export default function CommunityDeviceDetailDialog({
               <div className="community-device-profile-wide"><dt>档案更新时间</dt><dd>{localTime(matchedDetail.updated_at)}</dd></div>
             </dl>
 
-            {type?.toLowerCase() === 'sensor' ? (
+            {type?.toLowerCase() === 'temp_sensor' ? (
               <SensorHistoryPanel key={matchedDetail.device_id} device={matchedDetail} />
             ) : (
               <DeviceObservedStatePanel key={matchedDetail.device_id} device={matchedDetail} />

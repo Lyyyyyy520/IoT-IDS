@@ -17,7 +17,7 @@ import sqlite3
 import threading
 from typing import Callable, Iterator, Mapping, Sequence
 
-from contracts import DetectionReadiness
+from contracts import DetectionReadiness, STALE_AFTER_SECONDS
 from services.realtime_events import V3DatabaseUnavailable
 from v3_database import V3_DEVICE_TRAFFIC_MIGRATION, connect_v3_existing
 
@@ -927,6 +927,7 @@ class DeviceTrafficService:
             "freshness": {
                 "historical_source": "sqlite_minute_aggregates",
                 "latest_sample_at": latest_sample,
+                "stale_after_seconds": STALE_AFTER_SECONDS,
             },
             "realtime": self.realtime_window.snapshot(
                 device_id, protocol=selected_protocol

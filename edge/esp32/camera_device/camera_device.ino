@@ -171,9 +171,16 @@ void doAttack() {
 
 // ==================== WiFi / MQTT 连接 ====================
 
+// 固定 IP：CoAP 直连需要设备知道彼此的 IP（门禁→摄像头联动目标就是 .10）
+IPAddress GATEWAY(192, 168, 4, 1);
+IPAddress SUBNET(255, 255, 255, 0);
+IPAddress STATIC_IP(192, 168, 4, 10);
+
 void connectWiFi() {
   Serial.printf("连接 WiFi: %s\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
+  WiFi.config(STATIC_IP, GATEWAY, SUBNET);  // 静态 IP
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);       // 降低发射功率（社区密集部署）
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   int tries = 0;
   while (WiFi.status() != WL_CONNECTED && tries < 30) {
@@ -226,9 +233,12 @@ void setup() {
   panServo.attach(PIN_PAN);
   panServo.write(90);
 
-  coapUdp.begin(5683);   // 监听设备间联动（门禁→摄像头）
-
   connectWiFi();
+
+  coapUdp.begin(5683);   // 监听设备间联动（门禁→摄像头）
+  // 必须在 WiFi 初始化之后：UDP socket 走 lwIP tcpip 线程，
+  // 线程未启动时调用会触发 tcpip_send_msg_wait_sem (Invalid mbox) 崩溃
+
   connectMQTT();
   Serial.printf("摄像头启动: %s\n", DEVICE_ID);
 }

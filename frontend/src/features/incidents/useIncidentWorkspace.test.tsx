@@ -20,6 +20,7 @@ function api(overrides: Partial<IncidentsApi> = {}): IncidentsApi {
   return {
     listIncidents: vi.fn().mockResolvedValue(incidentListResponse()),
     getIncident: vi.fn().mockResolvedValue(incidentDetail),
+    getIncidentReplay: vi.fn(),
     createIncident: vi.fn().mockResolvedValue(incidentDetail),
     transitionIncident: vi.fn().mockResolvedValue(incidentDetail),
     getSupportContact: vi.fn().mockResolvedValue({ available: false, reason: 'support_contact_not_configured' }),

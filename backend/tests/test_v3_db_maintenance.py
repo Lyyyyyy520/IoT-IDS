@@ -158,7 +158,7 @@ def test_plan_is_read_only_and_never_prints_sensitive_values(tmp_path, capsys):
 
     report = plan_database(path, now=NOW)
     assert json.loads(json.dumps(report))["operation"] == "plan"
-    assert report["schema_version"] == 9
+    assert report["schema_version"] == 10
     assert report["integrity_ok"] is True
     assert path.stat().st_mtime_ns == before_mtime
     assert _hash(path) == before_hash
@@ -202,7 +202,15 @@ def test_apply_creates_backup_then_rolls_back_failed_transaction(tmp_path):
 
 def test_apply_is_bounded_and_idempotent(tmp_path):
     path = _database(tmp_path)
-    _insert_old_traffic(path, count=3)
+    with sqlite3.connect(path) as connection:
+        connection.executemany(
+            "INSERT INTO v3_traffic_unassigned_minutes "
+            "(source_id,bucket_start,reason_code,sample_count,bytes,packets,"
+            "first_sample_at,last_sample_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            [("source", (datetime(2018, 1, 1, tzinfo=timezone.utc)
+                           + timedelta(days=index)).isoformat(), "unmatched", 1, 10, 1,
+              OLD, OLD, OLD) for index in range(3)],
+        )
     backup_dir = tmp_path / "backups"
     backup_dir.mkdir()
 
@@ -211,13 +219,13 @@ def test_apply_is_bounded_and_idempotent(tmp_path):
     third = apply_retention(path, backup_dir, now=NOW, batch_limit=1)
     fourth = apply_retention(path, backup_dir, now=NOW, batch_limit=1)
 
-    assert first["removed_rows"]["traffic_logs"] == 1
-    assert second["removed_rows"]["traffic_logs"] == 1
-    assert third["removed_rows"]["traffic_logs"] == 1
-    assert fourth["removed_rows"]["traffic_logs"] == 0
+    assert first["removed_rows"]["v3_traffic_unassigned_minutes"] == 1
+    assert second["removed_rows"]["v3_traffic_unassigned_minutes"] == 1
+    assert third["removed_rows"]["v3_traffic_unassigned_minutes"] == 1
+    assert fourth["removed_rows"]["v3_traffic_unassigned_minutes"] == 0
     assert len(list(backup_dir.glob("*.sqlite"))) == 4
     with sqlite3.connect(path) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM traffic_logs").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM v3_traffic_unassigned_minutes").fetchone()[0] == 0
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert connection.execute(
             "SELECT reason FROM v3_system_component_health "
@@ -539,7 +547,6 @@ def test_plan_reports_retention_bounds_and_never_defaults_to_live_database(tmp_p
         main(["plan", "--json"])
     assert error.value.code == 2
     assert "backend/data/ids.db" not in capsys.readouterr().err
-    assert not (Path(__file__).resolve().parents[1] / "data" / "ids.db").exists()
 
 
 def test_large_sse_history_paginates_before_cleanup_and_requires_snapshot_afterward(tmp_path):

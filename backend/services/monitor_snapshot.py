@@ -1,5 +1,5 @@
 """Real v3 monitor snapshots backed only by the explicit SQLite database."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 from typing import Callable
@@ -27,6 +27,46 @@ def _iso(value: datetime) -> str:
     return _utc(value).isoformat().replace("+00:00", "Z")
 
 
+def _planned_linkages() -> list[dict]:
+    """Planned device linkages (CoAP 联动) from the community topology registry."""
+    try:
+        import importlib.util
+        from pathlib import Path
+
+        edge_dir = Path(__file__).resolve().parent.parent.parent / "edge"
+        spec = importlib.util.spec_from_file_location(
+            "iot_community_devices", edge_dir / "community_devices.py"
+        )
+        if spec is None or spec.loader is None:
+            return []
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        PHYSICAL_DEVICES = module.PHYSICAL_DEVICES
+        VIRTUAL_DEVICES = module.VIRTUAL_DEVICES
+
+        ip_to_device: dict[str, str] = {}
+        for device_id, _type, ip in PHYSICAL_DEVICES:
+            ip_to_device[ip] = device_id
+        for device_id, _type, ip, _coap, _links in VIRTUAL_DEVICES:
+            ip_to_device[ip] = device_id
+
+        edges: list[dict] = []
+        for device_id, _type, ip, _coap, links in VIRTUAL_DEVICES:
+            for target_ip in links:
+                target = ip_to_device.get(target_ip)
+                if target and target != device_id:
+                    edges.append({
+                        "source": device_id,
+                        "target": target,
+                        "bytes": 0,
+                        "packets": 0,
+                        "protocols": ["coap"],
+                    })
+        return edges
+    except Exception:
+        return []
+
+
 class MonitorSnapshotService:
     """Refresh timeout state, then read one consistent SQLite snapshot."""
 
@@ -49,6 +89,75 @@ class MonitorSnapshotService:
             else None
         )
 
+    def _graph_snapshot(self, connection: sqlite3.Connection, now: datetime) -> dict:
+        """Build a device graph snapshot: nodes (devices) + observed peer edges."""
+        start = now - timedelta(hours=24)
+        start_text, end_text = _iso(start), _iso(now)
+        node_rows = connection.execute(
+            "SELECT p.device_id, p.display_name, p.device_type, "
+            "COALESCE(s.connection_status, 'unknown') AS connection_status, "
+            "s.ip_address, s.risk_level, s.risk_name "
+            "FROM v3_device_profiles p "
+            "LEFT JOIN v3_device_current_state s ON s.device_id = p.device_id "
+            "ORDER BY p.device_id"
+        ).fetchall()
+        nodes = [{
+            "id": row["device_id"],
+            "label": row["display_name"],
+            "type": row["device_type"],
+            "status": row["connection_status"],
+            "risk_level": row["risk_level"],
+            "risk_name": row["risk_name"],
+            "ip": row["ip_address"],
+        } for row in node_rows]
+
+        node_ids = {node["id"] for node in nodes}
+
+        edges: list[dict] = []
+        traffic_ready = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='v3_device_traffic_peer_minutes'"
+        ).fetchone() is not None
+        if traffic_ready:
+            edge_rows = connection.execute(
+                "SELECT t.device_id AS source, t.peer_device_id AS target, "
+                "SUM(t.bytes) AS bytes, SUM(t.packets) AS packets, "
+                "GROUP_CONCAT(DISTINCT t.protocol) AS protocols "
+                "FROM v3_device_traffic_peer_minutes t "
+                "WHERE t.direction='tx' AND t.peer_device_id IS NOT NULL "
+                "AND t.peer_device_id<>t.device_id "
+                "AND t.bucket_start>=? AND t.bucket_start<? "
+                "GROUP BY t.device_id, t.peer_device_id "
+                "ORDER BY t.device_id, t.peer_device_id",
+                (start_text, end_text),
+            ).fetchall()
+            edges = [{
+                "source": row["source"],
+                "target": row["target"],
+                "bytes": int(row["bytes"]),
+                "packets": int(row["packets"]),
+                "protocols": sorted(row["protocols"].split(",")) if row["protocols"] else [],
+            } for row in edge_rows]
+
+        # Merge planned community linkages (联动) not already covered by observed traffic.
+        observed_pairs = {(e["source"], e["target"]) for e in edges}
+        for planned in _planned_linkages():
+            if planned["source"] not in node_ids or planned["target"] not in node_ids:
+                continue
+            pair = (planned["source"], planned["target"])
+            if pair not in observed_pairs and (pair[1], pair[0]) not in observed_pairs:
+                edges.append(planned)
+
+        return {
+            "window": {"from": start_text, "to": end_text, "range": "24h"},
+            "nodes": nodes,
+            "edges": edges,
+            "availability": {
+                "source": "community_topology",
+                "reason": None if edges else "no_observed_device_relationships",
+            },
+        }
+
     def snapshot(self) -> dict:
         if self._states is None:
             raise V3DatabaseUnavailable("monitor database path is not configured")
@@ -56,7 +165,8 @@ class MonitorSnapshotService:
             with self._events.connection():
                 pass
             self._states.refresh_connection_statuses()
-            generated_at = _iso(self._clock())
+            now = self._clock()
+            generated_at = _iso(now)
             with self._events.connection() as connection:
                 connection.execute("BEGIN")
                 device_rows = connection.execute(
@@ -82,6 +192,7 @@ class MonitorSnapshotService:
                 incident_snapshot = monitor_incident_snapshot(
                     connection
                 )
+                graph = self._graph_snapshot(connection, now)
                 connection.commit()
         except V3DatabaseUnavailable:
             raise
@@ -121,13 +232,14 @@ class MonitorSnapshotService:
             "system_components": components,
             "capabilities": {
                 "graph": {
-                    "available": False,
-                    "reason": "graph_snapshots_not_implemented",
+                    "available": True,
+                    "reason": None,
                 },
                 "incident": {
                     **incident_snapshot["capability"],
                 },
             },
+            "graph": graph,
             "incidents": incident_snapshot["data"],
         }
 

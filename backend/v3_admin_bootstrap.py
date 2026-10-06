@@ -7,6 +7,7 @@ import argparse
 import getpass
 from pathlib import Path
 import sqlite3
+from contracts import SQLITE_BUSY, SQLITE_LOCKED, SQLITE_READONLY, SQLITE_FULL, SQLITE_CORRUPT, SQLITE_NOTADB, SQLITE_CANTOPEN, SQLITE_IOERR
 import sys
 from urllib.parse import quote
 
@@ -47,19 +48,19 @@ class AdminBootstrapError(RuntimeError):
 def _sqlite_reason(error: sqlite3.Error) -> str:
     code = getattr(error, "sqlite_errorcode", None)
     primary = (int(code) & 0xFF) if isinstance(code, int) else None
-    if primary == sqlite3.SQLITE_BUSY:
+    if primary == SQLITE_BUSY:
         return "database_busy"
-    if primary == sqlite3.SQLITE_LOCKED:
+    if primary == SQLITE_LOCKED:
         return "database_locked"
-    if primary == sqlite3.SQLITE_READONLY:
+    if primary == SQLITE_READONLY:
         return "database_read_only"
-    if primary == sqlite3.SQLITE_FULL:
+    if primary == SQLITE_FULL:
         return "database_disk_full"
-    if primary in {sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB}:
+    if primary in {SQLITE_CORRUPT, SQLITE_NOTADB}:
         return "database_corrupt"
-    if primary == sqlite3.SQLITE_CANTOPEN:
+    if primary == SQLITE_CANTOPEN:
         return "database_open_failed"
-    if primary == sqlite3.SQLITE_IOERR:
+    if primary == SQLITE_IOERR:
         return "database_io_error"
     message = str(error).lower()
     if "locked" in message:

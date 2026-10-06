@@ -359,7 +359,7 @@ def test_migration_v1_checksum_is_frozen_and_v2_remains_registered(tmp_path):
             )
         }
     assert versions == [
-        (1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,),
+        (1,), (2,), (3,), (4,), (5,), (6,), (7,), (8,), (9,), (10,),
     ]
     assert V3_MQTT_HEARTBEAT_TABLES <= tables
     assert {"boot_id", "firmware_version", "uptime_ms"} <= observation_columns

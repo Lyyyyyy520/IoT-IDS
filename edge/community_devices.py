@@ -10,8 +10,8 @@
 import hashlib
 
 COMMUNITY_SUBNET = '192.168.4.'
-BROKER = '192.168.4.1'
-BROKER_PORT = 1883
+BROKER = '127.0.0.1'
+BROKER_PORT = 1884
 
 # 物理设备：(device_id, 类型, IP)
 PHYSICAL_DEVICES = [

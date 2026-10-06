@@ -94,7 +94,8 @@ def test_manual_cli_creates_only_first_admin_and_login_grants_health_access(
     assert str(path.resolve()) not in encoded
     assert password not in encoded
     assert user[1] not in encoded
-    assert health.get_json()["components"]["graph"]["reason_code"] == "graph_capability_unavailable"
+    assert health.get_json()["components"]["graph"]["status"] == "ready"
+    assert health.get_json()["components"]["graph"]["reason_code"] is None
 
     refused_prompts = []
     assert main(
@@ -161,7 +162,7 @@ def test_missing_wrong_version_and_checksum_databases_fail_without_prompt_or_cre
         connection.execute(
             "INSERT INTO v3_schema_migrations(version,name,checksum,applied_at) "
             "VALUES(9,?,?,?)",
-            (V3_MIGRATIONS[-1].name, "bad-checksum", "2026-01-01T00:00:00Z"),
+            (V3_MIGRATIONS[8].name, "bad-checksum", "2026-01-01T00:00:00Z"),
         )
     assert main(
         ["--database", str(path), "--username", "explicit-user"],

@@ -26,7 +26,18 @@ export const validSnapshot: MonitorSnapshot = {
   ],
   system_components: [],
   capabilities: {
-    graph: { available: false, reason: 'graph_snapshots_not_implemented' },
-    incident: { available: false, reason: 'incident_store_not_implemented' },
+    graph: { available: true, reason: null },
+    incident: { available: false, reason: 'incident_store_not_migrated' },
+  },
+  graph: {
+    window: { from: '2026-09-19T02:00:00Z', to: '2026-09-20T02:00:00Z', range: '24h' },
+    nodes: [
+      { id: 'camera-01', label: '东门摄像头', type: 'camera', status: 'online', risk_level: null, risk_name: null, ip: '192.168.4.21' },
+      { id: 'light-01', label: '路灯', type: 'light', status: 'online', risk_level: 0, risk_name: '正常(绿)', ip: '192.168.4.12' },
+    ],
+    edges: [
+      { source: 'camera-01', target: 'light-01', bytes: 120, packets: 3, protocols: ['coap'] },
+    ],
+    availability: { source: 'v3_device_traffic_peer_minutes', reason: null },
   },
 };

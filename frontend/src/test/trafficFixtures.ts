@@ -15,6 +15,7 @@ export function trafficResponse(overrides: Partial<TrafficResponse> = {}): Traff
     freshness: {
       historical_source: 'sqlite_minute_aggregates',
       latest_sample_at: '2026-09-21T09:59:55Z',
+      stale_after_seconds: 15,
     },
     realtime: {
       available: true,
@@ -71,7 +72,7 @@ export function trafficResponse(overrides: Partial<TrafficResponse> = {}): Traff
 export function emptyTrafficResponse(overrides: Partial<TrafficResponse> = {}): TrafficResponse {
   return trafficResponse({
     availability: { available: false, reason: 'no_samples', latest_sample_at: null },
-    freshness: { historical_source: 'sqlite_minute_aggregates', latest_sample_at: null },
+    freshness: { historical_source: 'sqlite_minute_aggregates', latest_sample_at: null, stale_after_seconds: 15 },
     realtime: {
       available: false,
       readiness: 'warming_up',

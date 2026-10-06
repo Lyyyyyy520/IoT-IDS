@@ -36,7 +36,7 @@
 #define DEVICE_SENSOR   4   // 温湿度传感器（DHT11）
 #define DEVICE_SPEAKER  5   // 智能音箱（蜂鸣器发声）
 
-#define DEVICE_TYPE   DEVICE_LIGHT   // ← 改成你要烧录的设备
+#define DEVICE_TYPE   DEVICE_SPEAKER   // ← 改成你要烧录的设备
 
 // WiFi、MQTT 凭据和设备 ID 来自不入库的 device_secrets.h。
 const char* WIFI_SSID     = IOT_WIFI_SSID;
@@ -275,34 +275,21 @@ void doAttack() {
 void connectWiFi() {
   Serial.printf("连接 WiFi: %s\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
-  WiFi.config(STATIC_IP, GATEWAY, SUBNET);  // 固定 IP（设备间 CoAP 直连需要）
-  WiFi.disconnect();
-  delay(200);
+  WiFi.config(STATIC_IP, GATEWAY, SUBNET);  // 静态 IP：CoAP 直连需要设备有固定 IP
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);       // 降低发射功率（社区密集部署）
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
 
-  // 关键修复：ESP32-C3 克隆板默认发射功率过高会导致天线失真、能扫描但连不上，
-  // 必须降低发射功率。逐档尝试，直到连上为止。
-  wifi_power_t powers[] = {WIFI_POWER_8_5dBm, WIFI_POWER_15dBm, WIFI_POWER_11dBm, WIFI_POWER_5dBm};
-  const char* names[]   = {"8.5dBm", "15dBm", "11dBm", "5dBm"};
-  int n = sizeof(powers) / sizeof(powers[0]);
-
-  for (int i = 0; i < n; i++) {
-    WiFi.setTxPower(powers[i]);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-    int tries = 0;
-    while (WiFi.status() != WL_CONNECTED && tries < 20) {  // 每档等 10 秒
-      delay(500);
-      Serial.print(".");
-      tries++;
-    }
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.printf("\n已连接 (功率 %s), IP: %s\n", names[i], WiFi.localIP().toString().c_str());
-      return;
-    }
-    Serial.printf("\n功率 %s 失败，换下一档...\n", names[i]);
-    WiFi.disconnect();
-    delay(300);
+  int tries = 0;
+  while (WiFi.status() != WL_CONNECTED && tries < 20) {  // 最多等 10 秒
+    delay(500);
+    Serial.print(".");
+    tries++;
   }
-  Serial.println("\nWiFi 连接失败（所有功率档都试过）");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("\n已连接, IP: %s\n", WiFi.localIP().toString().c_str());
+  } else {
+    Serial.println("\nWiFi 连接失败（当前热点可能未开启，稍后会自动重连）");
+  }
 }
 
 void connectMQTT() {
@@ -404,12 +391,15 @@ void setup() {
   digitalWrite(PIN_BUZZER, LOW);
 #endif
 
+  connectWiFi();
+
   // 设备间联动：绑定 CoAP 端口（接收方监听 5683）
+  // 必须放在 WiFi 初始化之后：UDP socket 走 lwIP tcpip 线程，
+  // 线程未启动时调用会触发 tcpip_send_msg_wait_sem (Invalid mbox) 崩溃
 #if COAP_LISTEN
   coapUdp.begin(5683);
 #endif
 
-  connectWiFi();
   connectMQTT();
   Serial.printf("设备启动: %s (类型 %d)\n", DEVICE_ID, DEVICE_TYPE);
 }

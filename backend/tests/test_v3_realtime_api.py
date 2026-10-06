@@ -82,9 +82,11 @@ def test_empty_monitor_is_real_no_store_snapshot(tmp_path, role):
     assert payload["devices"] == []
     assert payload["system_components"] == []
     assert payload["capabilities"]["graph"] == {
-        "available": False,
-        "reason": "graph_snapshots_not_implemented",
+        "available": True,
+        "reason": None,
     }
+    assert payload["graph"]["nodes"] == []
+    assert payload["graph"]["edges"] == []
     assert payload["capabilities"]["incident"] == {
         "available": True,
         "reason": "recorded_incident_workflow_available",
@@ -136,6 +138,10 @@ def test_monitor_returns_only_persisted_devices_and_component_health(tmp_path):
             "observed_at": "2026-09-19T08:00:00Z",
             "received_at": "2026-09-19T08:00:00Z",
             "sources": ["probe-a"],
+            "risk_level": None,
+            "risk_name": None,
+            "risk_confidence": None,
+            "risk_detected_at": None,
         }
     ]
     assert payload["system_components"][0]["component_id"] == "mqtt-subscriber"

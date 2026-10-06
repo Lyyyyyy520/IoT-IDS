@@ -345,21 +345,6 @@
 .camera-image-frame img { display: block; width: 100%; max-height: 560px; object-fit: contain; }
 .camera-image-loading { position: absolute; inset: auto 0 0; padding: 8px; background: rgba(0,0,0,.72); color: var(--text-primary); text-align: center; font-size: 16px; }
 .camera-frame-time { margin: 8px 0 0; color: var(--text-secondary); font-size: 16px; line-height: 1.5; }
-.traffic-behavior-panel { min-width:0; border-top:1px solid #1b3542; }
-.behavior-evidence-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); }
-.behavior-evidence-grid>div { min-width:0; display:flex; flex-direction:column; gap:5px; padding:11px; border-right:1px solid #18313c; border-bottom:1px solid #18313c; }
-.behavior-evidence-grid strong,.behavior-incident-heading strong { color:#bcd1d9; font-size: 16px; }
-.behavior-evidence-grid span,.behavior-observation-time { color:var(--text-secondary); font-size: 16px; line-height:1.5; overflow-wrap:anywhere; }
-.behavior-baseline-gap { margin:10px 11px; padding:9px 11px; border-left:3px solid var(--risk-medium); background:var(--risk-medium-bg); color:var(--text-primary); }
-.behavior-baseline-gap strong { font-size: 16px; }
-.behavior-baseline-gap p,.behavior-incident span,.behavior-incident p { margin:4px 0 0; color:var(--text-secondary); font-size: 16px; line-height:1.5; overflow-wrap:anywhere; }
-.behavior-incident-heading { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; padding:8px 11px; }
-.behavior-incident { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px 12px; padding:10px 11px; border-top:1px solid #18313c; }
-.behavior-incident>div { min-width:0; }
-.behavior-incident>div>strong { overflow-wrap:anywhere; }
-.behavior-link { align-self:start; border:0; background:transparent; color:var(--accent-cyan); padding:4px; cursor:pointer; font:inherit; text-decoration:underline; }
-.behavior-manual-note { grid-column:1/-1; }
-.behavior-observation-time { margin:0; padding:8px 11px; }
 
 @media (max-width: 720px) {
   .sensor-current-values { grid-template-columns: 1fr 1fr; }
@@ -386,8 +371,6 @@
   .sensor-history-controls { flex-wrap: wrap; }
   .detail-device-heading { flex-wrap: wrap; }
   .device-detail-grid { grid-template-columns: minmax(0, 1fr); }
-  .behavior-evidence-grid { grid-template-columns:minmax(0,1fr); }
-  .behavior-incident { grid-template-columns:minmax(0,1fr); }
 }
 
 /* Page-local 14px declarations were masking the global base size. Keep
@@ -413,16 +396,13 @@
 .sensor-history-controls label, .sensor-current-values span,
 .sensor-current-values small, .sensor-trend figcaption,
 .sensor-trend svg text, .sensor-chart-axis, .sensor-state-note,
-.camera-connection, .camera-image-loading, .camera-frame-time,
-.behavior-evidence-grid span, .behavior-observation-time,
-.behavior-baseline-gap p, .behavior-incident span, .behavior-incident p { font-size: var(--font-secondary); }
+.camera-connection, .camera-image-loading, .camera-frame-time { font-size: var(--font-secondary); }
 .devices-workspace-tabs button, .devices-button, .devices-load-more,
 .device-filter-stack input, .device-filter-stack select,
 .device-dialog-form input, .device-dialog-form select,
 .device-dialog-form textarea, .danger-zone input, .device-detail-tabs button,
 .traffic-controls select, .segmented-control button,
-.sensor-history-controls select, .sensor-history-controls button,
-.behavior-link { font-size: var(--font-control); line-height: 1.4; }
+.sensor-history-controls select, .sensor-history-controls button { font-size: var(--font-control); line-height: 1.4; }
 .devices-button, .devices-workspace-tabs button, .device-detail-tabs button,
 .traffic-controls select, .segmented-control button,
 .sensor-history-controls select, .sensor-history-controls button { min-height: 40px; }
@@ -440,8 +420,6 @@
 .sensor-current-values .sensor-reading-time strong { font-size: 16px; }
 .sensor-trend figcaption strong { font-size: 17px; }
 .camera-empty strong { font-size: 18px; }
-.behavior-evidence-grid strong, .behavior-incident-heading strong,
-.behavior-baseline-gap strong { font-size: 16px; line-height: 1.4; }
 .devices-empty { font-size: 16px; line-height: 1.5; }
 .devices-empty strong { font-size: 18px; }
 .device-detail-grid > div { grid-template-columns: minmax(100px, .8fr) minmax(0, 1.2fr); }
@@ -501,10 +479,6 @@
 .camera-frame-time, .detail-freshness, .runtime-loading,
 .sensor-empty-inline, .sensor-error { font-size: 16px; line-height: 1.55; }
 .camera-empty strong { font-size: 20px; }
-.behavior-evidence-grid strong, .behavior-incident-heading strong,
-.behavior-baseline-gap strong { font-size: 18px; line-height: 1.4; }
-.behavior-evidence-grid span, .behavior-observation-time,
-.behavior-baseline-gap p, .behavior-incident span, .behavior-incident p { font-size: 16px; line-height: 1.5; }
 .devices-empty { font-size: 16px; line-height: 1.55; }
 .devices-empty strong { font-size: 18px; }
 

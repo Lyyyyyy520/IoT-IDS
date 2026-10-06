@@ -35,6 +35,15 @@ vi.mock('../../features/monitor/monitorStore', () => ({
 vi.mock('../../features/traffic/DeviceTrafficPanel', () => ({
   default: () => <div>设备流量分析测试面板</div>,
 }));
+vi.mock('../../features/devices/SensorHistoryPanel', () => ({
+  default: () => <div>传感器历史测试面板</div>,
+}));
+vi.mock('../../features/devices/DeviceObservedStatePanel', () => ({
+  default: () => <div>设备观测状态测试面板</div>,
+}));
+vi.mock('../../features/devices/CameraPreviewPanel', () => ({
+  default: () => <div>摄像头预览测试面板</div>,
+}));
 
 function workspace(overrides: Record<string, unknown> = {}) {
   return {

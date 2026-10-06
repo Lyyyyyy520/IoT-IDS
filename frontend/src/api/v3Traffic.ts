@@ -62,6 +62,7 @@ export interface TrafficResponse {
   freshness: {
     historical_source: 'sqlite_minute_aggregates';
     latest_sample_at: string | null;
+    stale_after_seconds: number;
   };
   realtime: TrafficRealtime;
   summary: TrafficTotals | null;
@@ -261,6 +262,7 @@ export function parseTrafficResponse(value: unknown): TrafficResponse {
         freshness.historical_source, 'sqlite_minute_aggregates', 'freshness.historical_source',
       ),
       latest_sample_at: nullableTimestamp(freshness.latest_sample_at, 'freshness.latest_sample_at'),
+      stale_after_seconds: integer(freshness.stale_after_seconds, 'freshness.stale_after_seconds', 1),
     },
     realtime: parsedRealtime,
     summary: raw.summary === null ? null : totals(raw.summary, 'summary'),

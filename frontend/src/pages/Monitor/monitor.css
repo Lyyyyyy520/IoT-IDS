@@ -122,10 +122,10 @@
 .status-offline { color: #e46c64 !important; }
 .status-unknown { color: #8897a0 !important; }
 
-.risk-l0 { color: #38c87d !important; font-weight: 650; }
-.risk-l1 { color: #d8ad45 !important; font-weight: 650; }
-.risk-l2 { color: #e8924e !important; font-weight: 650; }
-.risk-l3 { color: #e46c64 !important; font-weight: 650; }
+.risk-l0 { color: var(--risk-low) !important; font-weight: 650; }
+.risk-l1 { color: var(--risk-medium) !important; font-weight: 650; }
+.risk-l2 { color: var(--risk-high) !important; font-weight: 650; }
+.risk-l3 { color: var(--risk-critical) !important; font-weight: 650; }
 
 .graph-heading, .recent-heading { min-height: 58px; }
 .capability-badge { border: 1px solid #41515b; border-radius: 12px; padding: 4px 8px; color: #8b9aa2; font-size: 16px; white-space: nowrap; }
@@ -452,4 +452,26 @@
   .monitor-title-break { display: block; }
   .monitor-title-space { display: none; }
 }
+
+/* 设备行为异常提示：真实检测结果 + 诚实的基线待接入状态 */
+.behavior-panel { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-color); }
+.behavior-title { margin: 0 0 9px; font-size: 16px; line-height: 1.4; }
+.behavior-evidence-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; }
+.behavior-evidence-grid > div { min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 11px; }
+.behavior-evidence-grid > div + div { border-left: 1px solid var(--border-color); }
+.behavior-evidence-grid strong { color: var(--text-primary); font-size: 16px; }
+.behavior-evidence-grid span, .behavior-observation-time, .behavior-note { color: var(--text-secondary); font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+.behavior-observation-time { margin: 9px 0 0; }
+.behavior-baseline-gap { margin: 10px 0 0; padding: 9px 11px; border-left: 3px solid var(--risk-medium); background: var(--risk-medium-bg); color: var(--text-primary); }
+.behavior-baseline-gap strong { font-size: 16px; }
+.behavior-baseline-gap p { margin: 4px 0 0; color: var(--text-secondary); font-size: 16px; line-height: 1.5; }
+@media (max-width: 720px) {
+  .behavior-evidence-grid { grid-template-columns: minmax(0, 1fr); }
+  .behavior-evidence-grid > div + div { border-left: 0; border-top: 1px solid var(--border-color); }
+}
+
+/* 设备类型 / 告警状态筛选下拉 */
+.device-filter-selects { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0 12px 9px; }
+.monitor-filter-select select { width: 100%; min-width: 0; min-height: 36px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--bg-base); color: var(--text-primary); padding: 5px 8px; font: inherit; font-size: 16px; }
+@media (max-width: 480px) { .device-filter-selects { grid-template-columns: 1fr; } }
 
