@@ -12,6 +12,7 @@ import {
   statusLabel,
   type DeviceFilter,
 } from '../../features/monitor/MonitorPanels';
+import MonitorTrafficTrendPanel from '../../features/monitor/MonitorTrafficTrendPanel';
 import type { ConnectionStatus } from '../../api/v3Monitor';
 import './monitor.css';
 
@@ -108,7 +109,6 @@ export default function MonitorPage() {
           <span className="brand-mark" aria-hidden="true">ID</span>
           <div>
             <strong>IoT IDS<span className="monitor-title-space"> </span><br className="monitor-title-break" />实时监视</strong>
-            <span>管理员与值守人员工作区</span>
           </div>
         </div>
         <div className="status-counters" aria-label="设备状态统计">
@@ -184,6 +184,8 @@ export default function MonitorPage() {
         <div className="monitor-grid">
           <DeviceListPanel
             devices={visibleDevices}
+            inventoryDevices={devices}
+            snapshotGeneratedAt={monitor.snapshot.generated_at}
             selectedId={selectedId}
             onSelect={(deviceId) => { setSelectedId(deviceId); setDetailDeviceId(deviceId); }}
             search={search}
@@ -219,6 +221,7 @@ export default function MonitorPage() {
           <div className="monitor-right-column">
             <DeviceDetailsPanel device={selectedDevice} />
             <SystemHealthPanel components={monitor.snapshot.system_components} />
+            <MonitorTrafficTrendPanel device={selectedDevice} range={reportRange} />
           </div>
         </div>
       ) : null}

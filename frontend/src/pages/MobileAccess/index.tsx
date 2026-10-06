@@ -164,7 +164,6 @@ export default function MobileAccessPage() {
         <div>
           <p className="mobile-access-eyebrow">SCOPED APP ACCESS</p>
           <h1>APP访问管理</h1>
-          <p>普通用户、可见范围、一次性配对和移动会话集中管理</p>
         </div>
         <button type="button" className="ma-button primary" onClick={() => setCreateOpen(true)}>
           创建移动用户

@@ -111,7 +111,6 @@ export default function DeviceDetailPanel({
         <div>
           <p className="devices-eyebrow">STABLE DEVICE PROFILE</p>
           <h2 id="device-detail-title">{device.display_name}</h2>
-          <span className="detail-device-id">{device.device_id}</span>
         </div>
         <div className="detail-status-stack">
           <span className={`status-pill status-${device.connection_status}`}>

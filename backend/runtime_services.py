@@ -259,7 +259,10 @@ class BackendServiceContainer:
             if self.capture_service is None:
                 from services.traffic_capture import TrafficCapture
 
-                self.capture_service = TrafficCapture(app)
+                self.capture_service = TrafficCapture(
+                    app,
+                    traffic_aggregation_service=self.get_traffic_service(),
+                )
             return self.capture_service
 
 

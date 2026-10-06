@@ -8,6 +8,14 @@ import type {
 export type TrafficMetric = 'bytes' | 'packets';
 export type ProtocolMetric = 'bytes' | 'packets' | 'flows';
 
+export interface TrafficRateSample {
+  sampled_at: string;
+  tx_bytes_per_second: number;
+  rx_bytes_per_second: number;
+  tx_packets_per_second: number;
+  rx_packets_per_second: number;
+}
+
 export const RESOLUTION_SECONDS: Record<Exclude<TrafficResolution, 'auto'>, number> = {
   minute: 60,
   '5minute': 300,
@@ -89,6 +97,19 @@ export function buildTrendSeries(
     series.push([point.bucket_start, point[direction]]);
   });
   return series;
+}
+
+export function buildRealtimeTrendSeries(
+  samples: TrafficRateSample[],
+  metric: TrafficMetric,
+  direction: 'tx' | 'rx',
+): Array<[string, number]> {
+  return samples.map((sample) => {
+    const value = metric === 'bytes'
+      ? direction === 'tx' ? sample.tx_bytes_per_second : sample.rx_bytes_per_second
+      : direction === 'tx' ? sample.tx_packets_per_second : sample.rx_packets_per_second;
+    return [sample.sampled_at, value];
+  });
 }
 
 export function protocolValue(protocol: ProtocolAggregate, metric: ProtocolMetric): number {

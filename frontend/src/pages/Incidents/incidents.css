@@ -39,6 +39,66 @@
 .replay-gap p{color:var(--risk-medium)}
 @media(max-width:720px){.incident-heading-actions{align-items:flex-start;flex-direction:column}.incident-report-export>span{max-width:none}.replay-controls{grid-template-columns:minmax(0,1fr)}.incident-list-row{grid-template-columns:1fr}.incident-list-side{align-items:flex-start;text-align:left}.incident-detail-header{flex-direction:column}.detail-badges{flex-wrap:wrap}.incident-list-panel,.support-list-panel{max-height:none}.incident-filters{grid-template-columns:minmax(0,1fr)}}
 
+/* Event and help lists span the page; selecting a row opens its detail in a modal. */
+.incident-list-panel, .support-list-panel { position: static; max-height: none; }
+.incident-list, .help-list { max-height: min(58vh, 720px); min-height: 220px; }
+.workspace-detail-backdrop {
+  position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center;
+  justify-content: center; padding: 18px; background: rgba(0, 0, 0, .74);
+}
+.workspace-detail-dialog {
+  position: relative; width: min(1280px, 96vw); max-height: 94vh; overflow: auto;
+  border: 1px solid rgba(55, 190, 211, .55); border-radius: 10px;
+  background: #0b1924; box-shadow: 0 20px 70px rgba(0, 0, 0, .55);
+}
+.workspace-detail-dialog.incident-detail-panel,
+.workspace-detail-dialog.help-detail-panel { padding: 20px; }
+.workspace-detail-dialog .incident-detail-panel,
+.workspace-detail-dialog .help-detail-panel { border: 0; box-shadow: none; background: transparent; }
+.workspace-detail-close {
+  position: absolute; z-index: 5; top: 8px; right: 10px; width: 42px; height: 42px;
+  border: 1px solid var(--border-color); border-radius: 6px; background: #101f2c;
+  color: var(--text-primary); font: inherit; font-size: 28px; line-height: 1; cursor: pointer;
+}
+.workspace-detail-close:hover { background: #18303c; }
+.workspace-detail-close:focus-visible { outline: 2px solid var(--accent-cyan); outline-offset: 2px; }
+.workspace-detail-dialog .incident-detail-header { padding-right: 60px; }
+.help-request-dialog { overflow-y: auto; }
+@media(max-width:720px) {
+  .incident-list, .help-list { max-height: none; }
+  .workspace-detail-backdrop { padding: 7px; }
+  .workspace-detail-dialog { width: 100%; max-height: 96vh; }
+  .workspace-detail-dialog.incident-detail-panel,
+  .workspace-detail-dialog.help-detail-panel { padding: 14px; }
+}
+
+/* Arrange help-request filters in a complete desktop row, including both dates. */
+.help-filters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.help-filters > label:nth-child(5) { grid-column: span 2; }
+@media(max-width:1100px) {
+  .help-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .help-filters > label:nth-child(5) { grid-column: 1 / -1; }
+}
+@media(max-width:720px) {
+  .help-filters > label:nth-child(5) { grid-column: auto; }
+}
+
+/* Put every help-request filter on one desktop row; wrap only on smaller screens. */
+.help-filters { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.help-filters > label:nth-child(5) { grid-column: auto; }
+@media(max-width:1600px) {
+  .help-filters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .help-filters > label:nth-child(5) { grid-column: span 2; }
+}
+@media(max-width:1100px) {
+  .help-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .help-filters > label:nth-child(5) { grid-column: 1 / -1; }
+}
+@media(max-width:720px) {
+  .help-filters { grid-template-columns: minmax(0, 1fr); }
+  .help-filters > label:nth-child(5) { grid-column: auto; }
+}
+
 /* The workspace rules below are scoped to the real incident and replay
    components; helper text remains 14px while investigation content is larger. */
 .incident-workspace { font-size: var(--font-body); }
@@ -82,6 +142,7 @@
 .incident-list-row, .help-row { align-items: start; min-height: 74px; }
 .incident-panel-heading { align-items: flex-start; flex-wrap: wrap; }
 .incident-heading-actions { flex: 1 1 100%; justify-content: flex-start; flex-wrap: wrap; }
+.help-heading-actions, .incident-list-heading-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: 0 0 auto; }
 .incident-report-export { flex: 1 1 auto; }
 .incident-report-export > span { flex: 1 1 auto; max-width: none; }
 .incident-panel-heading .ghost-button { flex: 0 0 auto; min-width: 72px; white-space: nowrap; }
@@ -151,5 +212,70 @@
 @media (max-width: 720px) {
   .replay-event time { font-size: 16px; line-height: 1.55; }
   .replay-event p { font-size: 18px; line-height: 1.5; }
+}
+
+/* Recorded-incident filters stay on one row at desktop widths. */
+.incident-list-panel .incident-filters {
+  grid-template-columns: minmax(280px, 2fr) repeat(6, minmax(145px, 1fr));
+  align-items: end;
+}
+.incident-list-panel .incident-filters > label.filter-wide { grid-column: auto; }
+@media(max-width:1600px) {
+  .incident-list-panel .incident-filters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .incident-list-panel .incident-filters > label.filter-wide { grid-column: span 2; }
+}
+@media(max-width:1100px) {
+  .incident-list-panel .incident-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media(max-width:720px) {
+  .incident-list-panel .incident-filters { grid-template-columns: minmax(0, 1fr); }
+  .incident-list-panel .incident-filters > label.filter-wide { grid-column: auto; }
+}
+
+/* Keep filters and results on the left, with the selected record beside them. */
+.incident-main-grid, .support-grid {
+  display: grid;
+  grid-template-columns: minmax(390px, 40fr) minmax(0, 60fr);
+  gap: 14px;
+  align-items: start;
+}
+.support-grid { grid-template-columns: minmax(390px, 42fr) minmax(0, 58fr); }
+.incident-list-panel, .support-list-panel {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 180px);
+  overflow: hidden;
+}
+.incident-detail-panel, .help-detail-panel {
+  max-height: calc(100vh - 180px);
+  overflow: auto;
+}
+.incident-list, .help-list {
+  flex: 1;
+  min-height: 220px;
+  max-height: none;
+}
+.incident-list-panel .incident-filters {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.incident-list-panel .incident-filters > label.filter-wide { grid-column: 1 / -1; }
+.support-list-panel .help-filters {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.support-list-panel .help-filters > label:nth-child(5) { grid-column: 1 / -1; }
+@media(max-width:1100px) {
+  .incident-main-grid, .support-grid { grid-template-columns: minmax(0, 1fr); }
+  .incident-list-panel, .support-list-panel, .incident-detail-panel, .help-detail-panel {
+    position: static;
+    max-height: none;
+  }
+  .incident-list, .help-list { flex: initial; max-height: min(58vh, 440px); }
+}
+@media(max-width:720px) {
+  .incident-list-panel .incident-filters, .support-list-panel .help-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .incident-list-panel .incident-filters > label.filter-wide,
+  .support-list-panel .help-filters > label:nth-child(5) { grid-column: auto; }
 }
 
