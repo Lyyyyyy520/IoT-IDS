@@ -10,6 +10,10 @@ from flask import Blueprint, Response, g, jsonify, request, session
 from contracts import Role
 from services.auth import effective_role
 from services.monitor_snapshot import MonitorSnapshotService
+from services.monitor_report import (
+    MonitorReportInputError,
+    MonitorReportService,
+)
 from services.realtime_events import (
     RealtimeEventError,
     RealtimeEventStore,
@@ -83,6 +87,7 @@ def create_v3_realtime_blueprint(
 ) -> Blueprint:
     """Build routes without opening the database or starting background work."""
     monitor = MonitorSnapshotService(database_path, clock=clock)
+    monitor_report = MonitorReportService(database_path, clock=clock)
     event_store = RealtimeEventStore(database_path)
     stream_options = {
         "replay_limit": replay_limit,
@@ -119,6 +124,43 @@ def create_v3_realtime_blueprint(
                 503,
             )
         response = jsonify(payload)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @blueprint.get("/api/v3/monitor/export")
+    @_require_current_operator
+    def monitor_report_csv():
+        allowed = {"search", "connection_status", "device_type", "risk_filter", "range"}
+        if set(request.args) - allowed:
+            return _error("unknown_query_parameters", "存在不支持的查询参数", 400)
+        values = {}
+        for name in allowed:
+            items = request.args.getlist(name)
+            if len(items) > 1:
+                return _error(
+                    "duplicate_query_parameter", f"{name} 不能重复", 400
+                )
+            values[name] = items[0].strip() if items else None
+        try:
+            csv_text = monitor_report.export_csv(
+                search=values["search"] or None,
+                connection_status=values["connection_status"] or None,
+                device_type=values["device_type"] or None,
+                risk_filter=values["risk_filter"] or "all",
+                range_key=values["range"] or "24h",
+            )
+        except MonitorReportInputError as exc:
+            return _error("invalid_monitor_report_filter", str(exc), 400)
+        except V3DatabaseUnavailable:
+            return _error(
+                "v3_database_unavailable",
+                "监控报表数据暂时不可用，请检查 v3 数据库与流量 schema",
+                503,
+            )
+        response = Response(csv_text, content_type="text/csv; charset=utf-8")
+        response.headers["Content-Disposition"] = (
+            'attachment; filename="monitor-report.csv"'
+        )
         response.headers["Cache-Control"] = "no-store"
         return response
 

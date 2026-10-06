@@ -114,12 +114,14 @@ describe('v3 monitor runtime contracts', () => {
           first_seen_at: '2026-09-20T02:00:00Z',
           updated_at: '2026-09-20T02:00:00Z',
           incident_version: 1,
+          affected_device_ids: ['camera-01'],
         }],
         recent: [],
         empty_meaning: 'no_recorded_incidents_not_proven_safe',
       },
     });
     expect(snapshot.incidents?.active[0].status).toBe('open');
+    expect(snapshot.incidents?.active[0].affected_device_ids).toEqual(['camera-01']);
     expect(snapshot.capabilities.graph.available).toBe(true);
 
     const event = parseMonitorEvent('incident.opened', JSON.stringify({

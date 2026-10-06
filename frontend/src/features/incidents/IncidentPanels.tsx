@@ -101,7 +101,7 @@ export function IncidentDetailPanel({
   const navigate = useNavigate();
   if (loading && !detail) return <section className="incident-panel incident-detail-panel"><div className="workspace-empty">正在读取事件详情…</div></section>;
   if (error && !detail) return <section className="incident-panel incident-detail-panel"><div className="workspace-inline-error" role="alert">{error}</div></section>;
-  if (!detail) return <section className="incident-panel incident-detail-panel"><div className="workspace-empty"><strong>选择事件查看详情</strong><span>详情、时间线和处置操作均来自后端。</span></div></section>;
+  if (!detail) return <section className="incident-panel incident-detail-panel"><div className="workspace-empty"><strong>选择事件查看详情</strong></div></section>;
   const grouped = (role: keyof typeof ROLE_LABELS) => detail.devices.filter((item) => item.incident_role === role);
   return (
     <section className="incident-panel incident-detail-panel" aria-labelledby="incident-detail-title">

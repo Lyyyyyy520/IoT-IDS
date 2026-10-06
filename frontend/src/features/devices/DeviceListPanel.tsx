@@ -132,7 +132,6 @@ export default function DeviceListPanel({
         ) : items.length === 0 && !error ? (
           <div className="devices-empty">
             <strong>没有匹配的真实设备</strong>
-            <span>当前筛选条件未返回设备，页面不会填充示例数据。</span>
           </div>
         ) : items.map((device) => (
           <button

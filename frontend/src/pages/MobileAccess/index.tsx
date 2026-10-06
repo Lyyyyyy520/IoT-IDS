@@ -269,7 +269,6 @@ export default function MobileAccessPage() {
           {!workspace.selectedUser ? (
             <div className="ma-empty large">
               <h2 id="scope-title">用户与可见范围</h2>
-              <p>从左侧选择用户后配置真实设备和区域。</p>
             </div>
           ) : (
             <>

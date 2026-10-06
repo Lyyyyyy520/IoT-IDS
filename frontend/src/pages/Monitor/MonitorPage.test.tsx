@@ -87,6 +87,26 @@ describe('MonitorPage real states', () => {
     );
   });
 
+  it('builds the monitor report URL from the active device filters and selected range', () => {
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText('搜索名称、类型、区域或 IP'), {
+      target: { value: '门厅' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '在线' }));
+    fireEvent.change(screen.getByLabelText('按类型筛选'), { target: { value: 'camera' } });
+    fireEvent.change(screen.getByLabelText('按告警状态筛选'), { target: { value: 'alerted' } });
+    fireEvent.change(screen.getByLabelText('趋势范围'), { target: { value: '6h' } });
+
+    const link = screen.getByRole('link', { name: '导出报表 CSV' });
+    const url = new URL(link.getAttribute('href')!, 'http://localhost');
+    expect(url.pathname).toBe('/api/v3/monitor/export');
+    expect(url.searchParams.get('search')).toBe('门厅');
+    expect(url.searchParams.get('connection_status')).toBe('online');
+    expect(url.searchParams.get('device_type')).toBe('camera');
+    expect(url.searchParams.get('risk_filter')).toBe('alerted');
+    expect(url.searchParams.get('range')).toBe('6h');
+  });
+
   it('shows real incident summaries and deep-links into incident management', () => {
     const summary = {
       incident_id: 'incident-42',
@@ -99,6 +119,7 @@ describe('MonitorPage real states', () => {
       updated_at: '2026-09-20T02:00:00Z',
       resolved_at: null,
       incident_version: 1,
+      affected_device_ids: ['camera-01'],
     };
     monitorState.snapshot = {
       ...validSnapshot,
@@ -114,7 +135,10 @@ describe('MonitorPage real states', () => {
     };
     renderPage();
     expect(screen.getByText('门厅设备需要复核')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /门厅设备需要复核/ }));
+    fireEvent.click(screen.getByRole('button', { name: '在拓扑中定位事件 门厅设备需要复核' }));
+    expect(screen.getByRole('status')).toHaveTextContent('事件定位：门厅设备需要复核');
+    expect(screen.getByRole('button', { name: '清除定位' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看事件 门厅设备需要复核' }));
     expect(screen.getByTestId('device-destination')).toHaveTextContent(
       '/incidents?incident_id=incident-42',
     );
