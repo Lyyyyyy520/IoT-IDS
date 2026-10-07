@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { RefreshControl, ScrollView, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMobile } from './MobileContext';
 import type { MobileDevice, MobileNotice } from './api';
 import { design, palette, ui } from './ui';
@@ -34,6 +35,7 @@ function greeting() {
 export default function HomeScreen() {
   const auth = useMobile();
   const navigation = useNavigation<any>();
+  const { width } = useWindowDimensions();
   const syncRef = useRef(auth.syncNotices);
   syncRef.current = auth.syncNotices;
   useEffect(() => {
@@ -55,15 +57,19 @@ export default function HomeScreen() {
   const openNotice = (notice: MobileNotice) => navigation.navigate('提醒详情', { incidentId: notice.incident_id });
   const visibleDevices = devices.slice(0, 4);
 
-  return <ScrollView style={ui.page} contentContainerStyle={design.pageContent}
-    refreshControl={<RefreshControl refreshing={auth.busy} onRefresh={() => void auth.sync()} />}>
-    <View style={design.homeHero}>
+  return <SafeAreaView style={ui.page} edges={['top']}>
+    <ScrollView style={ui.page} contentContainerStyle={[
+      design.homePageContent,
+      width >= 600 && design.homeWideContent,
+      width < 360 && design.homeNarrowPageContent,
+    ]} refreshControl={<RefreshControl refreshing={auth.busy} onRefresh={() => void auth.sync()} />}>
+    <View style={[design.homeHero, width < 360 && design.homeHeroCompact]}>
       <View style={design.heroCopy}>
         <Text style={design.eyebrow}>智慧家庭安全</Text>
         <Text style={design.heroTitle}>{greeting()}，{auth.overview?.user.username ?? auth.session?.user.username ?? '邻居'}</Text>
         <Text style={design.heroSubtitle}>家人平安，就是最好的安心</Text>
       </View>
-      <View style={design.heroArt}>
+      <View style={[design.heroArt, width < 360 && design.heroArtCompact]}>
         <View style={design.heroArtCircle} />
         <Ionicons name="home" size={59} color="#A78961" />
         <View style={{ position: 'absolute', bottom: 12, right: 12, backgroundColor: palette.green,
@@ -103,7 +109,7 @@ export default function HomeScreen() {
 
     <View style={design.sectionRow}>
       <Text style={design.sectionHeading}>我的设备</Text>
-      <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('本人设备')}>
+      <TouchableOpacity accessibilityRole="button" style={design.sectionAction} onPress={() => navigation.navigate('本人设备')}>
         <Text style={design.sectionLink}>查看全部　›</Text>
       </TouchableOpacity>
     </View>
@@ -123,8 +129,8 @@ export default function HomeScreen() {
               </View>
             </View>
             <Text numberOfLines={1} style={design.deviceTileTitle}>{device.display_name}</Text>
-            <Text numberOfLines={1} style={design.deviceTileMeta}>{statusText[device.connection_status]} · {device.area_id ?? device.device_type}</Text>
-            <Text numberOfLines={1} style={design.deviceTileMeta}>运行模式：{device.operation_mode}{device.retired ? ' · 已退役' : ''}</Text>
+            <Text numberOfLines={1} style={design.homeDeviceTileMeta}>{statusText[device.connection_status]} · {device.area_id ?? device.device_type}</Text>
+            <Text numberOfLines={1} style={design.homeDeviceTileMeta}>运行模式：{device.operation_mode}{device.retired ? ' · 已退役' : ''}</Text>
           </TouchableOpacity>;
         })}
       </View>}
@@ -134,26 +140,27 @@ export default function HomeScreen() {
         <Text style={design.featureTitle}>智能守护{'\n'}让家更安心</Text>
         <Text style={design.featureSubtitle}>{counts.online} 台在线 · {counts.stale + counts.offline + counts.unknown} 台需要关注</Text>
       </View>
-      <View style={{ width: 82, height: 68, alignItems: 'center', justifyContent: 'center' }}>
-        <Ionicons name="leaf" size={39} color="#6A8A61" />
+      <View style={{ width: 76, height: 56, alignItems: 'center', justifyContent: 'center' }}>
+        <Ionicons name="leaf" size={34} color="#6A8A61" />
         <Ionicons name="sparkles" size={17} color="#BC9557" style={{ position: 'absolute', right: 5, top: 1 }} />
       </View>
     </View>
 
     <View style={design.sectionRow}>
       <Text style={design.sectionHeading}>安全提醒</Text>
-      <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('安全提醒')}>
+      <TouchableOpacity accessibilityRole="button" style={design.sectionAction} onPress={() => navigation.navigate('安全提醒')}>
         <Text style={design.sectionLink}>查看全部　›</Text>
       </TouchableOpacity>
     </View>
     {recent.length > 0 ? recent.map(notice => <TouchableOpacity key={notice.incident_id}
-      accessibilityRole="button" style={[design.noticeCard, notice.severity === 'critical' || notice.severity === 'high' ? design.noticeCritical : null]}
+      accessibilityRole="button" style={[design.homeNoticeCard, notice.severity === 'critical' || notice.severity === 'high' ? design.noticeCritical : null]}
       onPress={() => openNotice(notice)}>
       <Text style={design.noticeTitle}>{notice.user_title}</Text>
       <Text style={design.noticeSummary} numberOfLines={2}>{notice.user_summary ?? notice.public_progress}</Text>
-      <Text style={design.noticeMeta}>查看处理进度　›</Text>
+      <Text style={design.homeNoticeMeta}>查看处理进度　›</Text>
     </TouchableOpacity>) : <View style={[ui.card, { paddingVertical: 14 }]}>
       <Text style={ui.muted}>{auth.overview?.security_capability.available === false ? '安全事件功能尚未接入' : (unread === 0 ? '当前没有未读提醒。' : '暂无提醒数据')}</Text>
     </View>}
-  </ScrollView>;
+    </ScrollView>
+  </SafeAreaView>;
 }
