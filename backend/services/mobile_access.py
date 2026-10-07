@@ -26,7 +26,6 @@ from v3_database import (
 Clock = Callable[[], datetime]
 FaultInjector = Callable[[str], None]
 _AREA_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
-_USERNAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{2,63}$")
 _CLIENT_INSTANCE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$")
 _PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _PAIRING_NORMALIZED_LENGTH = 32
@@ -191,12 +190,7 @@ def _client_name(value) -> str:
 
 
 def _username(value) -> str:
-    normalized = _text(value, "username", minimum=3, maximum=64)
-    if not _USERNAME_PATTERN.fullmatch(normalized):
-        raise MobileAccessError(
-            "username must start with a letter and contain only letters, digits, ., _, or -"
-        )
-    return normalized
+    return _text(value, "username", maximum=64)
 
 
 def _normalize_pairing_code(value) -> str:

@@ -79,7 +79,6 @@ export default function HomeScreen() {
       </View>
     </View>
 
-    {auth.config?.insecureLan && <Text style={ui.warning}>HTTP 开发模式：连接未加密</Text>}
     {auth.stale && <Text accessibilityRole="alert" style={ui.warning}>连接中断，以下数据可能已过期。{auth.error}</Text>}
 
     <View style={design.summaryRow}>
