@@ -18,6 +18,8 @@ npx expo start
 
 这会在 Expo Go 里临时运行开发版，不会生成可独立安装的 IPA；关闭电脑上的服务后，手机就无法继续打开此开发预览。要连接后端时，服务器地址也必须能从手机访问；`127.0.0.1` 指向手机自身，不能用来访问电脑上的后端。
 
+Expo 的 `exp://<电脑局域网 IP>:8081` 用于打开 APP。进入 APP 配对页后，“服务器地址”应填写后端根地址，例如 `http://<电脑局域网 IP>:5000`；后端须监听局域网可访问的地址，手机或平板与电脑连接同一 Wi-Fi。
+
 ## 安装与离线检查
 
 ```powershell
@@ -34,7 +36,7 @@ npx expo config --type public --json
 
 管理员先在 Web 端建立 `user` 账号、授权设备/区域，并生成一次性配对码。APP 输入完整服务器根地址（例如 `https://ids.example.com`，不要附 `/api`）、配对码和用户确认的客户端名称。配对码只在表单内存中，成功或离开页面即清除；APP 不使用 Web 用户名/密码或 Cookie 登录。
 
-生产地址必须为 HTTPS，不能含用户名、密码、查询串、fragment 或路径。仅 Expo 开发模式可由用户明确开启隔离局域网 HTTP；界面持续警告，且只接受本机/私有局域网主机。服务端仍可能返回 `https_required`（当前后端仅允许 loopback 或测试环境的不安全 HTTP），这不是证书忽略开关。APP 不信任任意自签名证书或代理。
+开发和发行版本均支持 HTTP 与 HTTPS，无需额外开发开关；地址不能含用户名、密码、查询串、fragment 或路径。后端在所有环境默认支持 HTTP；若显式设置 `IOT_IDS_MOBILE_ALLOW_INSECURE_HTTP=false`，HTTP 请求会返回 `https_required`。HTTPS 仍使用系统证书验证，APP 不忽略证书错误。
 
 ## 凭据分类与恢复
 
@@ -43,7 +45,7 @@ npx expo config --type public --json
 | access token | 进程内存；不持久化 |
 | refresh token | Expo SecureStore：`iot_ids_mobile_refresh_v1` |
 | 随机客户端 ID | Expo SecureStore：`iot_ids_mobile_client_instance_v1` |
-| 服务器地址、开发 HTTP 标志 | AsyncStorage：`iot_ids_mobile_server_v1`（非秘密） |
+| 服务器地址、兼容旧版的 HTTP 标志 | AsyncStorage：`iot_ids_mobile_server_v1`（非秘密） |
 | 配对码 | 配对表单内存；不持久化 |
 | overview | 进程内存；不持久化 |
 
@@ -55,7 +57,7 @@ npx expo config --type public --json
 
 APP 前台每约 30 秒刷新 overview；从后台恢复时重新验证令牌并获取 session 和 overview。离线时可保留进程内最后一次真实数据，但明确标记过期。用户确认注销后立即清理本机凭据；服务端注销请求失败时提示管理员在 Web 端撤销。重置客户端还会清除随机客户端 ID。
 
-真实联调前请确认服务端 HTTPS、v3 migration 已显式完成、管理员已设置授权范围、设备时钟/网络和真机 SecureStore 行为。不要对真实数据库使用测试脚本。本轮未连接真实后端、Broker 或探针。
+真实联调前请确认服务端 HTTP/HTTPS 配置、v3 migration 已显式完成、管理员已设置授权范围、设备时钟/网络和真机 SecureStore 行为。不要对真实数据库使用测试脚本。
 
 ## Android 直装 APK（无需 Expo Go 或 EAS）
 
@@ -73,4 +75,4 @@ APK 输出在 `android/app/build/outputs/apk/release/app-release.apk`；已生�
 
 iPhone 原生 Xcode 工程已生成在 ``ios/IoTIDS.xcodeproj``。Windows 不能编译 iOS 应用。该工程是在 SDK 54 时生成的；以后在 Mac 上做原生个人测试时，先运行 ``npm ci`` 和 ``npx expo prebuild --platform ios --clean`` 以 SDK 57 重建工程，再运行 ``npx expo run:ios --device``。免费 Personal Team 的签名配置 7 天后过期，需要重新构建并安装；它适合个人测试。TestFlight、Ad Hoc 或 App Store 分发需要加入 Apple Developer Program。
 
-安装包不会内置后端。正式配对需要可从手机访问的 HTTPS 服务：管理员在 Web 端创建 `user` 账号、授权设备/区域并生成一次性配对码；APP 输入完整 HTTPS 服务器根地址（不要附 `/api`）、配对码和用户确认的客户端名称。仓库的一键演示服务只监听 `127.0.0.1`，且发布版 APP 不允许 HTTP，因此不能直接用它连接手机。
+安装包不会内置后端。正式配对需要可从手机访问的 HTTP 或 HTTPS 服务：管理员在 Web 端创建 `user` 账号、授权设备/区域并生成一次性配对码；APP 输入完整服务器根地址（不要附 `/api`）、配对码和用户确认的客户端名称。仓库的一键演示服务只监听 `127.0.0.1`；手机连接时需将后端配置为监听局域网可访问的地址。原生网络配置变更后需要重新构建安装包。

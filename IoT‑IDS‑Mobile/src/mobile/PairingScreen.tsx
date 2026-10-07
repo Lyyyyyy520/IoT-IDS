@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useMobile } from './MobileContext';
 import { palette, ui } from './ui';
 
@@ -15,7 +15,6 @@ export default function PairingScreen() {
   const [address, setAddress] = useState(auth.config?.baseUrl ?? '');
   const [code, setCode] = useState('');
   const [name, setName] = useState('我的手机');
-  const [insecureLan, setInsecureLan] = useState(auth.config?.insecureLan ?? false);
   const [localError, setLocalError] = useState<string | null>(null);
   useEffect(() => () => setCode(''), []);
   const submit = async () => {
@@ -23,7 +22,7 @@ export default function PairingScreen() {
       setLocalError('请填写完整配对码和客户端名称'); return;
     }
     setLocalError(null);
-    const success = await auth.pair(address, insecureLan, code, name);
+    const success = await auth.pair(address, false, code, name);
     if (success) setCode('');
   };
   return <KeyboardAvoidingView style={ui.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -33,13 +32,8 @@ export default function PairingScreen() {
       <View style={ui.card}>
         <Text style={ui.label}>服务器地址</Text>
         <TextInput accessibilityLabel="服务器地址" style={ui.input} value={address}
-          onChangeText={setAddress} placeholder="https://example.com" autoCapitalize="none"
+          onChangeText={setAddress} placeholder="http://192.168.1.20:5000" autoCapitalize="none"
           autoCorrect={false} keyboardType="url" />
-        {__DEV__ && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <Switch accessibilityLabel="隔离局域网 HTTP 开发模式" value={insecureLan} onValueChange={setInsecureLan} />
-          <Text style={ui.body}>隔离局域网 HTTP 开发模式</Text>
-        </View>}
-        {insecureLan && <Text style={ui.warning}>HTTP 不加密，仅供隔离局域网开发测试；请勿在公网使用。</Text>}
         <Text style={ui.label}>配对码</Text>
         <TextInput accessibilityLabel="配对码" style={[ui.input, { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }]}
           value={formatPairingCode(code)} onChangeText={value => setCode(normalizePairingCode(value))}

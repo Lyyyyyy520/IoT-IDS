@@ -120,6 +120,11 @@ def create_app(
         raise TypeError("MOBILE_SECURITY_SETTINGS must be MobileSecuritySettings")
     resolved_mobile_settings.validate()
     application.config["MOBILE_SECURITY_SETTINGS"] = resolved_mobile_settings
+    if "SESSION_COOKIE_SECURE" not in overrides:
+        application.config["SESSION_COOKIE_SECURE"] = (
+            resolved_mobile_settings.environment == "production"
+            and not resolved_mobile_settings.allow_insecure_http
+        )
 
     configured_path = application.config.get("DATABASE_PATH")
     normalized_path = (

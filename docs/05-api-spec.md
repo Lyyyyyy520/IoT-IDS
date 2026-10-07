@@ -57,6 +57,11 @@
 
 ## 移动用户与 APP
 
+移动接口在开发、测试和生产环境默认支持 HTTP 与 HTTPS，包括局域网客户端；显式配置
+`IOT_IDS_MOBILE_ALLOW_INSECURE_HTTP=false` 可要求 HTTPS，并在生产环境启用 Secure session cookie。
+创建移动用户时，用户名可自行填写中文、数字或字母，去掉首尾空白后为 1～64 个字符；
+同名账号仍返回 `409 mobile_username_conflict`。
+
 | 方法 | 路径 | 权限 | 用途 |
 |---|---|---|---|
 | `GET/POST` | `/api/v3/mobile-users` | admin | 列表或创建移动用户 |

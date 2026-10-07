@@ -108,7 +108,7 @@ export default function MobileAccessPage() {
     setCreateOpen(false);
     setCreateUsername('');
     setCreateDisplayName('');
-  }, '移动用户已创建；默认没有任何设备可见范围。');
+  }, '移动用户已创建。');
 
   const submitEdit = () => run(async () => {
     await workspace.updateUser({ display_name: editDisplayName });
@@ -440,9 +440,8 @@ export default function MobileAccessPage() {
         destroyOnHidden
       >
         <div className="ma-form">
-          <label><span>用户名</span><input value={createUsername} onChange={(e) => setCreateUsername(e.target.value)} autoComplete="off" /></label>
+          <label><span>用户名</span><input value={createUsername} onChange={(e) => setCreateUsername(e.target.value)} placeholder="请输入用户名" maxLength={64} autoComplete="off" /></label>
           <label><span>显示名称</span><input value={createDisplayName} onChange={(e) => setCreateDisplayName(e.target.value)} /></label>
-          <p>角色固定为 user，不创建或返回 Web 登录密码；创建后默认无设备范围。</p>
         </div>
       </Modal>
 
