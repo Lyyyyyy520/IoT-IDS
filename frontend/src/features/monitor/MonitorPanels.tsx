@@ -26,6 +26,10 @@ const STATUS_LABELS: Record<ConnectionStatus, string> = {
   unknown: '未知',
 };
 
+const DEVICE_TYPE_LABELS: Record<string, string> = {
+  camera: '摄像头',
+};
+
 const MODE_LABELS: Record<MonitorDevice['operation_mode'], string> = {
   active: '运行中',
   maintenance: '维护中',
@@ -58,6 +62,10 @@ function formatTime(value: string | null): string {
 
 export function statusLabel(status: ConnectionStatus) {
   return STATUS_LABELS[status];
+}
+
+function deviceTypeLabel(deviceType: string): string {
+  return DEVICE_TYPE_LABELS[deviceType.toLowerCase()] ?? deviceType;
 }
 
 export function DeviceListPanel({
@@ -172,24 +180,29 @@ export function DeviceListPanel({
               className={`device-row-wrap ${selectedId === device.device_id ? 'is-selected' : ''}`}
               key={device.device_id}
             >
-              <div className="device-row-main">
-                <button
-                  type="button"
-                  className="device-row"
-                  onClick={() => onSelect(device.device_id)}
-                >
-                  <span className="device-name">{device.display_name}</span>
-                </button>
-                <button
-                  type="button"
-                  className="device-manage-link"
-                  onClick={() => onManageDevice(device.device_id)}
-                  aria-label={`查看或管理 ${device.display_name}`}
-                >
-                  查看/管理设备
-                </button>
-              </div>
-              <span className="device-meta">{device.device_type}</span>
+              <button
+                type="button"
+                className="device-row"
+                onClick={() => onSelect(device.device_id)}
+                aria-pressed={selectedId === device.device_id}
+              >
+                <span className={`status-dot status-${device.connection_status}`} aria-hidden="true" />
+                <span className="device-name">{device.display_name}</span>
+                <span className={`device-row-status status-${device.connection_status}`}>
+                  {STATUS_LABELS[device.connection_status]}
+                </span>
+                <span className="device-summary">
+                  {deviceTypeLabel(device.device_type)} · {device.area_id ?? '未分区'} · {device.ip_address ?? '尚无 IP'}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="device-manage-link"
+                onClick={() => onManageDevice(device.device_id)}
+                aria-label={`查看或管理 ${device.display_name}`}
+              >
+                管理
+              </button>
             </div>
           ))
         )}
