@@ -85,7 +85,7 @@ describe('IncidentsPage', () => {
     state.workspace = workspace({ incidents: [], incidentTotal: 0, incidentDetail: null, selectedIncidentId: null });
     renderPage();
     expect(screen.getByText('当前没有已记录事件')).toBeInTheDocument();
-    expect(screen.getByText('这不代表系统安全或没有攻击。')).toBeInTheDocument();
+    expect(screen.queryByText('这不代表系统安全或没有攻击。')).not.toBeInTheDocument();
   });
 
   it('does not offer reopen actions for terminal incidents', () => {

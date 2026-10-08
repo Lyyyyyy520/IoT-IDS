@@ -108,7 +108,7 @@ export default function MobileAccessPage() {
     setCreateOpen(false);
     setCreateUsername('');
     setCreateDisplayName('');
-  }, '移动用户已创建；默认没有任何设备可见范围。');
+  }, '移动用户已创建。');
 
   const submitEdit = () => run(async () => {
     await workspace.updateUser({ display_name: editDisplayName });
@@ -164,7 +164,6 @@ export default function MobileAccessPage() {
         <div>
           <p className="mobile-access-eyebrow">SCOPED APP ACCESS</p>
           <h1>APP访问管理</h1>
-          <p>普通用户、可见范围、一次性配对和移动会话集中管理</p>
         </div>
         <button type="button" className="ma-button primary" onClick={() => setCreateOpen(true)}>
           创建移动用户
@@ -269,7 +268,6 @@ export default function MobileAccessPage() {
           {!workspace.selectedUser ? (
             <div className="ma-empty large">
               <h2 id="scope-title">用户与可见范围</h2>
-              <p>从左侧选择用户后配置真实设备和区域。</p>
             </div>
           ) : (
             <>
@@ -442,9 +440,8 @@ export default function MobileAccessPage() {
         destroyOnHidden
       >
         <div className="ma-form">
-          <label><span>用户名</span><input value={createUsername} onChange={(e) => setCreateUsername(e.target.value)} autoComplete="off" /></label>
+          <label><span>用户名</span><input value={createUsername} onChange={(e) => setCreateUsername(e.target.value)} placeholder="请输入用户名" maxLength={64} autoComplete="off" /></label>
           <label><span>显示名称</span><input value={createDisplayName} onChange={(e) => setCreateDisplayName(e.target.value)} /></label>
-          <p>角色固定为 user，不创建或返回 Web 登录密码；创建后默认无设备范围。</p>
         </div>
       </Modal>
 

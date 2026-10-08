@@ -88,6 +88,7 @@ PATCH /api/v3/mobile-users/42
 {"username": "resident-a", "display_name": "A 栋住户"}
 ```
 
+用户名可自行填写中文、数字或字母，去掉首尾空白后须为 1～64 个字符，不包含控制字符。
 role、密码和管理员权限字段会作为未知字段拒绝。重复用户名返回
 `409 mobile_username_conflict`。新账号默认 scope 为空，因而不能生成配对码。
 修改 display name 或 active/disabled 状态必须携带 `expected_profile_version`；
@@ -260,13 +261,13 @@ Authorization: Bearer <opaque access token>
 overview 不返回 MAC、当前 IP、peer IP、端口、graph ID、GNN 分数/特征、MQTT 或
 probe 凭据。未观测设备保持 `unknown`；退役、维护、disabled 与连接状态分开表达。
 
-## 8. HTTPS、代理、限流与部署
+## 8. HTTP/HTTPS、代理、限流与部署
 
 生产环境必须显式设置：
 
 ```text
 IOT_IDS_MOBILE_TOKEN_SECRET=<独立且至少 32 字符的随机秘密>
-IOT_IDS_MOBILE_ALLOW_INSECURE_HTTP=false
+IOT_IDS_MOBILE_ALLOW_INSECURE_HTTP=true
 IOT_IDS_MOBILE_TRUST_PROXY=false
 ```
 
@@ -281,9 +282,11 @@ IOT_IDS_MOBILE_TRUST_PROXY=false
 `IOT_IDS_MOBILE_REFRESH_RATE_LIMIT`。
 
 默认不信任 `X-Forwarded-Proto` 或 `X-Forwarded-For`。只有部署在已确认会覆盖并
-清理这些头的可信反向代理后，才设置 `IOT_IDS_MOBILE_TRUST_PROXY=true`。开发时
-只有显式开启 insecure HTTP，且请求来自 loopback 或测试环境才允许明文，并会输出
-不包含秘密的安全警告；生产配置拒绝开启。
+清理这些头的可信反向代理后，才设置 `IOT_IDS_MOBILE_TRUST_PROXY=true`。
+所有环境默认允许 HTTP 与 HTTPS，包括局域网请求；显式设置
+`IOT_IDS_MOBILE_ALLOW_INSECURE_HTTP=false` 可要求 HTTPS，并在生产环境启用 Secure session cookie。
+Expo 开发和发行版本均允许填写 HTTP 或 HTTPS 地址，无需额外开关；原生配置插件允许
+iOS ATS 与 Android 明文网络请求，HTTPS 仍使用系统证书验证。
 
 pairing claim 和 refresh 使用 SQLite 持久限流，因此多进程共享同一限制状态；配对
 记录本身还有限定尝试次数。远端地址以服务端 HMAC 后的 bucket key 保存，不保存

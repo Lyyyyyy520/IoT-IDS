@@ -12,6 +12,7 @@ import {
   statusLabel,
   type DeviceFilter,
 } from '../../features/monitor/MonitorPanels';
+import MonitorTrafficTrendPanel from '../../features/monitor/MonitorTrafficTrendPanel';
 import type { ConnectionStatus } from '../../api/v3Monitor';
 import './monitor.css';
 
@@ -37,12 +38,14 @@ export default function MonitorPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const [detailDeviceId, setDetailDeviceId] = useState<string | null>(null);
   const closeDeviceDetail = useCallback(() => setDetailDeviceId(null), []);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<DeviceFilter>('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [riskFilter, setRiskFilter] = useState('all');
+  const [reportRange, setReportRange] = useState('24h');
   const devices = monitor.snapshot?.devices ?? [];
   const deviceTypes = useMemo(() => [...new Set(devices.map((device) => device.device_type))].sort(), [devices]);
 
@@ -66,6 +69,23 @@ export default function MonitorPage() {
   }, [devices, filter, typeFilter, riskFilter, search]);
 
   const visibleIds = useMemo(() => new Set(visibleDevices.map((device) => device.device_id)), [visibleDevices]);
+  const incidentSummaries = useMemo(() => {
+    const items = [...(monitor.snapshot?.incidents?.active ?? []), ...(monitor.snapshot?.incidents?.recent ?? [])];
+    return items.filter((item, index, all) => all.findIndex((candidate) => candidate.incident_id === item.incident_id) === index);
+  }, [monitor.snapshot?.incidents]);
+  const selectedIncident = incidentSummaries.find((item) => item.incident_id === selectedIncidentId) ?? null;
+  const highlightedDeviceIds = useMemo(
+    () => new Set(selectedIncident?.affected_device_ids ?? []),
+    [selectedIncident],
+  );
+  const monitorReportUrl = useMemo(() => {
+    const params = new URLSearchParams({ range: reportRange });
+    if (search.trim()) params.set('search', search.trim());
+    if (filter !== 'all') params.set('connection_status', filter);
+    if (typeFilter !== 'all') params.set('device_type', typeFilter);
+    if (riskFilter !== 'all') params.set('risk_filter', riskFilter);
+    return `/api/v3/monitor/export?${params.toString()}`;
+  }, [filter, reportRange, riskFilter, search, typeFilter]);
 
   const selectedDevice = devices.find((device) => device.device_id === selectedId) ?? null;
   const counts = devices.reduce<Record<ConnectionStatus, number>>(
@@ -89,7 +109,6 @@ export default function MonitorPage() {
           <span className="brand-mark" aria-hidden="true">ID</span>
           <div>
             <strong>IoT IDS<span className="monitor-title-space"> </span><br className="monitor-title-break" />实时监视</strong>
-            <span>管理员与值守人员工作区</span>
           </div>
         </div>
         <div className="status-counters" aria-label="设备状态统计">
@@ -115,6 +134,19 @@ export default function MonitorPage() {
           >
             {monitor.phase === 'resyncing' ? '重同步中…' : '重新同步'}
           </button>
+          <label className="monitor-report-range">
+            <span>趋势范围</span>
+            <select aria-label="趋势范围" value={reportRange} onChange={(event) => setReportRange(event.target.value)}>
+              <option value="15m">近 15 分钟</option>
+              <option value="1h">近 1 小时</option>
+              <option value="6h">近 6 小时</option>
+              <option value="24h">近 24 小时</option>
+              <option value="7d">近 7 天</option>
+            </select>
+          </label>
+          <a className="sync-button monitor-report-export-link" href={monitorReportUrl}>
+            导出报表 CSV
+          </a>
         </div>
         <div className="monitor-account">
           <span>{user?.username}</span>
@@ -152,6 +184,8 @@ export default function MonitorPage() {
         <div className="monitor-grid">
           <DeviceListPanel
             devices={visibleDevices}
+            inventoryDevices={devices}
+            snapshotGeneratedAt={monitor.snapshot.generated_at}
             selectedId={selectedId}
             onSelect={(deviceId) => { setSelectedId(deviceId); setDetailDeviceId(deviceId); }}
             search={search}
@@ -171,17 +205,23 @@ export default function MonitorPage() {
               graph={monitor.snapshot.graph}
               onSelect={(deviceId) => { setSelectedId(deviceId); setDetailDeviceId(deviceId); }}
               visibleIds={visibleIds}
+              highlightedDeviceIds={highlightedDeviceIds}
+              highlightLabel={selectedIncident?.admin_title ?? null}
+              onClearHighlight={() => setSelectedIncidentId(null)}
             />
             <RecentEventsPanel
               events={monitor.recentEvents}
               incident={monitor.snapshot.capabilities.incident}
               incidents={monitor.snapshot.incidents}
+              selectedIncidentId={selectedIncidentId}
+              onSelectIncident={setSelectedIncidentId}
               onViewIncident={(incidentId) => navigate(`/incidents?incident_id=${encodeURIComponent(incidentId)}`)}
             />
           </div>
           <div className="monitor-right-column">
             <DeviceDetailsPanel device={selectedDevice} />
             <SystemHealthPanel components={monitor.snapshot.system_components} />
+            <MonitorTrafficTrendPanel device={selectedDevice} range={reportRange} />
           </div>
         </div>
       ) : null}

@@ -4,7 +4,6 @@ from __future__ import annotations
 from functools import wraps
 from hashlib import sha256
 import hmac
-import ipaddress
 import json
 import logging
 from pathlib import Path
@@ -113,13 +112,6 @@ def _client_address(settings: MobileSecuritySettings) -> str:
     return (request.remote_addr or "unknown")[:128]
 
 
-def _is_loopback(address: str) -> bool:
-    try:
-        return ipaddress.ip_address(address).is_loopback
-    except ValueError:
-        return False
-
-
 def _is_secure_request(settings: MobileSecuritySettings) -> bool:
     if request.is_secure:
         return True
@@ -127,9 +119,7 @@ def _is_secure_request(settings: MobileSecuritySettings) -> bool:
         forwarded = request.headers.get("X-Forwarded-Proto", "")
         if forwarded.split(",", 1)[0].strip().lower() == "https":
             return True
-    return settings.allow_insecure_http and (
-        _is_loopback(request.remote_addr or "") or settings.environment == "testing"
-    )
+    return settings.allow_insecure_http
 
 
 def create_v3_mobile_blueprint(
@@ -153,8 +143,8 @@ def create_v3_mobile_blueprint(
     blueprint.mobile_service = service
     blueprint.mobile_device_service = device_service
     if settings.allow_insecure_http:
-        LOGGER.warning(
-            "mobile_insecure_http_enabled environment=%s loopback_or_test_only=true",
+        LOGGER.info(
+            "mobile_http_enabled environment=%s",
             settings.environment,
         )
 

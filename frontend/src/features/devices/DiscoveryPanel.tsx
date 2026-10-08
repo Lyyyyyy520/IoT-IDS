@@ -68,6 +68,15 @@ export default function DiscoveryPanel({
     setResolveConflict(false);
   }, [selectedId]);
 
+  useEffect(() => {
+    if (workspace.loading) return;
+    const selectionIsVisible = workspace.items.some((item) => item.candidate_id === selectedId);
+    if (selectionIsVisible) return;
+    const firstCandidate = workspace.items[0];
+    if (firstCandidate) void workspace.selectCandidate(firstCandidate.candidate_id);
+    else if (selectedId) void workspace.selectCandidate(null);
+  }, [selectedId, workspace.items, workspace.loading, workspace.selectCandidate]);
+
   const claim = async (event: FormEvent) => {
     event.preventDefault();
     if (!detail) return;
@@ -130,7 +139,7 @@ export default function DiscoveryPanel({
         <div className="discovery-list-meta"><span>{workspace.loading ? '正在同步…' : `共 ${workspace.total} 个候选`}</span><span>{workspace.lastUpdatedAt ? `更新于 ${new Date(workspace.lastUpdatedAt).toLocaleTimeString()}` : '尚未同步'}</span></div>
         {workspace.error && <div role="alert" className="devices-inline-error">{errorMessage(workspace.error)}</div>}
         <div className="discovery-candidate-list" aria-live="polite">
-          {!workspace.loading && !workspace.error && workspace.items.length === 0 && <div className="devices-empty"><strong>当前没有待确认候选</strong><span>这里只显示隔离区内的真实发现证据。</span></div>}
+          {!workspace.loading && !workspace.error && workspace.items.length === 0 && <div className="devices-empty"><strong>当前没有待确认候选</strong></div>}
           {workspace.items.map((candidate) => (
             <button type="button" key={candidate.candidate_id} className={`discovery-candidate ${selectedId === candidate.candidate_id ? 'selected' : ''}`} onClick={() => void workspace.selectCandidate(candidate.candidate_id)}>
               <span className={`candidate-mark ${candidate.conflict ? 'conflict' : candidate.status}`} aria-hidden="true" />
@@ -144,8 +153,10 @@ export default function DiscoveryPanel({
         </button>}
       </div>
 
-      <div className="discovery-detail-pane">
-        {!selectedId && <div className="devices-empty"><strong>选择一个候选查看证据</strong><span>候选证据不会自动成为可信设备。</span></div>}
+      <section className="discovery-detail-pane" aria-label="候选设备详情">
+        {!selectedId && workspace.loading && <div className="devices-empty">正在读取候选列表…</div>}
+        {!selectedId && !workspace.loading && workspace.items.length === 0 && <div className="devices-empty"><strong>当前没有待确认候选</strong></div>}
+        {!selectedId && !workspace.loading && workspace.items.length > 0 && <div className="devices-empty"><strong>选择一个候选查看证据</strong></div>}
         {selectedId && workspace.detailLoading && <div className="devices-empty">正在读取候选详情…</div>}
         {selectedId && workspace.detailError && <div role="alert" className="devices-inline-error">{errorMessage(workspace.detailError)}<button type="button" className="devices-button" onClick={() => void workspace.selectCandidate(selectedId)}>重试</button></div>}
         {detail && !workspace.detailLoading && (
@@ -209,7 +220,7 @@ export default function DiscoveryPanel({
             {!isAdmin && <p className="read-only-badge">operator · 只读</p>}
           </>
         )}
-      </div>
+      </section>
     </section>
   );
 }

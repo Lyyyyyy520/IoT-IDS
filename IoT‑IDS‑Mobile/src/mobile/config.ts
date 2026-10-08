@@ -9,15 +9,11 @@ const LEGACY_KEYS = [
 export type ServerConfig = { baseUrl: string; insecureLan: boolean };
 export class ServerConfigError extends Error { constructor(message: string) { super(message); this.name = 'ServerConfigError'; } }
 
-export function validateServerUrl(input: string, insecureLan: boolean): string {
+export function validateServerUrl(input: string, _insecureLan = false): string {
   let url: URL;
   try { url = new URL(input.trim()); } catch { throw new ServerConfigError('请输入完整的服务器地址'); }
-  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  const localHttp = host === 'localhost' || host === '::1' || host.endsWith('.local') ||
-    /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
-    (() => { const match = /^172\.(\d+)\./.exec(host); return !!match && Number(match[1]) >= 16 && Number(match[1]) <= 31; })();
-  if (url.protocol !== 'https:' && !(insecureLan && __DEV__ && url.protocol === 'http:' && localHttp)) {
-    throw new ServerConfigError('服务器地址必须使用 HTTPS；仅隔离局域网开发模式可显式启用 HTTP');
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new ServerConfigError('服务器地址必须使用 HTTP 或 HTTPS');
   }
   if (!url.hostname || url.username || url.password || url.search || url.hash ||
       (url.pathname !== '/' && url.pathname !== '')) {

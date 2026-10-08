@@ -2059,6 +2059,35 @@ def monitor_incident_snapshot(
         "incident_version FROM v3_incidents "
         "ORDER BY updated_at DESC,incident_id LIMIT 20"
     ).fetchall()
+
+    incident_ids = list(dict.fromkeys(
+        row["incident_id"] for row in [*active_rows, *recent_rows]
+    ))
+    affected_by_incident: dict[str, list[str]] = {}
+    if incident_ids:
+        placeholders = ",".join("?" for _ in incident_ids)
+        device_rows = connection.execute(
+            "SELECT incident_id,device_id FROM v3_incident_devices "
+            "WHERE incident_role='affected' AND incident_id IN (" + placeholders + ") "
+            "ORDER BY incident_id,device_id",
+            incident_ids,
+        ).fetchall()
+        for row in device_rows:
+            affected_by_incident.setdefault(row["incident_id"], []).append(
+                row["device_id"]
+            )
+
+    def with_affected_devices(rows):
+        return [
+            {
+                **dict(row),
+                "affected_device_ids": affected_by_incident.get(
+                    row["incident_id"], []
+                ),
+            }
+            for row in rows
+        ]
+
     return {
         "capability": {
             "available": True,
@@ -2068,8 +2097,8 @@ def monitor_incident_snapshot(
             ),
         },
         "data": {
-            "active": [dict(row) for row in active_rows],
-            "recent": [dict(row) for row in recent_rows],
+            "active": with_affected_devices(active_rows),
+            "recent": with_affected_devices(recent_rows),
             "empty_meaning": (
                 "no_recorded_incidents_not_proven_safe"
             ),

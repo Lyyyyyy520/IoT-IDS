@@ -72,7 +72,7 @@ function Trend({ traffic }: { traffic: MobileDeviceTraffic }) {
         top: 9 + line * 25, borderTopWidth: 1, borderStyle: 'dashed', borderColor: '#EAE8E2' }} />)}
       {chartWidth > 0 && gapIndexes.map(index => {
         const x = (xAt(index - 1) + xAt(index)) / 2;
-        return <View key={`gap-${index}`} accessible style={{ position: 'absolute',
+        return <View key={`gap-${index}`} accessible accessibilityLabel="此处存在数据缺口" style={{ position: 'absolute',
           left: x, top: 5, bottom: 5, borderLeftWidth: 2, borderStyle: 'dashed', borderColor: palette.muted, zIndex: 3 }} />;
       })}
       {chartWidth > 0 && series.map(item => <React.Fragment key={item.key}>
@@ -409,7 +409,8 @@ export default function MobileDeviceDetailScreen({ lifecycle = nativeAppLifecycl
           <View style={[design.detailRowIcon, { backgroundColor: '#F0EFEB' }]}><Ionicons name="settings-outline" size={19} color="#606966" /></View>
           <View style={design.detailRowText}><Text style={design.detailRowTitle}>设备运行状态</Text>
             <Text style={design.detailRowSubtitle}>连接状态：{device.status_text.connection}</Text>
-            <Text style={design.detailRowSubtitle}>运行模式：{device.status_text.operation}</Text></View>
+            <Text style={design.detailRowSubtitle}>运行模式：{device.status_text.operation}</Text>
+            <Text style={design.detailRowSubtitle}>设备可用性：{device.availability_text}</Text></View>
           <Ionicons name="chevron-forward" size={18} color="#8D9390" />
         </View>
         <TouchableOpacity accessibilityRole="button" style={[design.detailRow, { borderBottomWidth: 0 }]}

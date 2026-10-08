@@ -9,6 +9,7 @@ import {
   formatDeviceTime,
 } from './deviceUi';
 import CameraPreviewPanel from './CameraPreviewPanel';
+import DeviceIncidentReplayPanel from './DeviceIncidentReplayPanel';
 import DeviceObservedStatePanel from './DeviceObservedStatePanel';
 import SensorHistoryPanel from './SensorHistoryPanel';
 import './community-device-detail.css';
@@ -81,7 +82,6 @@ export default function DeviceDetailPanel({
     return (
       <section className="devices-panel device-detail-panel devices-empty">
         <strong>请选择设备</strong>
-        <span>从左侧真实设备档案中选择一项查看详情。</span>
       </section>
     );
   }
@@ -111,7 +111,6 @@ export default function DeviceDetailPanel({
         <div>
           <p className="devices-eyebrow">STABLE DEVICE PROFILE</p>
           <h2 id="device-detail-title">{device.display_name}</h2>
-          <span className="detail-device-id">{device.device_id}</span>
         </div>
         <div className="detail-status-stack">
           <span className={`status-pill status-${device.connection_status}`}>
@@ -205,6 +204,11 @@ export default function DeviceDetailPanel({
           )}
           {device.device_type.toLowerCase() === 'camera' && <CameraPreviewPanel device={device} />}
         </div>
+
+        {activeTab === 'overview' && <DeviceIncidentReplayPanel
+          deviceId={device.device_id}
+          deviceName={device.display_name}
+        />}
 
         <div className="detail-section">
           <div className="detail-section-title"><h3>生命周期与历史引用</h3></div>

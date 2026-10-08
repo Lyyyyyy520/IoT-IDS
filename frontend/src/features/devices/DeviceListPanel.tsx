@@ -1,12 +1,6 @@
 import type { DeviceListItem } from '../../api/v3Devices';
 import type { DeviceFilters } from './useDeviceWorkspace';
-import {
-  CONNECTION_LABELS,
-  IMPORTANCE_LABELS,
-  MODE_LABELS,
-  SOURCE_LABELS,
-  formatDeviceTime,
-} from './deviceUi';
+import { formatDeviceTime } from './deviceUi';
 
 interface Props {
   filters: DeviceFilters;
@@ -132,32 +126,25 @@ export default function DeviceListPanel({
         ) : items.length === 0 && !error ? (
           <div className="devices-empty">
             <strong>没有匹配的真实设备</strong>
-            <span>当前筛选条件未返回设备，页面不会填充示例数据。</span>
           </div>
         ) : items.map((device) => (
-          <button
-            type="button"
+          <div
             role="listitem"
             key={device.device_id}
-            className={`v3-device-card ${selectedId === device.device_id ? 'is-selected' : ''}`}
-            onClick={() => onSelect(device.device_id)}
           >
-            <span className={`device-status-mark status-${device.connection_status}`} aria-hidden="true" />
-            <span className="v3-device-card-main">
-              <span className="v3-device-name">{device.display_name}</span>
-              <span className="v3-device-id">{device.device_id}</span>
-              <span className="v3-device-meta">
-                {device.device_type} · {device.area_id ?? '未分区'} · {SOURCE_LABELS[device.profile_source]}
+            <button
+              type="button"
+              className={`device-inventory-row ${selectedId === device.device_id ? 'is-selected' : ''}`}
+              onClick={() => onSelect(device.device_id)}
+              aria-label={`查看或管理设备 ${device.display_name}`}
+            >
+              <span className="device-inventory-row-main">
+                <span className="v3-device-name">{device.display_name}</span>
+                <span className="device-inventory-manage-link">查看/管理设备</span>
               </span>
-              <span className="v3-device-ip">{device.ip_address ?? '尚无 IP'}</span>
-            </span>
-            <span className="v3-device-card-side">
-              <span className={`status-${device.connection_status}`}>{CONNECTION_LABELS[device.connection_status]}</span>
-              <span>{MODE_LABELS[device.operation_mode]}</span>
-              <span>{IMPORTANCE_LABELS[device.importance]} · v{device.profile_version}</span>
-              {device.lifecycle_status === 'retired' && <span className="lifecycle-retired">已退役</span>}
-            </span>
-          </button>
+              <span className="v3-device-meta">{device.device_type}</span>
+            </button>
+          </div>
         ))}
       </div>
 

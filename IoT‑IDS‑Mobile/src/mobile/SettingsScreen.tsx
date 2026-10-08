@@ -26,7 +26,6 @@ export default function SettingsScreen() {
     <View style={design.detailSection}>
       <Text style={design.detailSectionTitle}>服务器连接</Text>
       <Text style={ui.body}>{auth.config?.baseUrl ?? '尚未配置'}</Text>
-      {auth.config?.insecureLan && <Text style={ui.warning}>HTTP 开发模式：连接未加密</Text>}
       <Text style={ui.muted}>移动端使用独立授权，不使用 Web 管理员登录。</Text>
     </View>
     <TouchableOpacity accessibilityRole="button" style={design.ctaPurple} onPress={() => navigation.navigate('提交求助', {})}>

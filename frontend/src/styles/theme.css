@@ -183,6 +183,14 @@ html, body, #root {
 
 .ant-btn { min-height: 48px; padding-inline: 18px; }
 .ant-input, .ant-input-affix-wrapper, .ant-picker { min-height: 48px; }
+.login-card .ant-input-affix-wrapper,
+.login-card .ant-btn { min-height: 40px; }
+.login-card .ant-input-affix-wrapper { height: 40px; }
+.login-card .ant-input-affix-wrapper .ant-input {
+  height: auto;
+  min-height: 0;
+  background: transparent !important;
+}
 .ant-select-single { min-height: 48px; }
 .ant-select-single .ant-select-selector { min-height: 48px !important; align-items: center; }
 .ant-card-head-title { font-size: 22px; line-height: 1.35; }
