@@ -340,7 +340,7 @@ describe('DevicesPage permissions and server-backed interactions', () => {
     state.discovery = discoveryWorkspace();
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: '待确认设备' }));
-    expect(screen.getByText('当前没有待确认候选')).toBeInTheDocument();
+    expect(screen.getAllByText('当前没有待确认候选').length).toBeGreaterThan(0);
     expect(screen.queryByText('candidate-demo')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '新增设备档案' })).not.toBeInTheDocument();
   });

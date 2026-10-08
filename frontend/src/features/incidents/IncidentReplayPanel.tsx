@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { IncidentApiError, v3IncidentsApi } from '../../api/v3Incidents';
 import type { IncidentReplay } from '../../api/v3Incidents';
 import { STATUS_LABELS, localTime } from './incidentUi';
@@ -17,7 +17,7 @@ type ReplayEvent =
   | { kind: 'network'; at: string; label: string; text: string }
   | { kind: 'gap'; at: string; label: string; text: string };
 
-function replayEvents(replay: IncidentReplay): ReplayEvent[] {
+function replayEvents(replay: IncidentReplay, focusDeviceId?: string): ReplayEvent[] {
   const names = new Map(replay.devices.map((device) => [device.device_id, device.display_name]));
   const label = (deviceId: string) => names.get(deviceId) ?? deviceId;
   return [
@@ -31,31 +31,35 @@ function replayEvents(replay: IncidentReplay): ReplayEvent[] {
         item.admin_details,
       ].filter(Boolean).join(' · '),
     })),
-    ...replay.devices.flatMap((device) => device.observations.flatMap<ReplayEvent>((point) => {
-      const values = [
-        point.temperature_c === null ? null : `温度 ${point.temperature_c} °C`,
-        point.humidity_percent === null ? null : `湿度 ${point.humidity_percent} %RH`,
-      ].filter(Boolean);
-      return values.length ? [{
-        kind: 'observation',
-        at: point.received_at,
-        label: device.display_name,
-        text: values.join(' · '),
-      }] : [];
-    })),
-    ...replay.connection_status_changes.map<ReplayEvent>((item) => ({
+    ...replay.devices
+      .filter((device) => !focusDeviceId || device.device_id === focusDeviceId)
+      .flatMap((device) => device.observations.flatMap<ReplayEvent>((point) => {
+        const values = [
+          point.temperature_c === null ? null : `温度 ${point.temperature_c} °C`,
+          point.humidity_percent === null ? null : `湿度 ${point.humidity_percent} %RH`,
+        ].filter(Boolean);
+        return values.length ? [{
+          kind: 'observation',
+          at: point.received_at,
+          label: device.display_name,
+          text: values.join(' · '),
+        }] : [];
+      })),
+    ...replay.connection_status_changes.filter((item) => !focusDeviceId || item.device_id === focusDeviceId).map<ReplayEvent>((item) => ({
       kind: 'status',
       at: item.occurred_at,
       label: label(item.device_id),
       text: `连接状态 ${item.from_status} → ${item.to_status}（${item.source === 'timeout' ? '超时判定' : '上报'}）`,
     })),
-    ...replay.relationships.map<ReplayEvent>((item) => ({
+    ...replay.relationships.filter((item) => !focusDeviceId
+      || item.source_device_id === focusDeviceId
+      || item.target_device_id === focusDeviceId).map<ReplayEvent>((item) => ({
       kind: 'network',
       at: item.bucket_start,
       label: '已观测通信关系',
       text: `${label(item.source_device_id)} → ${label(item.target_device_id)} · ${item.protocol} · ${item.flows} 条流 · ${item.bytes} 字节`,
     })),
-    ...replay.gaps.map<ReplayEvent>((item) => ({
+    ...replay.gaps.filter((item) => !focusDeviceId || item.device_id === focusDeviceId).map<ReplayEvent>((item) => ({
       kind: 'gap',
       at: item.from,
       label: '数据缺口',
@@ -64,45 +68,71 @@ function replayEvents(replay: IncidentReplay): ReplayEvent[] {
   ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }
 
-export function IncidentReplayPanel({ incidentId }: { incidentId: string }) {
+export function IncidentReplayPanel({
+  incidentId,
+  focusDeviceId,
+  focusDeviceName,
+}: {
+  incidentId: string;
+  focusDeviceId?: string;
+  focusDeviceName?: string;
+}) {
   const [replay, setReplay] = useState<IncidentReplay | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const requestController = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    let mounted = true;
+    const controller = new AbortController();
+    requestController.current?.abort();
+    requestController.current = controller;
     setBusy(true);
     setError(null);
-    v3IncidentsApi.getIncidentReplay(incidentId)
-      .then((value) => { if (mounted) setReplay(value); })
+    setReplay(null);
+    setFrom('');
+    setTo('');
+    v3IncidentsApi.getIncidentReplay(incidentId, undefined, controller.signal)
+      .then((value) => { if (!controller.signal.aborted) setReplay(value); })
       .catch((cause: unknown) => {
-        if (mounted) setError(cause instanceof IncidentApiError ? cause.message : '事件回放读取失败');
+        if (!controller.signal.aborted) setError(cause instanceof IncidentApiError ? cause.message : '事件回放读取失败');
       })
-      .finally(() => { if (mounted) setBusy(false); });
-    return () => { mounted = false; };
+      .finally(() => { if (!controller.signal.aborted) setBusy(false); });
+    return () => {
+      controller.abort();
+      if (requestController.current === controller) requestController.current = null;
+    };
   }, [incidentId]);
 
   const submit = () => {
     const range: { from?: string; to?: string } = {};
     if (from) range.from = utc(from);
     if (to) range.to = utc(to);
+    requestController.current?.abort();
+    const controller = new AbortController();
+    requestController.current = controller;
     setBusy(true);
     setError(null);
-    v3IncidentsApi.getIncidentReplay(incidentId, range)
-      .then(setReplay)
-      .catch((cause: unknown) => setError(cause instanceof IncidentApiError ? cause.message : '事件回放读取失败'))
-      .finally(() => setBusy(false));
+    v3IncidentsApi.getIncidentReplay(incidentId, range, controller.signal)
+      .then((value) => { if (!controller.signal.aborted) setReplay(value); })
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted) setError(cause instanceof IncidentApiError ? cause.message : '事件回放读取失败');
+      })
+      .finally(() => { if (!controller.signal.aborted) setBusy(false); });
   };
 
-  const events = replay ? replayEvents(replay) : [];
+  const events = replay ? replayEvents(replay, focusDeviceId) : [];
+  const visibleGaps = replay?.gaps.filter((item) => !focusDeviceId || item.device_id === focusDeviceId) ?? [];
+  const visibleDevices = replay?.devices.filter((device) => !focusDeviceId || device.device_id === focusDeviceId) ?? [];
 
   return (
     <section className="incident-replay" aria-labelledby="replay-title">
       <div className="replay-heading">
         <h3 id="replay-title">事件回放时间轴</h3>
-        <p>按统一时间标尺汇总事件发生前后的处置进度、设备传感器读数、连接状态与通信关系变化，并标注数据缺失区间。</p>
+        <p>{focusDeviceId
+          ? `当前设备视角：${focusDeviceName ?? focusDeviceId}。显示该设备的传感器读数、连接状态、数据缺口及相关通信关系，并保留事件处置进度。`
+          : '按统一时间标尺汇总事件发生前后的处置进度、设备传感器读数、连接状态与通信关系变化，并标注数据缺失区间。'}</p>
       </div>
       <div className="replay-controls">
         <label><span>开始时间</span><input type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
@@ -119,9 +149,9 @@ export function IncidentReplayPanel({ incidentId }: { incidentId: string }) {
             <span>{replay.capabilities.connection_status_history ? '连接状态历史可用' : '连接状态历史未配置'}</span>
             <span>{replay.capabilities.camera_media ? '含摄像头画面' : '摄像头画面未留存'}</span>
           </div>
-          {replay.devices.length > 0 && (
+          {visibleDevices.length > 0 && (
             <div className="replay-current-state">
-              {replay.devices.map((device) => (
+              {visibleDevices.map((device) => (
                 <p key={device.device_id}>
                   <strong>{device.display_name}</strong>（{device.device_id} · {device.device_type}）当前连接状态 {device.current_connection_status}
                   {device.current_last_received_at ? ` · 最近上报 ${localTime(device.current_last_received_at)}` : ''}
@@ -130,7 +160,7 @@ export function IncidentReplayPanel({ incidentId }: { incidentId: string }) {
             </div>
           )}
           {replay.truncated && <div className="replay-gap-note">事件较多，时间轴结果已截断。</div>}
-          {replay.gaps.length > 0 && <div className="replay-gap-note">时间轴中存在 {replay.gaps.length} 段数据缺失区间，已在下方标注。</div>}
+          {visibleGaps.length > 0 && <div className="replay-gap-note">{focusDeviceId ? '当前设备视角中' : '时间轴中'}存在 {visibleGaps.length} 段数据缺失区间，已在下方标注。</div>}
           {events.length === 0 ? (
             <p className="workspace-empty">所选时段没有可回放的留存记录。</p>
           ) : (

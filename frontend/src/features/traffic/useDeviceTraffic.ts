@@ -9,6 +9,7 @@ import {
   type TrafficResolution,
   type TrafficResponse,
 } from '../../api/v3Traffic';
+import type { TrafficRateSample } from './trafficUi';
 
 export type TrafficRangeKey = '15m' | '1h' | '6h' | '24h' | '7d' | '30d';
 export interface TrafficRange {
@@ -45,6 +46,7 @@ interface Options {
 
 const systemNow = () => new Date();
 const noop = () => {};
+const MAX_REALTIME_TREND_SAMPLES = 60;
 
 function normalizedError(error: unknown): TrafficApiError {
   if (error instanceof TrafficApiError) return error;
@@ -85,6 +87,7 @@ export function useDeviceTraffic(options: Options) {
   const [peerSort, setPeerSortState] = useState<PeerSort>('bytes');
   const [peerOffset, setPeerOffset] = useState(0);
   const [realtime, setRealtime] = useState<TrafficResponse | null>(null);
+  const [realtimeSamples, setRealtimeSamples] = useState<TrafficRateSample[]>([]);
   const [history, setHistory] = useState<TrafficResponse | null>(null);
   const [peers, setPeers] = useState<PeersResponse | null>(null);
   const [realtimeError, setRealtimeError] = useState<TrafficApiError | null>(null);
@@ -109,6 +112,7 @@ export function useDeviceTraffic(options: Options) {
 
   useEffect(() => {
     setRealtime(null);
+    setRealtimeSamples([]);
     setHistory(null);
     setPeers(null);
     setRealtimeError(null);
@@ -148,6 +152,20 @@ export function useDeviceTraffic(options: Options) {
         }, controller.signal), deviceId);
         if (stopped) return;
         setRealtime(result);
+        if (result.realtime.available) {
+          const sample: TrafficRateSample = {
+            sampled_at: result.realtime.as_of,
+            tx_bytes_per_second: result.realtime.tx_bytes_per_second,
+            rx_bytes_per_second: result.realtime.rx_bytes_per_second,
+            tx_packets_per_second: result.realtime.tx_packets_per_second,
+            rx_packets_per_second: result.realtime.rx_packets_per_second,
+          };
+          setRealtimeSamples((currentSamples) => {
+            const latest = currentSamples[currentSamples.length - 1];
+            if (latest?.sampled_at === sample.sampled_at) return currentSamples;
+            return [...currentSamples, sample].slice(-MAX_REALTIME_TREND_SAMPLES);
+          });
+        }
         setRealtimeError(null);
         setRealtimeUpdatedAt(nowRef.current().toISOString());
         failures = 0;
@@ -324,6 +342,7 @@ export function useDeviceTraffic(options: Options) {
     range: selectedRange,
     setRange,
     realtime,
+    realtimeSamples,
     history,
     peers,
     realtimeError,

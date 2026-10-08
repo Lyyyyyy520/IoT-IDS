@@ -29,6 +29,7 @@ export default function DevicesPage() {
   const [workspaceTab, setWorkspaceTab] = useState<'trusted' | 'discovery'>('trusted');
   const [notice, setNotice] = useState<{ kind: 'success' | 'warning'; message: string } | null>(null);
   const lastDiscoveryEventId = useRef<number | null>(null);
+  const userChangedDeviceFilters = useRef(false);
 
   const updateQuerySelection = useCallback((deviceId: string | null) => {
     setSearchParams((current) => {
@@ -54,6 +55,16 @@ export default function DevicesPage() {
   });
   const discovery = useDiscoveryWorkspace({ active: workspaceTab === 'discovery' });
   const monitor = useMonitorStore({ enabled: workspaceTab === 'discovery' });
+
+  useEffect(() => {
+    if (workspaceTab !== 'trusted' || workspace.listLoading) return;
+    if (!userChangedDeviceFilters.current && requestedDeviceId && workspace.selectedId === requestedDeviceId) return;
+    const selectionIsVisible = workspace.items.some((item) => item.device_id === workspace.selectedId);
+    if (selectionIsVisible) return;
+    const firstDevice = workspace.items[0];
+    if (firstDevice) void workspace.selectDevice(firstDevice.device_id);
+    else if (workspace.selectedId) void workspace.selectDevice(null);
+  }, [workspace.items, workspace.listLoading, workspace.selectDevice, workspace.selectedId, workspaceTab]);
 
   useEffect(() => {
     const event = monitor.recentEvents[0];
@@ -121,6 +132,7 @@ export default function DevicesPage() {
 
   const listError = workspace.listError ? deviceErrorMessage(workspace.listError) : null;
   const detailError = workspace.detailError ? deviceErrorMessage(workspace.detailError) : null;
+  const selectedDeviceDetail = workspace.detail?.device_id === workspace.selectedId ? workspace.detail : null;
 
   return (
     <main className="devices-workspace">
@@ -128,7 +140,6 @@ export default function DevicesPage() {
         <div>
           <p className="devices-eyebrow">ADMINISTRATIVE DEVICE CONTROL</p>
           <h1>v3 设备管理工作区</h1>
-          <p>稳定身份、真实连接状态、生命周期与历史证据分离管理</p>
         </div>
         <div className="devices-page-actions">
           <span className="workspace-role">{isAdmin ? '管理员 · 可写' : '值守人员 · 只读'}</span>
@@ -153,9 +164,9 @@ export default function DevicesPage() {
 
       <nav className="devices-workspace-tabs" aria-label="设备工作区">
         <button type="button" aria-current={workspaceTab === 'trusted' ? 'page' : undefined}
-          className={workspaceTab === 'trusted' ? 'active' : ''} onClick={() => setWorkspaceTab('trusted')}>可信设备</button>
+          className={workspaceTab === 'trusted' ? 'active' : ''} onClick={() => { if (workspaceTab !== 'trusted') void discovery.selectCandidate(null); setWorkspaceTab('trusted'); }}>可信设备</button>
         <button type="button" aria-current={workspaceTab === 'discovery' ? 'page' : undefined}
-          className={workspaceTab === 'discovery' ? 'active' : ''} onClick={() => setWorkspaceTab('discovery')}>待确认设备</button>
+          className={workspaceTab === 'discovery' ? 'active' : ''} onClick={() => { if (workspaceTab !== 'discovery') void workspace.selectDevice(null); setWorkspaceTab('discovery'); }}>待确认设备</button>
       </nav>
 
       {workspaceTab === 'discovery' ? (
@@ -169,8 +180,8 @@ export default function DevicesPage() {
       ) : <div className="devices-grid">
         <DeviceListPanel
           filters={workspace.filters}
-          onFilters={workspace.patchFilters}
-          onClearFilters={workspace.clearFilters}
+          onFilters={(filters) => { userChangedDeviceFilters.current = true; workspace.patchFilters(filters); }}
+          onClearFilters={() => { userChangedDeviceFilters.current = true; workspace.clearFilters(); }}
           items={workspace.items}
           total={workspace.total}
           selectedId={workspace.selectedId}
@@ -187,7 +198,7 @@ export default function DevicesPage() {
           error={listError}
         />
         <DeviceDetailPanel
-          device={workspace.detail}
+          device={selectedDeviceDetail}
           loading={workspace.detailLoading}
           error={detailError}
           isAdmin={isAdmin}
@@ -200,10 +211,10 @@ export default function DevicesPage() {
           onHistoryConflict={() => void workspace.refreshDetail()}
           activeTab={detailTab}
           onTabChange={setDetailTab}
-          trafficContent={workspace.detail ? (
+          trafficContent={selectedDeviceDetail ? (
             <Suspense fallback={<div className="traffic-loading">正在加载流量分析模块…</div>}>
               <DeviceTrafficPanel
-                device={workspace.detail}
+                device={selectedDeviceDetail}
                 isAdmin={isAdmin}
                 active={detailTab === 'traffic'}
                 onSelectPeer={(deviceId) => {

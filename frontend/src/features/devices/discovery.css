@@ -111,3 +111,26 @@
 .candidate-evidence-grid dd, .candidate-observation span,
 .candidate-action-card p { overflow-wrap: anywhere; line-height: 1.5; }
 
+/* Keep the candidate filters and their actions in one row on desktop. */
+.discovery-filters {
+  grid-template-columns: minmax(210px, 1.6fr) repeat(3, minmax(150px, 1fr)) auto;
+  align-items: end;
+}
+.discovery-filter-actions { grid-column: auto; justify-content: flex-end; white-space: nowrap; }
+@media (max-width: 1200px) {
+  .discovery-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .discovery-filter-actions { grid-column: 1 / -1; justify-content: flex-start; }
+}
+@media (max-width: 780px) {
+  .discovery-filters { grid-template-columns: minmax(0, 1fr); }
+  .discovery-filter-actions { grid-column: auto; }
+}
+
+/* Fit candidate filters in the left-hand inventory column. */
+.discovery-workspace .discovery-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.discovery-workspace .discovery-filter-actions { grid-column: 1 / -1; justify-content: flex-end; }
+@media (max-width: 780px) {
+  .discovery-workspace .discovery-filters { grid-template-columns: minmax(0, 1fr); }
+  .discovery-workspace .discovery-filter-actions { grid-column: auto; justify-content: flex-start; }
+}
+

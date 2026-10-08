@@ -36,7 +36,7 @@ export const validSnapshot: MonitorSnapshot = {
       { id: 'light-01', label: '路灯', type: 'light', status: 'online', risk_level: 0, risk_name: '正常(绿)', ip: '192.168.4.12' },
     ],
     edges: [
-      { source: 'camera-01', target: 'light-01', bytes: 120, packets: 3, protocols: ['coap'] },
+      { source: 'camera-01', target: 'light-01', bytes: 120, packets: 3, protocols: ['coap'], relation_type: 'observed_traffic' },
     ],
     availability: { source: 'v3_device_traffic_peer_minutes', reason: null },
   },

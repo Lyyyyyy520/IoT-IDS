@@ -22,14 +22,27 @@ describe('pairing and server configuration', () => {
     expect(normalizePairingCode('abcd- efgh')).toBe('ABCDEFGH');
     expect(formatPairingCode('abcd efgh')).toBe('ABCD-EFGH');
   });
-  it('rejects credentials, paths, fragments and HTTP outside explicit development mode', () => {
+  it('accepts HTTP and HTTPS without a development-mode switch', () => {
     expect(validateServerUrl('https://example.test/', false)).toBe('https://example.test');
+    expect(validateServerUrl('http://example.test/', false)).toBe('http://example.test');
+    expect(validateServerUrl('http://192.168.1.20:5000/', false)).toBe('http://192.168.1.20:5000');
+    expect(validateServerUrl('http://localhost:5000/', false)).toBe('http://localhost:5000');
+    const devFlag = Object.getOwnPropertyDescriptor(global, '__DEV__');
+    try {
+      Object.defineProperty(global, '__DEV__', { value: false, configurable: true });
+      expect(validateServerUrl('http://example.test', false)).toBe('http://example.test');
+    } finally {
+      if (devFlag) Object.defineProperty(global, '__DEV__', devFlag);
+      else Reflect.deleteProperty(global, '__DEV__');
+    }
+  });
+  it('rejects credentials, paths, fragments, query strings and non-web protocols', () => {
     expect(() => validateServerUrl('https://u:p@example.test', false)).toThrow();
     expect(() => validateServerUrl('https://example.test/api', false)).toThrow();
     expect(() => validateServerUrl('https://example.test/#secret', false)).toThrow();
-    expect(() => validateServerUrl('http://example.test', false)).toThrow();
-    expect(() => validateServerUrl('http://example.test', true)).toThrow();
-    expect(validateServerUrl('http://192.168.1.20:5000/', true)).toBe('http://192.168.1.20:5000');
+    expect(() => validateServerUrl('http://example.test/?token=secret', false)).toThrow();
+    expect(() => validateServerUrl('ftp://example.test', false)).toThrow();
+    expect(() => validateServerUrl('file:///tmp/server', false)).toThrow();
   });
   it('removes legacy auth keys and only persists public server config', async () => {
     await clearLegacyAuthentication();

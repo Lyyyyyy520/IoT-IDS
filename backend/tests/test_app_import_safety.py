@@ -26,7 +26,9 @@ def test_importing_app_creates_no_database_and_starts_no_thread(tmp_path):
         env=environment,
         text=True,
         capture_output=True,
-        timeout=30,
+        # A cold Windows import loads the full route/dependency graph and can
+        # exceed 30 seconds on slower hosts; retain a finite hang guard.
+        timeout=60,
         check=False,
     )
 

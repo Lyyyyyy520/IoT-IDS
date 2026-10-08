@@ -44,7 +44,10 @@ export function IncidentListPanel({
     <section className="incident-panel incident-list-panel" aria-labelledby="incident-list-title">
       <header className="incident-panel-heading">
         <div><p>RECORDED INCIDENTS</p><h2 id="incident-list-title">已记录事件</h2></div>
-        <button type="button" className="ghost-button" onClick={onRefresh} disabled={loading}>刷新</button>
+        <div className="incident-list-heading-actions">
+          <button type="button" className="ghost-button" onClick={onRefresh} disabled={loading}>刷新</button>
+          <button type="button" className="ghost-button" onClick={onClear}>清空筛选</button>
+        </div>
       </header>
       <div className="incident-filters">
         <label className="filter-wide"><span>搜索</span><input type="search" value={filters.search} onChange={(e) => patch({ search: e.target.value })} placeholder="标题、类型或事件 ID" /></label>
@@ -54,7 +57,6 @@ export function IncidentListPanel({
         <label><span>设备 ID</span><input value={filters.deviceId} onChange={(e) => patch({ deviceId: e.target.value })} /></label>
         <label><span>开始时间</span><input type="datetime-local" value={filters.from} onChange={(e) => patch({ from: e.target.value })} /></label>
         <label><span>结束时间</span><input type="datetime-local" value={filters.to} onChange={(e) => patch({ to: e.target.value })} /></label>
-        <button type="button" className="ghost-button clear-filter" onClick={onClear}>清空筛选</button>
       </div>
       <div className="incident-report-export">
         <span>导出当前筛选的告警摘要（{total} 条）</span>
@@ -66,7 +68,7 @@ export function IncidentListPanel({
         {loading && items.length === 0 ? <div className="workspace-empty">正在读取真实事件…</div> : error && items.length === 0 ? (
           <div className="workspace-empty"><strong>事件列表暂不可用</strong><span>修复连接或权限后可重新读取。</span></div>
         ) : items.length === 0 ? (
-          <div className="workspace-empty"><strong>当前没有已记录事件</strong><span>这不代表系统安全或没有攻击。</span></div>
+          <div className="workspace-empty"><strong>当前没有已记录事件</strong></div>
         ) : items.map((item) => (
           <button type="button" className={`incident-list-row ${selectedId === item.incident_id ? 'selected' : ''}`} onClick={() => onSelect(item.incident_id)} key={item.incident_id}>
             <span className={`severity-marker severity-${item.severity}`}>{SEVERITY_LABELS[item.severity]}</span>
@@ -101,7 +103,7 @@ export function IncidentDetailPanel({
   const navigate = useNavigate();
   if (loading && !detail) return <section className="incident-panel incident-detail-panel"><div className="workspace-empty">正在读取事件详情…</div></section>;
   if (error && !detail) return <section className="incident-panel incident-detail-panel"><div className="workspace-inline-error" role="alert">{error}</div></section>;
-  if (!detail) return <section className="incident-panel incident-detail-panel"><div className="workspace-empty"><strong>选择事件查看详情</strong><span>详情、时间线和处置操作均来自后端。</span></div></section>;
+  if (!detail) return <section className="incident-panel incident-detail-panel"><div className="workspace-empty"><strong>选择事件查看详情</strong></div></section>;
   const grouped = (role: keyof typeof ROLE_LABELS) => detail.devices.filter((item) => item.incident_role === role);
   return (
     <section className="incident-panel incident-detail-panel" aria-labelledby="incident-detail-title">
