@@ -55,9 +55,22 @@ export default function DeviceTrafficPanel({ device, isAdmin, active, onSelectPe
   const latestSample = traffic.realtime?.freshness.latest_sample_at
     ?? traffic.history?.freshness.latest_sample_at
     ?? null;
+  const realtimeSamples = traffic.realtimeSamples ?? [];
   const staleAfterMs = (traffic.history?.freshness.stale_after_seconds ?? 15) * 1000;
   const freshness = freshnessKind(latestSample, new Date(), staleAfterMs);
   const historyPoints = buildTrendData(traffic.history, trendMetric);
+  const realtimeTrendHasTraffic = realtimeSamples.some((sample) => (
+    trendMetric === 'bytes'
+      ? sample.tx_bytes_per_second > 0 || sample.rx_bytes_per_second > 0
+      : sample.tx_packets_per_second > 0 || sample.rx_packets_per_second > 0
+  ));
+  const hasRealtimeTrend = Boolean(
+    realtime?.available && realtimeSamples.length >= 2 && realtimeTrendHasTraffic,
+  );
+  const hasHistoryTrend = Boolean(
+    traffic.history?.availability.available && historyPoints.length > 0,
+  );
+  const useRealtimeTrend = hasRealtimeTrend;
   const protocolRows = useMemo(
     () => protocolBreakdown(traffic.history?.protocols ?? [], protocolMetric),
     [protocolMetric, traffic.history?.protocols],
@@ -145,7 +158,12 @@ export default function DeviceTrafficPanel({ device, isAdmin, active, onSelectPe
 
       <section className="traffic-analysis-section" aria-labelledby="history-title">
         <div className="traffic-section-heading traffic-filter-heading">
-          <div><h3 id="history-title">历史趋势</h3><span>仅绘制后端返回的时间桶，缺失时间不会补零。</span></div>
+          <div>
+            <h3 id="history-title">流量趋势</h3>
+            <span>{useRealtimeTrend
+              ? '当前设备有流量；显示最近的后端实时速率样本。'
+              : '仅绘制后端返回的时间桶，缺失时间不会补零。'}</span>
+          </div>
           <div className="traffic-controls">
             <label>时间范围
               <select
@@ -168,18 +186,16 @@ export default function DeviceTrafficPanel({ device, isAdmin, active, onSelectPe
           <div className="traffic-inline-error" role="alert">{errorWithRequest(traffic.historyError)}</div>
         )}
         {traffic.historyLoading && !traffic.history && <div className="traffic-loading">正在读取历史分钟聚合…</div>}
-        {traffic.history && !traffic.history.availability.available ? (
-          <div className="traffic-empty-state">
-            <strong>{traffic.history.availability.reason === 'no_samples' ? '尚未收到流量样本' : '历史聚合不可用'}</strong>
-            <span>{traffic.history.availability.reason === 'no_samples'
-              ? '当前窗口没有可绘制的真实聚合数据。'
-              : `服务原因：${traffic.history.availability.reason ?? '未提供'}`}</span>
-          </div>
-        ) : traffic.history && historyPoints.length ? (
+        {hasHistoryTrend && !useRealtimeTrend ? (
           <>
-            <div className="traffic-chart-shell" data-testid="traffic-chart-data" data-points={historyPoints.length}>
+            <div
+              className="traffic-chart-shell"
+              data-testid="traffic-chart-data"
+              data-source="history"
+              data-points={historyPoints.length}
+            >
               <Suspense fallback={<div className="traffic-loading">正在加载图表模块…</div>}>
-                <TrafficTrendChart response={traffic.history} metric={trendMetric} />
+                <TrafficTrendChart response={traffic.history!} metric={trendMetric} />
               </Suspense>
             </div>
             <div className="traffic-table-wrap">
@@ -198,6 +214,30 @@ export default function DeviceTrafficPanel({ device, isAdmin, active, onSelectPe
               </table>
             </div>
           </>
+        ) : useRealtimeTrend ? (
+          <div
+            className="traffic-chart-shell"
+            data-testid="traffic-chart-data"
+            data-source="realtime"
+            data-points={realtimeSamples.length}
+          >
+            <Suspense fallback={<div className="traffic-loading">正在加载图表模块…</div>}>
+              <TrafficTrendChart realtimeSamples={realtimeSamples} metric={trendMetric} />
+            </Suspense>
+          </div>
+        ) : traffic.history ? (
+          <div className="traffic-empty-state">
+            <strong>{traffic.history.availability.reason === 'no_samples'
+              ? realtime?.available ? '正在积累流量趋势样本' : '尚未收到流量样本'
+              : traffic.history.availability.available ? '暂无可绘制趋势' : '历史聚合不可用'}</strong>
+            <span>{traffic.history.availability.reason === 'no_samples'
+              ? realtime?.available
+                ? '当前实时速率样本尚未形成流量折线。'
+                : '当前窗口没有可绘制的真实流量数据。'
+              : traffic.history.availability.available
+                ? '收到连续且包含流量的真实样本后会显示折线图。'
+                : `服务原因：${traffic.history.availability.reason ?? '未提供'}`}</span>
+          </div>
         ) : null}
       </section>
 

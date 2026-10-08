@@ -171,7 +171,6 @@ export default function SystemHealthPage() {
         <div>
           <p className="system-health-eyebrow">OPERATIONS / READ ONLY</p>
           <h1>系统健康</h1>
-          <p>查看运行组件、数据库完整性和最近维护记录。页面只读取健康 API，不执行维护操作。</p>
         </div>
         <Button icon={<ReloadOutlined />} onClick={() => void refresh()} loading={loading}>刷新状态</Button>
       </section>

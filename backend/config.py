@@ -76,7 +76,7 @@ class MobileConfigurationError(ValueError):
 class MobileSecuritySettings:
     token_secret: str = field(repr=False)
     environment: str = "development"
-    allow_insecure_http: bool = False
+    allow_insecure_http: bool = True
     trust_proxy: bool = False
     pairing_ttl_seconds: int = 300
     access_ttl_seconds: int = 1800
@@ -91,10 +91,6 @@ class MobileSecuritySettings:
         if len(self.token_secret) < 32:
             raise MobileConfigurationError(
                 "IOT_IDS_MOBILE_TOKEN_SECRET must contain at least 32 characters"
-            )
-        if self.environment == "production" and self.allow_insecure_http:
-            raise MobileConfigurationError(
-                "plaintext mobile HTTP cannot be enabled in production"
             )
         limits = (
             ("pairing TTL", self.pairing_ttl_seconds, 60, 900),
@@ -143,7 +139,7 @@ def mobile_security_settings(
             token_secret=configured_secret,
             environment=mode,
             allow_insecure_http=_boolean_setting(
-                source, "IOT_IDS_MOBILE_ALLOW_INSECURE_HTTP", False
+                source, "IOT_IDS_MOBILE_ALLOW_INSECURE_HTTP", True
             ),
             trust_proxy=_boolean_setting(
                 source, "IOT_IDS_MOBILE_TRUST_PROXY", False

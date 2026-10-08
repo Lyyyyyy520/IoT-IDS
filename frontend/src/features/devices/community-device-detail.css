@@ -3,7 +3,7 @@
   padding: 22px; overflow: auto; background: rgba(2, 8, 13, .82); backdrop-filter: blur(4px);
 }
 .community-device-dialog {
-  width: min(1040px, 100%); max-height: min(94vh, 1120px); overflow-y: auto;
+  position: relative; width: min(1040px, 100%); max-height: min(94vh, 1120px); overflow-y: auto;
   border: 1px solid #315369; border-radius: 10px; background: #0c1721;
   color: #dceaf2; box-shadow: 0 24px 70px rgba(0, 0, 0, .5);
 }
@@ -99,8 +99,10 @@
 .community-device-dialog .camera-unavailable { color: #9bb0bc; }
 .community-device-dialog .camera-empty { display: flex; flex-direction: column; gap: 8px; }
 .community-device-dialog .camera-empty strong { color: #dceaf2; font-size: 17px; }
-.community-device-dialog .camera-image-frame { position: relative; display: grid; place-items: center; min-height: 230px; overflow: hidden; border: 1px solid #294657; border-radius: 6px; background: #000; }
+.community-device-dialog .camera-image-frame { position: relative; display: grid; place-items: center; width: 100%; min-height: 230px; overflow: hidden; border: 1px solid #294657; border-radius: 6px; padding: 0; color: inherit; background: #000; cursor: zoom-in; }
 .community-device-dialog .camera-image-frame img { display: block; width: 100%; max-height: 520px; object-fit: contain; }
+.community-device-dialog .camera-image-frame.is-expanded { position: absolute; z-index: 5; inset: 0; width: auto; height: auto; min-height: 0; border: 0; border-radius: inherit; cursor: zoom-out; }
+.community-device-dialog .camera-image-frame.is-expanded img { height: 100%; max-height: none; object-fit: contain; }
 .community-device-dialog .camera-image-loading { position: absolute; inset: auto 0 0; padding: 9px; color: #e7f0f4; background: rgba(0, 0, 0, .75); text-align: center; font-size: 16px; }
 .community-device-dialog .camera-frame-time { margin: 9px 0 0; padding: 0; color: #9eb2be; background: transparent; }
 
@@ -124,6 +126,42 @@
 .observed-change-list ul span { color: #8fd2d6; overflow-wrap: anywhere; }
 .observed-change-list small { color: #8299a6; font-size: 16px; }
 
+.device-incident-replay { min-width: 0; }
+.device-replay-context,
+.device-replay-hint,
+.device-replay-empty { margin: 8px 0; color: var(--text-secondary); font-size: var(--font-secondary); line-height: 1.5; }
+.device-replay-empty { padding: 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-base); }
+.device-replay-select { display: grid; gap: 6px; max-width: 640px; margin: 12px 0; color: var(--text-secondary); font-size: var(--font-secondary); }
+.device-replay-select select { min-width: 0; min-height: 42px; border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px; color: var(--text-primary); background: var(--bg-base); font: inherit; }
+.device-incident-replay button:focus-visible,
+.device-incident-replay select:focus-visible,
+.device-incident-replay input:focus-visible { outline: 3px solid var(--accent-cyan); outline-offset: 2px; }
+.device-incident-replay .incident-replay { min-width: 0; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-color); }
+.device-incident-replay .replay-heading h3 { margin: 0 0 5px; color: var(--text-primary); font-size: 20px; line-height: 1.35; }
+.device-incident-replay .replay-heading p,
+.device-incident-replay .replay-hint { margin: 0 0 9px; color: var(--text-secondary); font-size: var(--font-secondary); line-height: 1.5; }
+.device-incident-replay .replay-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto; align-items: end; gap: 9px; margin: 12px 0; }
+.device-incident-replay .replay-controls label { display: grid; gap: 5px; min-width: 0; color: var(--text-secondary); font-size: var(--font-secondary); }
+.device-incident-replay .replay-controls input { min-width: 0; min-height: 42px; border: 1px solid var(--border-color); border-radius: 6px; padding: 7px 9px; color: var(--text-primary); background: var(--bg-base); font: inherit; }
+.device-incident-replay .replay-controls button { min-height: 42px; border: 1px solid var(--accent-blue); border-radius: 6px; padding: 7px 12px; color: var(--text-primary); background: var(--bg-elevated); font: inherit; cursor: pointer; }
+.device-incident-replay .replay-capabilities,
+.device-incident-replay .replay-current-state { display: flex; flex-wrap: wrap; gap: 7px 14px; margin: 10px 0; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-secondary); background: var(--bg-base); font-size: var(--font-secondary); }
+.device-incident-replay .replay-current-state { flex-direction: column; }
+.device-incident-replay .replay-current-state strong,
+.device-incident-replay .replay-event strong { color: var(--text-primary); }
+.device-incident-replay .replay-gap-note { margin: 9px 0; padding: 9px 11px; border-left: 3px solid var(--risk-medium); color: var(--text-primary); background: var(--risk-medium-bg); font-size: var(--font-secondary); line-height: 1.5; }
+.device-incident-replay .replay-timeline { display: grid; gap: 0; max-height: 420px; overflow: auto; margin: 12px 0; padding: 0 4px; list-style: none; }
+.device-incident-replay .replay-event { position: relative; display: grid; grid-template-columns: 17px minmax(0, 1fr); gap: 10px; padding: 9px 0; }
+.device-incident-replay .replay-event:not(:last-child)::before { position: absolute; top: 20px; bottom: -4px; left: 6px; width: 2px; background: var(--border-color); content: ''; }
+.device-incident-replay .replay-marker { z-index: 1; width: 13px; height: 13px; margin-top: 4px; border: 2px solid var(--accent-cyan); border-radius: 50%; background: var(--bg-base); }
+.device-incident-replay .replay-network .replay-marker { border-color: var(--accent-blue); }
+.device-incident-replay .replay-gap .replay-marker { border-color: var(--risk-medium); border-style: dashed; }
+.device-incident-replay .replay-event header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; }
+.device-incident-replay .replay-event time,
+.device-incident-replay .replay-event p { margin: 3px 0 0; color: var(--text-secondary); font-size: var(--font-secondary); line-height: 1.45; overflow-wrap: anywhere; }
+.device-incident-replay .replay-event time { color: var(--text-muted); }
+.device-incident-replay .workspace-empty { min-height: 88px; color: var(--text-secondary); }
+
 @media (max-width: 720px) {
   .community-device-overlay { place-items: start center; padding: 8px; }
   .community-device-dialog { max-height: 96dvh; border-radius: 8px; }
@@ -142,6 +180,7 @@
   .community-device-dialog .sensor-trend-grid { grid-template-columns: minmax(0, 1fr); }
   .observed-telemetry-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .community-device-dialog .camera-image-frame { min-height: 180px; }
+  .device-incident-replay .replay-controls { grid-template-columns: minmax(0, 1fr); }
 }
 
 

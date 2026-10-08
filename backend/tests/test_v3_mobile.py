@@ -9,7 +9,7 @@ import pytest
 from werkzeug.security import check_password_hash
 
 from app import create_app, get_service_container
-from config import MobileSecuritySettings
+from config import MobileSecuritySettings, mobile_security_settings
 from database import init_db
 from services.device_traffic import TrafficSample
 from services.incident_workflow import IncidentActor
@@ -851,13 +851,92 @@ def test_missing_database_returns_503_without_creating_file(tmp_path):
     assert not missing.exists()
 
 
-def test_production_settings_require_https_and_a_separate_secret():
+def test_production_settings_require_a_separate_secret_and_allow_http():
     with pytest.raises(Exception):
         MobileSecuritySettings(
             token_secret="short", environment="production"
         ).validate()
-    with pytest.raises(Exception):
-        _settings(environment="production", allow_insecure_http=True).validate()
+    assert _settings(environment="production", allow_insecure_http=True).validate()
+
+
+@pytest.mark.parametrize("environment", ["development", "production"])
+@pytest.mark.parametrize("username", ["张三", "2026", "x"])
+def test_default_http_support_creates_custom_mobile_user_from_lan(
+    mobile_context, environment, username,
+):
+    settings = mobile_security_settings({
+        "IOT_IDS_ENV": environment,
+        "IOT_IDS_MOBILE_TOKEN_SECRET": mobile_context.settings.token_secret,
+    })
+    application = create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "http-mobile-web-session-test-secret",
+            "DATABASE_PATH": str(mobile_context.database_path),
+            "V3_CLOCK": mobile_context.clock,
+        },
+        mobile_settings=settings,
+    )
+    assert application.config["SESSION_COOKIE_SECURE"] is False
+    client = application.test_client()
+    payload = {"username": username, "display_name": "自定义移动用户"}
+    assert client.post("/api/v3/mobile-users", json=payload).status_code == 401
+    _login(client)
+    csrf = _csrf(client)
+    response = client.post(
+        "/api/v3/mobile-users",
+        json=payload,
+        headers={"X-CSRF-Token": csrf},
+        environ_overrides={"REMOTE_ADDR": "192.168.1.50"},
+    )
+    assert response.status_code == 201
+    user = response.get_json()
+    assert user["username"] == username
+    with sqlite3.connect(mobile_context.database_path) as connection:
+        role = connection.execute(
+            "SELECT role FROM users WHERE id=?", (user["user_id"],)
+        ).fetchone()
+    assert role == ("user",)
+    assert user["device_scope_count"] == user["area_scope_count"] == 0
+    assert not {"password", "password_hash"} & user.keys()
+    duplicate = client.post(
+        "/api/v3/mobile-users",
+        json=payload,
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.get_json()["error"]["code"] == "mobile_username_conflict"
+
+
+@pytest.mark.parametrize("username", ["   ", "x" * 65, "name\nuser"])
+def test_custom_mobile_username_still_requires_valid_nonempty_text(mobile_context, username):
+    client = mobile_context.client
+    _login(client)
+    response = client.post(
+        "/api/v3/mobile-users",
+        json={"username": username, "display_name": "住户"},
+        headers={"X-CSRF-Token": _csrf(client)},
+    )
+    assert response.status_code == 400
+
+
+def test_production_can_explicitly_require_https_and_secure_session_cookies(mobile_context):
+    settings = mobile_security_settings({
+        "IOT_IDS_ENV": "production",
+        "IOT_IDS_MOBILE_TOKEN_SECRET": mobile_context.settings.token_secret,
+        "IOT_IDS_MOBILE_ALLOW_INSECURE_HTTP": "false",
+    })
+    application = create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "strict-production-session-test-secret",
+            "DATABASE_PATH": str(mobile_context.database_path),
+        },
+        mobile_settings=settings,
+    )
+    assert application.config["SESSION_COOKIE_SECURE"] is True
+    response = application.test_client().post("/api/v3/pairing/claim", json={})
+    assert response.get_json()["error"]["code"] == "https_required"
 
 
 def test_mobile_only_user_creation_uses_random_hash_and_denies_web_login(

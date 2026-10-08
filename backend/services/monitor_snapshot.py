@@ -61,6 +61,7 @@ def _planned_linkages() -> list[dict]:
                         "bytes": 0,
                         "packets": 0,
                         "protocols": ["coap"],
+                        "relation_type": "configured_linkage",
                     })
         return edges
     except Exception:
@@ -137,6 +138,7 @@ class MonitorSnapshotService:
                 "bytes": int(row["bytes"]),
                 "packets": int(row["packets"]),
                 "protocols": sorted(row["protocols"].split(",")) if row["protocols"] else [],
+                "relation_type": "observed_traffic",
             } for row in edge_rows]
 
         # Merge planned community linkages (联动) not already covered by observed traffic.

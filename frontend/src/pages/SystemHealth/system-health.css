@@ -1,7 +1,7 @@
 .system-health-page{display:flex;flex-direction:column;gap:14px;max-width:1440px;margin:0 auto;padding-bottom:24px;color:var(--text-primary)}
 .system-health-header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:18px 20px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-elevated)}
 .system-health-header h1{margin:4px 0;font-size:22px}
-.system-health-header p:last-child{color:var(--text-secondary);font-size: 16px}
+.system-health-header p:not(.system-health-eyebrow){color:var(--text-secondary);font-size: 16px}
 .system-health-eyebrow{color:var(--accent-cyan);font:700 16px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.12em}
 .health-component-card{min-height:150px;border-color:var(--border-color)!important}
 .health-component-card.status-ready{border-inline-start:3px solid var(--risk-low)!important}
@@ -47,7 +47,7 @@
 .system-health-page { font-size: 18px; line-height: 1.55; gap: 18px; }
 .system-health-header { padding: 22px 24px; min-height: 132px; }
 .system-health-header h1 { font-size: 36px; line-height: 1.2; }
-.system-health-header p:last-child { font-size: 18px; line-height: 1.5; }
+.system-health-header p:not(.system-health-eyebrow) { font-size: 18px; line-height: 1.5; }
 .system-health-summary, .health-detail, .health-reason,
 .health-advice, .health-updated, .health-capacity-grid span,
 .system-health-footnote { font-size: 16px; line-height: 1.55; }
