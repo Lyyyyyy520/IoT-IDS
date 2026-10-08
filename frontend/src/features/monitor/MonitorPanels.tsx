@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
+import type { EChartsInstance } from 'echarts-for-react/lib/types';
 import * as echarts from 'echarts/core';
 import { GraphChart } from 'echarts/charts';
 import { TooltipComponent } from 'echarts/components';
@@ -391,6 +392,7 @@ export function buildGraphOption(
       data: nodes,
       links,
       roam: true,
+      scaleLimit: { min: 0.5, max: 4 },
       draggable: true,
       force: { repulsion: 140, edgeLength: 90, gravity: 0.1 },
       emphasis: { focus: 'adjacency', lineStyle: { width: 3 } },
@@ -416,6 +418,9 @@ export function CapabilityPanel({
   highlightLabel?: string | null;
   onClearHighlight?: () => void;
 }) {
+  const graphPanelRef = useRef<HTMLElement | null>(null);
+  const chartRef = useRef<EChartsInstance | null>(null);
+  const [isGraphFullscreen, setIsGraphFullscreen] = useState(false);
   const filteredGraph = useMemo(() => {
     if (!graph || !visibleIds) return graph;
     const kept = new Set(graph.nodes.filter((node) => visibleIds.has(node.id)).map((node) => node.id));
@@ -430,16 +435,74 @@ export function CapabilityPanel({
     (node) => highlightedDeviceIds?.has(node.id),
   ).length ?? 0;
   const renderable = capability.available && filteredGraph != null && filteredGraph.nodes.length > 0;
+
+  const enterGraphFullscreen = useCallback(() => {
+    const panel = graphPanelRef.current;
+    if (!panel || isGraphFullscreen || document.fullscreenElement === panel) return;
+    if (typeof panel.requestFullscreen !== 'function') {
+      setIsGraphFullscreen(true);
+      return;
+    }
+    void panel.requestFullscreen().catch(() => setIsGraphFullscreen(true));
+  }, [isGraphFullscreen]);
+
+  const exitGraphFullscreen = useCallback(() => {
+    const panel = graphPanelRef.current;
+    if (panel && document.fullscreenElement === panel && typeof document.exitFullscreen === 'function') {
+      void document.exitFullscreen().catch(() => setIsGraphFullscreen(false));
+      return;
+    }
+    setIsGraphFullscreen(false);
+  }, []);
+
+  const handleChartReady = useCallback((instance: EChartsInstance) => {
+    chartRef.current = instance;
+    instance.getZr().on('click', (event) => {
+      const pointerEvent = event as unknown as { target?: unknown; topTarget?: unknown };
+      if (pointerEvent.target || pointerEvent.topTarget) return;
+      enterGraphFullscreen();
+    });
+  }, [enterGraphFullscreen]);
+
+  useEffect(() => {
+    const syncFullscreen = () => {
+      setIsGraphFullscreen(document.fullscreenElement === graphPanelRef.current);
+      window.requestAnimationFrame(() => chartRef.current?.resize());
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && isGraphFullscreen && document.fullscreenElement !== graphPanelRef.current) {
+        setIsGraphFullscreen(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreen);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isGraphFullscreen]);
+
   return (
-    <section className="monitor-panel graph-panel" aria-labelledby="graph-title">
+    <section
+      ref={graphPanelRef}
+      className={`monitor-panel graph-panel${isGraphFullscreen ? ' is-graph-fullscreen' : ''}`}
+      aria-labelledby="graph-title"
+    >
       <div className="panel-heading graph-heading">
         <div>
           <p className="eyebrow">DEVICE RELATION VIEW · 近 24 小时</p>
           <h2 id="graph-title">设备通信与配置关系</h2>
         </div>
-        <span className={`capability-badge ${capability.available ? 'available' : 'unavailable'}`}>
-          {capability.available ? '能力可用' : '能力不可用'}
-        </span>
+        <div className="graph-heading-actions">
+          {isGraphFullscreen ? (
+            <button type="button" className="graph-exit-fullscreen" onClick={exitGraphFullscreen}>退出全屏</button>
+          ) : (
+            <span className="graph-interaction-hint">滚轮缩放 · 点击空白处全屏</span>
+          )}
+          <span className={`capability-badge ${capability.available ? 'available' : 'unavailable'}`}>
+            {capability.available ? '能力可用' : '能力不可用'}
+          </span>
+        </div>
       </div>
       {renderable ? (
         <>
@@ -479,12 +542,18 @@ export function CapabilityPanel({
               {onClearHighlight && <button type="button" onClick={onClearHighlight}>清除定位</button>}
             </div>
           )}
-          <div className="graph-canvas" style={{ flex: 1, minHeight: 0 }} data-testid="graph-capability">
+          <div
+            className="graph-canvas"
+            style={{ flex: 1, minHeight: 0 }}
+            data-testid="graph-capability"
+            aria-label="设备关系图。滚轮缩放，拖动平移，点击空白区域进入全屏，按 Esc 退出。"
+          >
             <ReactEChartsCore
               echarts={echarts}
               option={buildGraphOption(filteredGraph, highlightedDeviceIds)}
               notMerge
               lazyUpdate
+              onChartReady={handleChartReady}
               onEvents={onSelect ? {
                 click: (params: unknown) => {
                   const p = params as { dataType?: string; data?: { id?: string } };

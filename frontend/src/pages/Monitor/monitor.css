@@ -133,6 +133,13 @@
 
 .graph-heading, .recent-heading { min-height: 58px; }
 .graph-heading h2 { font-size: 22px; }
+.graph-heading-actions { display: flex; align-items: center; gap: 10px; }
+.graph-interaction-hint { color: #718895; font-size: 12px; white-space: nowrap; }
+.graph-exit-fullscreen { border: 1px solid #2b6576; border-radius: 5px; padding: 5px 10px; background: #0c2530; color: #bcebf0; cursor: pointer; font: inherit; font-size: 14px; }
+.graph-panel:fullscreen, .graph-panel.is-graph-fullscreen {
+  position: fixed; inset: 0; z-index: 2000; width: 100vw; height: 100vh; height: 100dvh;
+  min-height: 0; max-height: none; margin: 0; border: 0; border-radius: 0; background: #0e1822;
+}
 .capability-badge { border: 1px solid #41515b; border-radius: 12px; padding: 4px 8px; color: #8b9aa2; font-size: 16px; white-space: nowrap; }
 .capability-badge.available { border-color: #2c7653; color: #59c58d; }
 .capability-badge.unavailable { border-color: #65532d; color: #c6aa65; }
