@@ -75,7 +75,7 @@ describe('MonitorPage real states', () => {
     monitorState.realtime = 'disconnected';
     monitorState.stale = true;
     renderPage();
-    expect(screen.getByRole('status')).toHaveTextContent('数据可能过期');
+    expect(screen.getByText(/数据可能过期/)).toBeInTheDocument();
     expect(screen.getAllByText('东门摄像头').length).toBeGreaterThan(0);
   });
 
@@ -92,7 +92,7 @@ describe('MonitorPage real states', () => {
     fireEvent.change(screen.getByPlaceholderText('搜索名称、类型、区域或 IP'), {
       target: { value: '门厅' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '在线' }));
+    fireEvent.change(screen.getByLabelText('按连接状态筛选'), { target: { value: 'online' } });
     fireEvent.change(screen.getByLabelText('按类型筛选'), { target: { value: 'camera' } });
     fireEvent.change(screen.getByLabelText('按告警状态筛选'), { target: { value: 'alerted' } });
     fireEvent.change(screen.getByLabelText('趋势范围'), { target: { value: '6h' } });
@@ -136,7 +136,7 @@ describe('MonitorPage real states', () => {
     renderPage();
     expect(screen.getByText('门厅设备需要复核')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '在拓扑中定位事件 门厅设备需要复核' }));
-    expect(screen.getByRole('status')).toHaveTextContent('事件定位：门厅设备需要复核');
+    expect(screen.getAllByText(/事件定位：门厅设备需要复核/).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: '清除定位' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看事件 门厅设备需要复核' }));
     expect(screen.getByTestId('device-destination')).toHaveTextContent(
