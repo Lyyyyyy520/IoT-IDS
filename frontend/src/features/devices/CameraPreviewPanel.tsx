@@ -45,9 +45,11 @@ export default function CameraPreviewPanel({ device }: { device: DeviceDetail })
   const address = source.kind === 'ready' ? source.address : null;
   const [loadError, setLoadError] = useState(false);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     setLoadError(false);
     setLoadedAt(null);
+    setExpanded(false);
   }, [device.device_id, address]);
   if (device.device_type.toLowerCase() !== 'camera') return null;
   const connectionKind = device.connection_status === 'offline'
@@ -81,7 +83,15 @@ export default function CameraPreviewPanel({ device }: { device: DeviceDetail })
           <strong>摄像头画面连接失败</strong><span>确认设备在线、流服务可达，并检查浏览器跨域或混合内容限制。</span>
         </div>
       ) : (
-        <div className="camera-image-frame" aria-busy={!loadedAt}>
+        <button
+          type="button"
+          className={`camera-image-frame${expanded ? ' is-expanded' : ''}`}
+          aria-label={expanded ? '收起摄像头画面' : '放大摄像头画面'}
+          aria-expanded={expanded}
+          aria-busy={!loadedAt}
+          disabled={!loadedAt}
+          onClick={() => setExpanded((current) => !current)}
+        >
           <img
             src={address}
             alt={`${device.display_name} 的实际摄像头画面`}
@@ -90,7 +100,7 @@ export default function CameraPreviewPanel({ device }: { device: DeviceDetail })
             onError={() => setLoadError(true)}
           />
           {!loadedAt && <span className="camera-image-loading" role="status">正在连接摄像头画面…</span>}
-        </div>
+        </button>
       )}
       {device.connection_status === 'stale' && <p className="sensor-state-note warning">设备心跳已过期，画面连接状态不能代替设备在线确认。</p>}
       {address && loadedAt && !loadError && <p className="camera-frame-time">浏览器首次收到画面：{localTime(loadedAt)} · 设备最近上报：{localTime(device.received_at)}</p>}

@@ -1,7 +1,7 @@
 {
   "name": "iot-ids-mobile",
   "version": "1.0.0",
-  "description": "IoT IDS 智慧社区物联网僵尸网络入侵检测系统 — 移动端 (Expo SDK 54)",
+  "description": "IoT IDS 智慧社区物联网僵尸网络入侵检测系统 — 移动端 (Expo SDK 57)",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -19,6 +19,7 @@
     "@react-navigation/native-stack": "^7.18.8",
     "expo": "^57.0.0",
     "expo-crypto": "~57.0.3",
+    "expo-font": "~57.0.4",
     "expo-secure-store": "~57.0.4",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
@@ -31,7 +32,7 @@
     "@react-native/jest-preset": "^0.86.3",
     "@testing-library/react-native": "^14.0.1",
     "@types/jest": "^29.5.14",
-    "@types/react": "~19.2.4",
+    "@types/react": "~19.2.10",
     "babel-preset-expo": "~57.0.0",
     "jest": "~29.7.0",
     "jest-expo": "~57.0.5",

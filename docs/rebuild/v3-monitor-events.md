@@ -6,7 +6,10 @@
 
 - `GET /api/v3/monitor`：读取真实设备当前状态、系统组件健康和事件游标；
 - `GET /api/v3/events`：从 SQLite 追加式事件日志补发并继续有界轮询；
-- graph 和 incident 存储尚未实现，monitor 明确返回 `available: false` 及原因。
+- monitor 快照还包含设备关系图及近期事件摘要。图节点来自已登记设备；边由 24 小时真实 peer 流量和社区拓扑中的配置联动组成，并以 `relation_type` 区分 `observed_traffic`、`configured_linkage` 和兼容旧响应的 `unknown`。空图保持为空，不生成替代关系。
+- 已迁移的事件工作流会返回活动/近期事件摘要及 `affected_device_ids`。该字段只列 `affected` 角色设备，供管理端定位；疑似来源、旁观设备和用户私有处置内容不会进入 monitor 摘要。
+
+关系图是监视页的关系视图，不代表已持久化 GNN 图快照或一次 GNN 推理结果。只有明确标为 `observed_traffic` 的边才来自已观测流量。
 
 模块导入不会创建数据库、连接 MQTT 或启动线程。部署方必须先对显式数据库运行
 v3 升级命令。正式 `backend/app.py::create_app()` 会用同一个显式数据库路径创建并

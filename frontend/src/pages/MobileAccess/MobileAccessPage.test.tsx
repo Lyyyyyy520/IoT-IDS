@@ -119,17 +119,17 @@ describe('MobileAccessPage', () => {
   });
 
   it('creates only with username/display name and starts with no scope claim', async () => {
-    const createUser = vi.fn().mockResolvedValue(user());
+    const createUser = vi.fn().mockResolvedValue(user({ username: '住户2026' }));
     mocks.workspace = workspace({ createUser });
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: '创建移动用户' }));
-    fireEvent.change(screen.getByLabelText('用户名'), { target: { value: 'resident_7' } });
+    fireEvent.change(screen.getByLabelText('用户名'), { target: { value: '住户2026' } });
     fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: '住户七' } });
     expect(screen.queryByLabelText(/密码|角色/)).not.toBeInTheDocument();
     const dialog = screen.getByRole('dialog', { name: '创建普通移动用户' });
     fireEvent.click(within(dialog).getByRole('button', { name: /^创\s*建$/ }));
-    await waitFor(() => expect(createUser).toHaveBeenCalledWith('resident_7', '住户七'));
-    expect(screen.getByText('移动用户已创建；默认没有任何设备可见范围。')).toBeInTheDocument();
+    await waitFor(() => expect(createUser).toHaveBeenCalledWith('住户2026', '住户七'));
+    expect(screen.getByText('移动用户已创建。')).toBeInTheDocument();
   });
 
   it('shows the one-time pairing code once and clears it when the dialog closes', () => {
