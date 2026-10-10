@@ -1,6 +1,7 @@
 """Real v3 monitor snapshots backed only by the explicit SQLite database."""
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import os
 import sqlite3
 from typing import Callable
 
@@ -28,44 +29,68 @@ def _iso(value: datetime) -> str:
 
 
 def _planned_linkages() -> list[dict]:
-    """Planned device linkages (CoAP 联动) from the community topology registry."""
-    try:
-        import importlib.util
-        from pathlib import Path
+    """Planned device linkages (CoAP 联动) from the community topology registries.
 
-        edge_dir = Path(__file__).resolve().parent.parent.parent / "edge"
-        spec = importlib.util.spec_from_file_location(
-            "iot_community_devices", edge_dir / "community_devices.py"
+    场景选择：IOT_IDS_TOPO_SCENARIO = auto(默认，虚拟+物理合并) | virtual(仅虚拟)
+    | physical(仅纯固件物理联动)。虚拟版注册表加载行为在 auto 下与历史一致。
+    """
+    scenario = os.environ.get('IOT_IDS_TOPO_SCENARIO', 'auto')
+    edges: list[dict] = []
+
+    def _load_registry(filename: str, module_name: str):
+        try:
+            import importlib.util
+
+            edge_dir = Path(__file__).resolve().parent.parent.parent / "edge"
+            spec = importlib.util.spec_from_file_location(
+                module_name, edge_dir / filename
+            )
+            if spec is None or spec.loader is None:
+                return None
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+        except Exception:
+            return None
+
+    if scenario in ('auto', 'virtual'):
+        module = _load_registry('community_devices.py', 'iot_community_devices')
+        if module is not None:
+            ip_to_device: dict[str, str] = {}
+            for device_id, _type, ip in module.PHYSICAL_DEVICES:
+                ip_to_device[ip] = device_id
+            for device_id, _type, ip, _coap, _links in module.VIRTUAL_DEVICES:
+                ip_to_device[ip] = device_id
+            for device_id, _type, ip, _coap, links in module.VIRTUAL_DEVICES:
+                for target_ip in links:
+                    target = ip_to_device.get(target_ip)
+                    if target and target != device_id:
+                        edges.append({
+                            "source": device_id,
+                            "target": target,
+                            "bytes": 0,
+                            "packets": 0,
+                            "protocols": ["coap"],
+                            "relation_type": "configured_linkage",
+                        })
+
+    if scenario in ('auto', 'physical'):
+        module = _load_registry(
+            'community_devices_physical.py', 'iot_community_devices_physical'
         )
-        if spec is None or spec.loader is None:
-            return []
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        PHYSICAL_DEVICES = module.PHYSICAL_DEVICES
-        VIRTUAL_DEVICES = module.VIRTUAL_DEVICES
-
-        ip_to_device: dict[str, str] = {}
-        for device_id, _type, ip in PHYSICAL_DEVICES:
-            ip_to_device[ip] = device_id
-        for device_id, _type, ip, _coap, _links in VIRTUAL_DEVICES:
-            ip_to_device[ip] = device_id
-
-        edges: list[dict] = []
-        for device_id, _type, ip, _coap, links in VIRTUAL_DEVICES:
-            for target_ip in links:
-                target = ip_to_device.get(target_ip)
-                if target and target != device_id:
+        if module is not None:
+            for source, target, _role, protocols in module.PHYSICAL_LINKAGES:
+                if source != target:
                     edges.append({
-                        "source": device_id,
+                        "source": source,
                         "target": target,
                         "bytes": 0,
                         "packets": 0,
-                        "protocols": ["coap"],
+                        "protocols": list(protocols),
                         "relation_type": "configured_linkage",
                     })
-        return edges
-    except Exception:
-        return []
+
+    return edges
 
 
 class MonitorSnapshotService:

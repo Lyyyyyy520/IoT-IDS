@@ -56,8 +56,35 @@
 1. 开发板管理器安装 **ESP32** 支持包（Arduino-ESP32 core）
 2. 开发板选择：**ESP32C3 Dev Module**
 3. 插 USB，选择对应串口
-4. 复制并填写 `device_secrets.h`
-5. 改好设备类型配置 → 上传
+4. **Flash Mode 必须选 `DIO`**（合宙/安信可 C3 板的闪存芯片在 QIO 模式 80MHz 下会启动失败——
+   现象：上传"成功"但程序不跑、串口无输出、不连 WiFi。QIO→DIO 即可解决，已在 2026-10-09 实测）
+5. **USB CDC On Boot 保持 `Disabled`**（CH343 桥接板的串口走 UART0，开 CDC 反而看不到输出）
+6. 复制并填写 `device_secrets.h`
+7. 改好设备类型配置 → 上传
+
+### 4.1 现场演示烧录清单（LINK_SIM_MODE=1，6 块板）
+
+`community_device.ino` / `camera_device.ino` 顶部有 `#define LINK_SIM_MODE 0/1`：
+现场演示烧 **1**（事件类联动载荷 + 发送方白名单 + 角色托管，见
+dev-logs/2026-10-08「固件 LINK_SIM_MODE」）；烧 0 = 旧行为逐字不变。
+
+每块板烧录（**烧完一块立刻贴标签**，device_id 与板一一对应，杜绝混淆）：
+
+| 板 | sketch | 步骤 |
+|----|--------|------|
+| door-01 | `community_device/` | `board_secrets/door-01.h` 复制为 `community_device/device_secrets.h`；`.ino` 里 `DEVICE_TYPE` 改 `DEVICE_DOOR`；`LINK_SIM_MODE 1` |
+| light-01 | `community_device/` | `board_secrets/light-01.h` → `device_secrets.h`；`DEVICE_TYPE` 改 `DEVICE_LIGHT` |
+| plug-01 | `community_device/` | `board_secrets/plug-01.h` → `device_secrets.h`；`DEVICE_TYPE` 改 `DEVICE_PLUG` |
+| sensor-01 | `community_device/` | `board_secrets/sensor-01.h` → `device_secrets.h`；`DEVICE_TYPE` 改 `DEVICE_SENSOR` |
+| speaker-01 | `community_device/` | `board_secrets/speaker-01.h` → `device_secrets.h`；`DEVICE_TYPE` 改 `DEVICE_SPEAKER` |
+| camera-01 | `camera_device/` | `board_secrets/camera-01.h` → `camera_device/device_secrets.h`；`LINK_SIM_MODE 1` |
+
+`board_secrets/*.h` 与 `edge/pi-passwords.env` 已被 `.gitignore` 排除，密码与
+`edge/setup_pi_gateway.sh` 在 Pi 上写入的 `mosquitto_passwd` 一致，勿改其中任何一个。
+
+⚠️ GPIO2 启动陷阱：plug-01 继电器与 camera-01 云台舵机都在 GPIO2（启动 strapping
+引脚）。**先烧录（裸板）后接执行器**；接好执行器后上电实测，若板子起不来，把
+该执行器换到 GPIO5/6/7/10（避开 2/8/9）。
 
 ## 5. MQTT 主题与攻击模式
 

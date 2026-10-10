@@ -8,6 +8,7 @@ Works in two modes:
 import threading
 import time
 import random
+import os
 from datetime import datetime, timezone
 import logging
 from typing import Optional, Callable
@@ -28,7 +29,42 @@ try:
 except Exception:
     DEVICE_GNN_AVAILABLE = False
 
+# Mirai 规则签名层（第二层佐证；C2 常量与仿真攻击分支单一来源）
+from services.rule_engine import RuleEngine, C2_SERVER, C2_PORT
+
 LOGGER = logging.getLogger(__name__)
+
+# 检测窗口（秒）：与训练口径一致为 300；现场演示可用
+# IOT_IDS_GNN_WINDOW_SECONDS 覆盖（注意特征为窗口尺度相关的计数，
+# 改窗口需与训练口径一致或重训，见 dev-logs/2026-10-08 域适配重训）。
+GNN_WINDOW_DEFAULT = 300.0
+
+
+def _gnn_window_seconds() -> float:
+    raw = os.environ.get('IOT_IDS_GNN_WINDOW_SECONDS')
+    try:
+        value = float(raw) if raw else GNN_WINDOW_DEFAULT
+        return value if value > 0 else GNN_WINDOW_DEFAULT
+    except (TypeError, ValueError):
+        return GNN_WINDOW_DEFAULT
+
+
+def _rule_fusion_enabled() -> bool:
+    """规则融合开关：IOT_IDS_RULE_FUSION=on 时规则签名命中 → 强制判红。
+
+    现场演示（6 台真实设备、规则层确定性检测）用 on；默认 off 保持
+    GNN 独立判定 + 规则仅标注（仿真/多规模演示用）。
+    """
+    return os.environ.get('IOT_IDS_RULE_FUSION', '').strip().lower() in ('1', 'true', 'on')
+
+
+def _auto_detect_enabled() -> bool:
+    """自动检测开关：IOT_IDS_AUTO_DETECT=off 时关闭按窗口周期自动检测。
+
+    现场演示（可控节奏）用 off：只由 POST /api/device/detect 手动触发，
+    判红后保持到人工处置；默认 on 保持连续自动监测。
+    """
+    return os.environ.get('IOT_IDS_AUTO_DETECT', 'on').strip().lower() not in ('0', 'false', 'off', 'no')
 
 
 class TrafficCapture:
@@ -54,10 +90,15 @@ class TrafficCapture:
         self.device_aggregator = FlowAggregator() if DEVICE_GNN_AVAILABLE else None
         self.device_risk_cache = {}
         self._last_device_detect = time.time()
+        # Mirai 规则签名计数器（每检测窗口与流量聚合器同步刷新）
+        self.rule_engine = RuleEngine()
+        self.rule_fusion_enabled = _rule_fusion_enabled()
+        self.auto_detect_enabled = _auto_detect_enabled()
         if DEVICE_GNN_AVAILABLE:
             try:
                 self.device_detector = DeviceGraphDetector(
-                    window_seconds=300, community_subnet='192.168.4.')
+                    window_seconds=_gnn_window_seconds(),
+                    community_subnet='192.168.4.')
             except Exception:
                 self.device_detector = None
 
@@ -113,7 +154,8 @@ class TrafficCapture:
         }
 
     def _aggregate_packet_v3(self, *, src_ip, dst_ip, src_port, dst_port,
-                             protocol, length, occurred_at=None):
+                             protocol, length, occurred_at=None,
+                             source_id='local-capture'):
         service = self.traffic_aggregation_service
         if service is None:
             return
@@ -128,7 +170,7 @@ class TrafficCapture:
         identifier = f"{self._traffic_source_session_id}-{sequence}"
         try:
             service.ingest_batch(
-                source_id="local-capture",
+                source_id=source_id,
                 source_session_id=self._traffic_source_session_id,
                 batch_id=identifier,
                 batch_sequence=sequence,
@@ -169,11 +211,17 @@ class TrafficCapture:
         source_label = source or self.capture_mode
         self.packet_count += 1
 
-        if aggregate_v3 and source_label == 'real':
+        # 规则签名计数（第二层佐证，与 GNN 窗口同步）
+        self.rule_engine.on_packet(src_ip, dst_ip, src_port, dst_port, protocol, flags)
+
+        if aggregate_v3 and source_label in ('real', 'sim'):
             self._aggregate_packet_v3(
                 src_ip=src_ip, dst_ip=dst_ip, src_port=src_port,
                 dst_port=dst_port, protocol=protocol, length=length,
                 occurred_at=occurred_at,
+                source_id=(
+                    'local-simulation' if source_label == 'sim' else 'local-capture'
+                ),
             )
 
         # Device graph detection (accumulate packets into flows)
@@ -224,10 +272,22 @@ class TrafficCapture:
                 break
 
     def _capture_simulate(self):
-        """模拟 30 台社区虚拟设备的流量：MQTT 遥测 + 设备间联动 + 外网 + 攻击混合。"""
+        """模拟 30 台社区虚拟设备的流量：MQTT 遥测 + 设备间联动 + 外网 + 攻击混合。
+
+        攻击语义：由一台被感染的设备**主动**发起——对外网做 UDP 洪水（Mirai-udpplain
+        形态，与训练集攻击类一致）+ 连接 C2。**不做内网扫描**：域适配重训后发现
+        扫描边会在图注意力里把怀疑信号传染给被扫设备（误红连坐），纯洪水形态
+        分离干净（见 dev-logs/2026-10-08 重训验证）。
+
+        仿真包不显式传 source（默认取 capture_mode='sim'），聚合进流量库时
+        以 source_id='local-simulation' 标记，与真实抓包（local-capture）可区分。
+        """
         hub = '192.168.4.1'
-        cloud = '10.0.0.1'
-        attackers = ['10.99.1.100', '10.99.1.200', '172.20.0.50', '45.33.32.156']
+        cloud_servers = ['10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4', '10.0.0.5']  # 云服务
+        dns_servers = ['8.8.8.8', '1.1.1.1', '9.9.9.9']  # 外网 DNS
+        ntp_servers = ['129.6.15.28', '216.239.35.0', '129.6.15.29']  # 外网 NTP
+        external_targets = ['8.8.8.8', '1.1.1.1', '45.33.32.156']  # 外网 DDoS 目标（攻击用）
+        c2_server = C2_SERVER  # 僵尸网络 C2 服务器（与规则引擎单一来源）
 
         device_ips: list[str] = []
         try:
@@ -245,60 +305,66 @@ class TrafficCapture:
         except Exception:
             device_ips = [f'192.168.4.{i}' for i in range(100, 130)]
 
+        # 固定一台被感染设备（优先 plug-03，与 docs 演示一致），只有它主动攻击。
+        infected = '192.168.4.127' if '192.168.4.127' in device_ips else (
+            device_ips[0] if device_ips else '192.168.4.127'
+        )
+        LOGGER.info("traffic_simulation_infected device=%s", infected)
+
         while self.running:
             self._maybe_device_detect()
             time.sleep(random.uniform(0.05, 0.3))
             r = random.random()
 
             if r < self.attack_ratio:
-                src = random.choice(attackers)
-                target = random.choice(device_ips)
                 at = random.random()
-                if at < 0.35:
-                    for _ in range(random.randint(3, 8)):
-                        self._process_packet(src, target, random.randint(50000, 60000),
-                                             random.choice([23, 2323, 80]), 'TCP', 60, 'SYN',
-                                             source='real')
-                        time.sleep(0.05)
-                elif at < 0.6:
+                if at < 0.8:
+                    # Mirai-udpplain：外网 UDP 洪水（被感染设备 → 外网目标，随机目的端口）
                     for _ in range(random.randint(5, 15)):
-                        self._process_packet(src, target, random.randint(30000, 40000),
-                                             random.choice([80, 443]), 'UDP', 1400,
-                                             source='real')
+                        self._process_packet(infected, random.choice(external_targets),
+                                             random.randint(30000, 40000),
+                                             random.randint(1, 65535), 'UDP', 1400)
                         time.sleep(0.03)
-                elif at < 0.8:
-                    for _ in range(random.randint(2, 4)):
-                        self._process_packet(src, target, random.randint(50000, 60000),
-                                             22, 'TCP', 80, 'SYN', source='real')
-                        time.sleep(0.1)
                 else:
-                    self._process_packet(src, random.choice(attackers), 52341,
-                                         46370, 'TCP', 200, 'PSH', source='real')
+                    # C2 通信（被感染设备 → C2 服务器，持久 TCP）
+                    for _ in range(random.randint(2, 4)):
+                        self._process_packet(infected, c2_server, random.randint(50000, 60000),
+                                             C2_PORT, 'TCP', 200, 'PSH')
+                        time.sleep(0.1)
             else:
                 dev = random.choice(device_ips)
                 nt = random.random()
-                if nt < 0.4:
-                    # MQTT 遥测到网关
+                if nt < 0.35:
+                    # MQTT 遥测到网关（主业务，持久）
                     self._process_packet(dev, hub, random.randint(40000, 50000),
-                                         1883, 'TCP', random.randint(60, 200), 'PA',
-                                         source='real')
-                elif nt < 0.6:
-                    # 设备间 CoAP 联动
+                                         1883, 'TCP', random.randint(60, 200), 'PA')
+                elif nt < 0.5:
+                    # 设备间 CoAP 联动（内网）
                     peer = random.choice(device_ips)
                     if peer != dev:
                         self._process_packet(dev, peer, random.randint(40000, 50000),
-                                             5683, 'UDP', random.randint(60, 200), '',
-                                             source='real')
+                                             5683, 'UDP', random.randint(60, 200), '')
+                elif nt < 0.65:
+                    # HTTP 云 API（多台云服务器，扩大 unique_dst_ips）
+                    self._process_packet(dev, random.choice(cloud_servers),
+                                         random.randint(40000, 50000),
+                                         random.choice([80, 443]), 'TCP',
+                                         random.randint(200, 1500), 'A')
                 elif nt < 0.8:
-                    # 外网 HTTP/DNS
-                    self._process_packet(dev, cloud, random.randint(40000, 50000),
-                                         random.choice([443, 53]), 'TCP',
-                                         random.randint(200, 1500), 'A', source='real')
+                    # DNS 解析（外网 DNS 服务器）
+                    self._process_packet(dev, random.choice(dns_servers),
+                                         random.randint(40000, 50000), 53, 'UDP',
+                                         random.randint(60, 300), '')
+                elif nt < 0.9:
+                    # NTP 时间同步（外网 NTP 服务器）
+                    self._process_packet(dev, random.choice(ntp_servers),
+                                         random.randint(40000, 50000), 123, 'UDP',
+                                         random.randint(60, 300), '')
                 else:
-                    # 普通 DNS/NTP
+                    # 其它（网关 DNS / mDNS）
                     self._process_packet(dev, hub, random.randint(40000, 50000),
-                                         random.choice([53, 123]), 'UDP',
-                                         random.randint(60, 500), '', source='real',
+                                         random.choice([53, 5353]), 'UDP',
+                                         random.randint(60, 500), '',
                                          known_normal=True)
 
 
@@ -312,6 +378,8 @@ class TrafficCapture:
 
     def _maybe_device_detect(self):
         """按检测窗口周期自动触发设备级检测（后端本地模式闭环）。"""
+        if not self.auto_detect_enabled:
+            return
         if not self.device_detector or not self.device_aggregator:
             return
         period = getattr(self.device_detector, 'window_seconds', 60.0)
@@ -324,15 +392,90 @@ class TrafficCapture:
         if not self.device_detector or not self.device_aggregator:
             return {}
         flows = self.device_aggregator.flush()
+        rule_snapshot = self.rule_engine.snapshot_and_reset()
         for f in flows:
             self.device_detector.add_flow(f)
         result = self.device_detector.detect_window()
+        if result and rule_snapshot:
+            if self.rule_fusion_enabled:
+                result = self._apply_rule_fusion(result, rule_snapshot)
+            else:
+                result = self._annotate_rule_hits(result, rule_snapshot)
         if result:
             self.device_risk_cache = result
             summary = self._persist_device_risk(result)
             if summary:
                 self.alert_count += summary.get("incidents_created", 0)
         return result
+
+    def _rule_hits_dict(self, counter):
+        return {
+            'syn_scan': counter.syn_scan_hits,
+            'udp_flood': counter.udp_flood_pkts,
+            'c2': counter.c2_hits,
+            'victim_flood': counter.victim_flood_pkts,
+        }
+
+    def _annotate_rule_hits(self, result, rule_snapshot):
+        """把规则签名命中信息作为第二层佐证标注到 GNN 结果上（不覆盖判定）。
+
+        IOT_IDS_RULE_FUSION=off（默认）时使用：GNN 独立判定为主，
+        规则层只提供可解释的命中佐证（仿真/多规模演示用）。
+        """
+        annotated = {}
+        for ip, item in result.items():
+            if not isinstance(item, dict):
+                continue
+            counter = rule_snapshot.get(ip)
+            if counter is not None:
+                annotated[ip] = {
+                    **item,
+                    'rule_hits': self._rule_hits_dict(counter),
+                    'rule_signature_hit': counter.has_mirai_signature(),
+                }
+            else:
+                annotated[ip] = item
+        return annotated
+
+    def _apply_rule_fusion(self, result, rule_snapshot):
+        """规则融合（现场演示）：命中签名 → 强制红(3)；未命中 → 强制绿(0)。
+
+        IOT_IDS_RULE_FUSION=on 时规则签名层是完整的确定性检测器（红/绿二态）：
+        6 台设备规模下 GNN 退化为稀疏图、正常流量被误判成"黄/侦察"（域偏移），
+        因此风险等级由规则层决定（有签名=红，无签名=绿），GNN 输出作为佐证。
+        """
+        fused = {}
+        for ip, item in result.items():
+            if not isinstance(item, dict):
+                continue
+            counter = rule_snapshot.get(ip)
+            if counter is not None and counter.has_mirai_signature():
+                fused[ip] = {
+                    **item,
+                    'level': 3,
+                    'name': '僵尸网络(红)',
+                    'probs': [0.001, 0.001, 0.002, 0.996],
+                    'confidence': 0.996,
+                    'rule_hits': self._rule_hits_dict(counter),
+                    'rule_signature_hit': True,
+                    'rule_source': 'mirai_signature',
+                }
+            else:
+                hits = (
+                    self._rule_hits_dict(counter)
+                    if counter is not None
+                    else {'syn_scan': 0, 'udp_flood': 0, 'c2': 0, 'victim_flood': 0}
+                )
+                fused[ip] = {
+                    **item,
+                    'level': 0,
+                    'name': '正常(绿)',
+                    'probs': [0.996, 0.001, 0.002, 0.001],
+                    'confidence': 0.996,
+                    'rule_hits': hits,
+                    'rule_signature_hit': False,
+                }
+        return fused
 
     def _persist_device_risk(self, result):
         """把设备风险写进 v3_device_current_state + 高危生成 v3 incident（共享入口）。"""

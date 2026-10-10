@@ -46,6 +46,8 @@ interface VisibilitySource {
 
 interface MonitorStoreOptions {
   enabled?: boolean;
+  /** 周期刷新快照的间隔（毫秒）；<=0 关闭。默认 5000（演示用，让风险色变化实时可见）。 */
+  refreshIntervalMs?: number;
   fetchSnapshot?: (signal?: AbortSignal) => Promise<MonitorSnapshot>;
   createEventSource?: (url: string) => EventSourceLike;
   now?: () => Date;
@@ -155,6 +157,23 @@ export class MonitorStore {
   resync = (reason = 'manual'): Promise<void> => {
     if (!this.started) return Promise.resolve();
     return this.synchronize(reason);
+  };
+
+  refreshSnapshot = async (): Promise<void> => {
+    if (!this.started) return;
+    try {
+      const snapshot = await this.fetchSnapshot();
+      if (!this.started) return;
+      this.patch({
+        snapshot,
+        lastSyncedAt: this.now().toISOString(),
+        lastEventId: snapshot.event_cursor,
+        stale: false,
+        error: null,
+      });
+    } catch {
+      // 周期刷新失败时静默保留当前快照，下次刷新会重试
+    }
   };
 
   private patch(next: Partial<MonitorViewState>): void {
@@ -473,12 +492,21 @@ export class MonitorStore {
 export function useMonitorStore(options?: MonitorStoreOptions) {
   const store = useMemo(() => new MonitorStore(options), []);
   const enabled = options?.enabled ?? true;
+  const refreshIntervalMs = options?.refreshIntervalMs ?? 5000;
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   useEffect(() => {
     if (!enabled) return undefined;
     store.start();
-    return store.stop;
-  }, [enabled, store]);
+    if (refreshIntervalMs <= 0) return store.stop;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      void store.refreshSnapshot();
+    }, refreshIntervalMs);
+    return () => {
+      window.clearInterval(timer);
+      store.stop();
+    };
+  }, [enabled, store, refreshIntervalMs]);
   return {
     ...state,
     resync: store.resync,

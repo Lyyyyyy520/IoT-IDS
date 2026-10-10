@@ -179,6 +179,23 @@ def build_graph_sparse(df, window_size=300, max_per_class=8000):
     nodes = pd.concat(sampled).reset_index(drop=True)
     print(f'下采样后节点数: {len(nodes):,}')
 
+    # —— 域适配修复：补"纯接收"节点 ——
+    # 推理时为社区内所有出现过的 dst IP 建节点（无出向流 -> 全零特征），
+    # 训练集原本只有 src 侧节点，零特征节点是分布外输入（模型乱判的根因之一）。
+    # 这里把每个窗口内"仅作为目的出现"的 IP 补成零特征节点，label=0（正常）。
+    _rx = df[df['dst_ip'].apply(is_community)].copy()
+    _rx['window'] = ((_rx['ts_start'] - t0) / window_size).astype(int)
+    _rx_pairs = set(zip(_rx['dst_ip'], _rx['window']))
+    _node_pairs = set(zip(nodes['src_ip'], nodes['window']))
+    _missing_rx = sorted(_rx_pairs - _node_pairs)
+    if _missing_rx:
+        _extra = pd.DataFrame([
+            {'src_ip': ip, 'window': w, **_zero_vals(), 'level': 0}
+            for ip, w in _missing_rx
+        ])
+        nodes = pd.concat([nodes, _extra], ignore_index=True)
+        print(f'补充纯接收节点: {len(_extra)}')
+
     node_ids = list(zip(nodes['src_ip'], nodes['window']))
     node_index = {k: i for i, k in enumerate(node_ids)}
     n_nodes = len(nodes)
@@ -222,6 +239,13 @@ def build_graph_sparse(df, window_size=300, max_per_class=8000):
     std = X.std(axis=0) + 1e-6
     X = (X - mean) / std
     return X, edge_index, edge_type, edge_weight, labels, node_type, nodes['src_ip'].values, mean, std
+
+
+def _zero_vals():
+    return {f: 0.0 for f in ['flow_count', 'total_packets', 'total_bytes', 'avg_packets',
+                             'avg_bytes', 'max_packets', 'unique_dst_ports', 'unique_dst_ips',
+                             'unique_src_ports', 'unique_protocols', 'tcp_flags_mean',
+                             'avg_flow_duration', 'internal_ratio']}
 
 
 # ---------------- 训练 ----------------

@@ -34,6 +34,9 @@ Desktop.ini
 
 # Local database (contains user/device/event history; never regenerate from demo seeds)
 backend/data/ids.db
+backend/data/ids.db-journal
+backend/data/ids.db-wal
+backend/data/ids.db-shm
 backend/data/backups/
 
 # Trained models (too large, regenerate from training scripts)
@@ -52,11 +55,16 @@ edge/ids_error.log
 *.tmp
 tmp/
 temp/
+.pytest-tmp/
+.ops/
 
 # Environment
 .env
 .env.local
+backend/.dev-runtime-secrets
 edge/esp32/**/device_secrets.h
+edge/esp32/board_secrets/
+edge/pi-passwords.env
 edge/mosquitto/passwd*
 training/data/
 

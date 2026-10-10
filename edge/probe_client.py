@@ -18,6 +18,8 @@ def main():
     p.add_argument('--name', default='Pi-001')
     p.add_argument('--interval', type=int, default=5)
     p.add_argument('--token', default=os.getenv('IOT_IDS_PROBE_TOKEN', ''))
+    # 设备流量全在 Pi 热点接口 wlan0（板间 CoAP/攻击洪水都不过 eth0）
+    p.add_argument('--interface', default='wlan0', help='capture interface (default: wlan0)')
     args = p.parse_args()
 
     if not args.token:
@@ -26,10 +28,16 @@ def main():
     session = requests.Session()
     session.headers.update({'X-Probe-Token': args.token})
 
-    print(f'Probe: {args.name} -> {args.server}')
+    print(f'Probe: {args.name} -> {args.server} (interface {args.interface})')
 
-    # Clean start + register
-    subprocess.run(['sudo', 'pkill', '-f', 'tcpdump'], capture_output=True)
+    # 后端端口（用于 BPF 排除探针自身的上报流量）
+    try:
+        server_port = int(args.server.rsplit(':', 1)[1].rstrip('/'))
+    except (IndexError, ValueError):
+        server_port = 5000
+
+    # 注册（不再 pkill tcpdump：probe_client 与 edge_detect.py 可在同一 Pi 共存，
+    # 每次抓包都是短命 `timeout 3` 子进程，会自愈退出）
     try:
         r = session.post(f'{args.server}/api/probe/register', json={'name': args.name})
         session.post(f'{args.server}/api/probe/status-report', json={'name': args.name, 'status': 'stopped'})
@@ -60,13 +68,15 @@ def main():
             elif cmd == 'stop' and capturing:
                 print('Capture STOPPED')
                 capturing = False
-                subprocess.run(['sudo', 'pkill', '-f', 'tcpdump'], capture_output=True)
                 session.post(f'{args.server}/api/probe/status-report', json={'name': args.name, 'status': 'stopped'}, timeout=3)
 
             if capturing:
                 try:
-                    raw = subprocess.run(['sudo', 'timeout', '3', 'tcpdump', '-i', 'eth0', '-c', '5', '-n', '-tt'],
-                                       capture_output=True, text=True, timeout=5)
+                    bpf = f'not tcp port {server_port}'
+                    raw = subprocess.run(
+                        ['sudo', 'timeout', '3', 'tcpdump', '-i', args.interface,
+                         '-c', '50', '-n', '-tt', bpf],
+                        capture_output=True, text=True, timeout=5)
                     flows = []
                     for line in raw.stdout.split('\n'):
                         m = pat.search(line)
@@ -110,8 +120,9 @@ def main():
                             },
                             timeout=3,
                         )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # 不再静默吞异常：抓包失败（接口不存在/权限）要能看见
+                    print(f'Capture failed: {type(exc).__name__}: {exc}')
 
             session.post(f'{args.server}/api/probe/heartbeat', json={'name': args.name}, timeout=3)
         except Exception as e:
